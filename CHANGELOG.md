@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **A web page to control the host** from a phone or PC, so nobody has to leave the game for the app: the host's status,
+  version and firmware, the PIN for a pending pairing, the running streams with "End stream" per device, renaming and
+  removing paired devices, the settings (without the Experimental switches, which stay in the app), the end of
+  `sunshine.log` and `host_diag.log` with a download, the same diagnostic report as the app's (scrubbed for a public issue),
+  and a host restart. It is off until you set a user name and password
+  under **Web page** in the app's Settings, and the app can turn it off again. Then it is at `https://<console-ip>:47990`
+  (the base port plus one) with the host's own self-signed certificate, so the browser warns once. It answers only the LAN
+  and Tailscale (100.64.0.0/10), and comes back after rest mode like the other services. Don't forward 47990 to the
+  internet. After 5 failed sign-ins from one address it waits 30 seconds, doubling up to 15 minutes, and after 20 from all
+  addresses together every address waits the same way until the next good sign-in; failed sign-ins are
+  logged with the address, never the password, and the password is stored only as a salted PBKDF2-SHA256 hash. The control
+  socket has `WEBLOGIN [SET <user> <password>|OFF]` for it (GitHub issue #21). Measured on 13.00, and the page was checked in
+  a phone's browser.
+
 ## 0.3.2 (2026-11-05)
 
 ### Changed

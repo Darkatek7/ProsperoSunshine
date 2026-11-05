@@ -16,6 +16,9 @@
 //   UNPAIR <uuid>               -> removes a paired device and ends its stream ("OK removed" / "ERR ...")
 //   REPORT                      -> "OK port=<n>": for some seconds, <appdata>/diagnostics.txt is on that port
 //   AUTOLOAD [ON|OFF]           -> the Payload Manager's autoload list, for the app (autoload_host.hpp)
+//   WEBLOGIN                    -> "OK user=<name>", empty without a login (the web page is off then)
+//   WEBLOGIN SET <user> <pass>  -> sets the web page's login and turns it on; the password is the rest of the line
+//   WEBLOGIN OFF                -> removes the login and turns the web page off
 //   QUIT                        -> raises the host's shutdown event
 // It has no authentication, so it listens on 127.0.0.1 only (the PS5 app); the empty file
 // <appdata>/control_lan opens it to the LAN for development on trusted networks (ROADMAP P9.1).
@@ -27,6 +30,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <stop_token>
 #include <string>
 
@@ -40,8 +44,10 @@ public:
     ~ControlServer();
     void run(std::stop_token stop);
     void run_report(std::stop_token stop);
-    // Handles one request line; public for tests.
-    std::string handle(const std::string &line);
+    // Who asks: the app over the socket or the web page. Each has its own STREAMS rate baseline.
+    enum class Caller { app, web };
+    // Handles one request line; the web page's thread and the socket's call it.
+    std::string handle(const std::string &line, Caller caller = Caller::app);
     // Whether RELISTEN was asked for since the last call.
     bool take_relisten() { return relisten_.exchange(false); }
 
@@ -53,13 +59,14 @@ private:
     std::atomic_bool report_listening_{false};
     std::atomic_bool relisten_{false};
     std::atomic<std::chrono::steady_clock::rep> report_until_{0};
-    // Each session's video bytes at the last STREAMS, by client certificate: the rate is the difference. One client at a
-    // time asks, so the handler's thread is the only one that touches it.
+    std::string handle_locked(const std::string &line, Caller caller);
+    std::mutex mutex_;
+    // Each session's video bytes at the caller's last STREAMS, by client certificate: the rate is the difference.
     struct SentSample {
         unsigned long long bytes;
         std::chrono::steady_clock::time_point at;
     };
-    std::map<std::string, SentSample> sent_;
+    std::map<std::string, SentSample> sent_[2];
 };
 
 }

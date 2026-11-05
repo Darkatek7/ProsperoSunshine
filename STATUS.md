@@ -524,6 +524,36 @@ alle H.264 1080p60 auf „PS5 Screen“ mit `--no-script`; B, C und A beim zweit
 Nicht geprüft: echtes Moonlight, ein echter DualSense an der Konsole, und ob der Dialog „Wer benutzt diesen Controller?“
 einem Gast den Nutzer des Hosts anbietet.
 
+### Webseite (2026-11-05, 13.00, Branch `webui`, nicht veröffentlicht)
+
+Host und App aus dem Arbeitsstand des Branches, über die App installiert. Den Login hat für den Test `WEBLOGIN SET` vom PC
+gesetzt (dafür lag kurz `control_lan` im Datenordner, danach gelöscht und der Host neu gestartet; der Steuer-Socket war
+danach vom PC aus wieder geschlossen). Gemessen mit curl vom PC im LAN:
+
+- Ohne Login war 47990 zu; nach `WEBLOGIN SET` lieferte die Seite 200, die API ohne Cookie 401.
+- Anmelden: ohne den Header `X-Prospero` 403, mit ihm 200 und ein Cookie `Secure; HttpOnly; SameSite=Strict`, die
+  Content-Security-Policy im Kopf. Fünf falsche Passwörter je 401, der sechste Versuch 429 mit 30 s Wartezeit. Im
+  `sunshine.log` nur „login from“ mit der Adresse, kein Passwort; ein Login dauerte rund 0,1 s.
+- Übersicht, Geräte, Einstellungen (ohne die Experimental-Schalter) und Logs lieferten die Daten der Konsole.
+- „Restart host“ über die API: nach etwa 4 s war der Host wieder da, der Login blieb, die alte Sitzung bekam 401.
+- `RELISTEN`: „Starting the services anew“, danach „Web page on port 47990“ und ein neuer Login ging.
+- Der Diagnosebericht über die Seite kam in 0,03 s, ohne Adressen und Gerätenamen.
+- In der App: der Eintrag „Web page“ zeigte die Adresse und „On for tester“; „Turn off“ schloss 47990 sofort. Später „Set login“ über die
+  Bildschirmtastatur (Name, dann Passwort als Punkte mit Zeichenzahl): „The web page is on“, und ein Login vom PC mit diesen
+  Daten bekam 200.
+- Die Oberfläche selbst lief gegen einen Nachbau der API im Browser am PC, auch in Handybreite; den echten Host konnte der
+  Browser des Tests wegen des selbst signierten Zertifikats nicht öffnen.
+
+Der Diagnosebericht, die Sperre über alle Adressen (20 Fehlversuche) und das Lesen nur des Log-Endes kamen mit einem zweiten
+aufgespielten Stand; auf ihm liefen Bericht, Logs, Übersicht, Login und „Restart host“ erneut, die Sperre über alle Adressen
+nur im Unit-Test, das Log-Ende nur mit einem kurzen Log.
+
+Danach hat der Besitzer die Seite im Browser seines Handys gegen die Konsole geöffnet, sich angemeldet und sie angesehen:
+ohne Befund.
+
+Nicht geprüft: ein Browser am PC gegen die Konsole, PIN, „End
+stream“, Umbenennen und Entfernen über die Seite, eine Adresse außerhalb des LAN, echter Ruhemodus.
+
 ### Testbuild für 13.40 (2026-11-05, 13.00)
 
 Pre-Release `v0.3.1-fw1340-1` für Issue #14: 13.40 und alles bis 13.60 bekommt den Datensatz von 13.60. Gemessen nur auf

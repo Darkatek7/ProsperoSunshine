@@ -3,7 +3,7 @@
 //   - the host's control socket on 127.0.0.1:47995 (src/control/control_server.hpp): STATUS, PAIRINGS,
 //     DEVICES and STREAMS every two seconds, PIN for a pending pairing, RENAME and UNPAIR for a paired
 //     device, ENDSTREAM to end one device's stream, QUIT to stop it, REPORT to have it offer the diagnostic report on the network (a title may not
-//     listen there itself);
+//     listen there itself), WEBLOGIN for the web page's login (web.hpp; the password never goes to a log);
 //   - starting the host: its ELF sent to the ELF loader on 127.0.0.1:9021;
 //   - /data/prosperosunshine/sunshine.conf (conf.hpp) and the Payload Manager's autoload list
 //     (autoload.hpp).
@@ -64,6 +64,8 @@ struct Snapshot
     std::vector<diag::Device> devices;
     bool streams_known = false;       // the running host answered STREAMS (an older one does not)
     std::vector<diag::Stream> streams; // who streams now
+    bool web_known = false;           // the running host answered WEBLOGIN (an older one does not)
+    std::string web_user;             // the web page's login; empty: no login, the page is off
     // Files.
     bool files_read = false;
     Values config;            // the keys of option_specs()
@@ -102,6 +104,8 @@ class Host
     void rename_device(const std::string &id, const std::string &name);
     void remove_device(const std::string &id, const std::string &name); // name: for the message
     void end_stream(const std::string &id, const std::string &name);    // the game and the others go on
+    void set_web_login(const std::string &user, const std::string &password); // turns the web page on
+    void web_login_off();                                                      // and off
     void start_host();
     void stop_host();
     void restart_host();
@@ -120,6 +124,8 @@ class Host
         rename_device,
         remove_device,
         end_stream,
+        web_set,
+        web_off,
         start,
         stop,
         restart,
@@ -156,6 +162,7 @@ class Host
     void do_rename_device(const Job &job);
     void do_remove_device(const Job &job);
     void do_end_stream(const Job &job);
+    void do_web(const Job &job);
     void do_start();
     void do_stop();
     void do_restart();

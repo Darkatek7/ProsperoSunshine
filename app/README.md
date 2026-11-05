@@ -6,7 +6,7 @@ console itself, with a controller:
 - **Host**: shows whether the host runs or streams, and starts, stops or restarts it.
 - **Pairing**: lists Moonlight's pending pairing requests and takes the PIN Moonlight shows, on an
   on-screen keyboard. This replaces Sunshine's web UI for pairing.
-- **Settings**: edits `/data/prosperosunshine/sunshine.conf`.
+- **Settings**: edits `/data/prosperosunshine/sunshine.conf`, and turns the host's web page on or off.
 - **Start at boot**: puts the host into the Payload Manager's autoload list, or takes it out.
 - **Diagnostics**: a report for a bug report, to read on the console, from a phone or PC, or as a file.
 
@@ -93,6 +93,11 @@ The names, ranges and defaults are Sunshine's (`src/config.cpp` at a679b059), ex
 reads itself. Every other line of the file, comments included, is kept as it is. Sunshine uses the first line of a key; when the app
 sets a key that appears more than once, it keeps the first line's place and removes the others.
 
+**Web page** sets the user name and password for the host's [web page](../README.md#web-page) (`WEBLOGIN SET`), which turns
+it on, or removes them (`WEBLOGIN OFF`), which turns it off. It isn't a `sunshine.conf` key: the host keeps the login, the password
+only as a salted hash, in `/data/prosperosunshine/web_login`, and the change applies at once, without a restart. The page edits the
+same settings except the Experimental switches, which stay here with their firmware checks.
+
 The third row, **Experimental**, is for testers on firmware where a function isn't verified. Its tiles come from one list,
 `app/src/psapp/experimental_list.h`, which also holds the keys, the names and where each function is verified, for the app and the host
 alike. Cross flips a switch; off removes the
@@ -155,6 +160,7 @@ request:
 | `ENDSTREAM <uuid>` | `OK ended`, `ERR not streaming` or `ERR no such device`, once that device's stream has ended |
 | `REPORT` | `OK port=47996`: for 8 s the host answers there with `diagnostics.txt` |
 | `AUTOLOAD [ON\|OFF]` | `OK list=<0\|1> manager=<0\|1> slot=<0\|1>` or `ERR ...`: the autoload list, as the host sees it or after its change |
+| `WEBLOGIN [SET <user> <password>\|OFF]` | `OK user=<name>` (empty without a login), `OK set` or `ERR <reason>`, `OK off`: the web page's login; the password is the rest of the line |
 | `QUIT` | `OK bye`, then the host ends |
 
 The socket serves one client at a time and has no authentication; it is meant for the local network

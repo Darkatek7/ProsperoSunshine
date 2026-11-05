@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// PC tests for the app's pure parts: sunshine.conf edits and the Payload Manager's autoload list.
+// PC tests for the app's pure parts: sunshine.conf edits, the Payload Manager's autoload list, the
+// diagnostic report and the web page's login.
 #include "app/psapp/autoload.hpp"
 #include "app/psapp/conf.hpp"
 #include "app/psapp/diag.hpp"
 #include "app/psapp/experimental_list.h"
+#include "app/psapp/web.hpp"
 
 #include <cstdio>
 #include <string>
@@ -557,11 +559,77 @@ static void diag_tests()
     CHECK(diag::errno_name(9999) == "errno 9999");
 }
 
+static void web_tests()
+{
+    // The host's rules (src/web/web_auth.hpp): a one-word user, a printable password of 8 to 128.
+    CHECK(web::valid_user("admin"));
+    CHECK(web::valid_user("a"));
+    CHECK(web::valid_user("Ann.B_c-9"));
+    CHECK(web::valid_user(std::string(32, 'x')));
+    CHECK(!web::valid_user(std::string(33, 'x')));
+    CHECK(!web::valid_user(""));
+    CHECK(!web::valid_user("two words"));
+    CHECK(!web::valid_user("a@b"));
+    CHECK(!web::valid_user("\xC3\xA4rger"));
+    CHECK(web::user_problem("admin").empty());
+    CHECK(!web::user_problem("").empty());
+    CHECK(!web::user_problem("a b").empty());
+    CHECK(!web::user_problem(std::string(33, 'x')).empty());
+
+    CHECK(web::valid_password("12345678"));
+    CHECK(web::valid_password("with spaces and ~!@#"));
+    CHECK(web::valid_password(" leading and trailing "));
+    CHECK(web::valid_password(std::string(128, 'p')));
+    CHECK(!web::valid_password(std::string(129, 'p')));
+    CHECK(!web::valid_password("1234567"));
+    CHECK(!web::valid_password("tab\there12"));
+    CHECK(!web::valid_password("line\nbreak12"));
+    CHECK(!web::valid_password("\xC3\xA4\xC3\xA4\xC3\xA4\xC3\xA4"));
+    CHECK(web::password_problem("12345678").empty());
+    CHECK(!web::password_problem("short").empty());
+    CHECK(!web::password_problem(std::string(129, 'p')).empty());
+    CHECK(!web::password_problem("tab\there12").empty());
+    // The reason never repeats the password.
+    CHECK(web::password_problem("secret!").find("secret") == std::string::npos);
+
+    // Base port plus one; the default without the key or with a broken value.
+    CHECK(web::port(std::nullopt) == 47990);
+    CHECK(web::port(std::string("47989")) == 47990);
+    CHECK(web::port(std::string("48000")) == 48001);
+    CHECK(web::port(std::string("")) == 47990);
+    CHECK(web::port(std::string("12a")) == 47990);
+    CHECK(web::port(std::string("70000")) == 47990);
+    CHECK(web::address("192.0.2.7", 47990) == "https://192.0.2.7:47990");
+    CHECK(web::address("", 47990).empty());
+
+    // The control lines.
+    CHECK(web::set_request("admin", "pass word ") == "WEBLOGIN SET admin pass word \n");
+    CHECK(web::set_request("u", " lead1234") == "WEBLOGIN SET u  lead1234\n");
+    CHECK(std::string(web::kQuery) == "WEBLOGIN\n");
+    CHECK(std::string(web::kOff) == "WEBLOGIN OFF\n");
+    CHECK(web::parse_user("OK user=admin") == std::optional<std::string>("admin"));
+    CHECK(web::parse_user("OK user=") == std::optional<std::string>(""));
+    CHECK(!web::parse_user("ERR unknown command"));
+    CHECK(!web::parse_user("OK"));
+    CHECK(!web::parse_user(""));
+
+    const web::Outcome set = web::parse_outcome("OK set");
+    CHECK(set.ok && !set.unknown && set.reason.empty());
+    CHECK(web::parse_outcome("OK off").ok);
+    const web::Outcome bad = web::parse_outcome("ERR the password takes 8 to 128 printable characters");
+    CHECK(!bad.ok && !bad.unknown && bad.reason == "the password takes 8 to 128 printable characters");
+    const web::Outcome old = web::parse_outcome("ERR unknown command");
+    CHECK(!old.ok && old.unknown);
+    const web::Outcome odd = web::parse_outcome("");
+    CHECK(!odd.ok && !odd.reason.empty());
+}
+
 int main()
 {
     conf_tests();
     autoload_tests();
     diag_tests();
+    web_tests();
     std::printf("%s\n", failures == 0 ? "psapp tests passed" : "psapp tests FAILED");
     return failures == 0 ? 0 : 1;
 }

@@ -33,6 +33,9 @@ Seit 0.1.5 sind folgende Releases dazugekommen:
 - **0.3.2:**
   - Die Host-Rolle (Konsolennutzer, PS, Create) gehört einem gepairten Gerät; Gäste verlieren auch Create (Issue #15).
   - Firmware 13.40 bekommt den Datensatz von 13.60 (Issue #14, von einem Tester bestätigt).
+- **Unveröffentlicht:** eine Webseite zur Steuerung des Hosts (Issue #21), gebaut, auf 13.00 gemessen und am Handy
+  angesehen (STATUS.md)
+  („Nächste konkrete Schritte“, Punkt 12).
 
 Firmware: 13.00 und 10.20 sind geprüft. 10.40, 12.70, 13.40 und 13.60 streamen laut Nutzerberichten (Issues #1, #2, #14, #17), dort aber nicht
 gemessen.
@@ -365,3 +368,13 @@ echtem Moonlight beim Besitzer.
     Konsole: ob der Host einen echten Controller an der Konsole erkennt (dann wären alle Stream-Geräte Gäste), was ein
     Stream-Pad mit zwei DualSense an der Konsole macht und welchen Nutzer das Pad des Hosts nimmt (heute der erste Ordner
     in `/user/home`). Danach ein Schalter „Guests can only play“, standardmäßig an.
+12. Webseite zur Steuerung (Issue #21): gebaut, auf 13.00 gemessen (STATUS.md, „Webseite“). HTTPS auf Basisport + 1 (47990) mit dem
+    selbst signierten Zertifikat des Hosts, aus, bis in der App unter „Web page“ ein Login gesetzt ist (`WEBLOGIN` am
+    Steuer-Socket), nur aus dem LAN und Tailscale (100.64.0.0/10), sonst 403. Seiten: Übersicht (Status, Version, Firmware,
+    PIN, laufende Streams mit Beenden), Geräte (umbenennen, entfernen), Einstellungen ohne die experimentellen Schalter,
+    Logs mit Download, Diagnosebericht wie in der App, Host neu starten. Code in `src/web/`; Login-Prüfung und Log-Zeilen
+    haben Unit-Tests (`tests/web_auth_test.cpp`, `tests/web_lines_test.cpp`). Offen:
+    - die Seite im Browser am PC (am Handy angesehen, ohne Befund);
+    - PIN-Eingabe, „End stream“ während eines Streams, Umbenennen und Entfernen über die Seite;
+    - „Save and restart host“, 403 von einer Adresse außerhalb, die Seite nach echtem Ruhemodus.
+    Später, falls gewünscht: Geräte sperren, die Host-Rolle je Gerät auf der Seite zeigen.

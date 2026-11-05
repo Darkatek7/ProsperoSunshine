@@ -139,7 +139,41 @@ if(EXISTS "${PROSPERO_DEPS}/include/boost" AND EXISTS "${PROSPERO_DEPS}/lib/liba
     string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," COVER_BYTES "${COVER_HEX}")
     file(CONFIGURE OUTPUT "${CMAKE_BINARY_DIR}/generated/cover_png.cpp" CONTENT
         "// Generated from assets/ps5_screen.png by CMakeLists.txt\n#include <cstddef>\nextern const unsigned char prospero_cover_png[] = {@COVER_BYTES@};\nextern const std::size_t prospero_cover_png_size = sizeof prospero_cover_png;\n")
+    # The web page's files (src/web/page), embedded the same way; web_server.cpp serves them by path.
+    set(WEB_PAGE_FILES index.html text/html app.js text/javascript style.css text/css)
+    set(WEB_ARRAYS "")
+    set(WEB_TABLE "")
+    set(WEB_INDEX 0)
+    list(LENGTH WEB_PAGE_FILES WEB_PAGE_LENGTH)
+    while(WEB_INDEX LESS WEB_PAGE_LENGTH)
+        list(GET WEB_PAGE_FILES ${WEB_INDEX} WEB_NAME)
+        math(EXPR WEB_TYPE_INDEX "${WEB_INDEX} + 1")
+        list(GET WEB_PAGE_FILES ${WEB_TYPE_INDEX} WEB_TYPE)
+        set(WEB_FILE "${CMAKE_SOURCE_DIR}/src/web/page/${WEB_NAME}")
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${WEB_FILE}")
+        file(READ "${WEB_FILE}" WEB_HEX HEX)
+        string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," WEB_BYTES "${WEB_HEX}")
+        string(APPEND WEB_ARRAYS "static const unsigned char web_${WEB_INDEX}[] = {${WEB_BYTES}};
+")
+        string(APPEND WEB_TABLE "    {\"/${WEB_NAME}\", \"${WEB_TYPE}; charset=utf-8\", web_${WEB_INDEX}, sizeof web_${WEB_INDEX}},
+")
+        math(EXPR WEB_INDEX "${WEB_INDEX} + 2")
+    endwhile()
+    file(CONFIGURE OUTPUT "${CMAKE_BINARY_DIR}/generated/web_page.cpp" CONTENT
+        "// Generated from src/web/page by CMakeLists.txt
+#include <cstddef>
+struct prospero_web_asset {
+    const char *path, *type;
+    const unsigned char *data;
+    std::size_t size;
+};
+@WEB_ARRAYS@extern const prospero_web_asset prospero_web_assets[] = {
+@WEB_TABLE@};
+extern const std::size_t prospero_web_asset_count = sizeof prospero_web_assets / sizeof prospero_web_assets[0];
+")
     add_executable(prospero_sunshine "${CMAKE_BINARY_DIR}/generated/cover_png.cpp"
+        "${CMAKE_BINARY_DIR}/generated/web_page.cpp" src/web/web_server.cpp src/web/web_login.cpp src/web/web_report.cpp
+        app/src/psapp/conf.cpp app/src/psapp/diag.cpp
         ${SUNSHINE_KEPT}
         "${MOONLIGHT_SRC}/src/RtspParser.c"
         src/sunshine/main_ps5.cpp src/sunshine/video_ps5.cpp src/sunshine/process_ps5.cpp

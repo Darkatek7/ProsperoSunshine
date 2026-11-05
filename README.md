@@ -21,7 +21,8 @@ patches) for the console and replaces the parts that talk to PC hardware:
   the experimental Surround switch.
 - **Input:** a native virtual DualSense per Moonlight gamepad, with touchpad and motion sensors, and a virtual keyboard and
   mouse for Moonlight's keyboard and mouse.
-- **App list:** "PS5 Screen" and the console's installed games, with their covers. There is no web UI.
+- **App list:** "PS5 Screen" and the console's installed games, with their covers. Sunshine's web UI is replaced by the PS5
+  app and a small [web page](#web-page) of the host's own, which is off until you set a login.
 
 Details: `docs/adr/001-sunshine-port.md`. Roadmap: `ROADMAP.md`; verified state: `STATUS.md`;
 reverse-engineering notes: `docs/` (German).
@@ -106,6 +107,30 @@ or broadcast your screen. The role belongs to the host's device, not to the firs
 gets it, and the host's device takes it back when it reconnects. Once every controller is gone, the next device to connect
 is the host. To give PS and Create to everyone, turn on **PS for all players** in the app's Settings and restart the host.
 
+## Web page
+
+The host can serve a small web page, so a phone or PC in your network can do what the app does without leaving the game:
+see the host's status, version and firmware, enter the PIN of a pending pairing, end a device's stream, rename or remove
+paired devices, change the settings, read or download the end of `sunshine.log` and `host_diag.log`, get the same
+diagnostic report as the app's (ready to paste into an issue), and restart the host.
+It is off until you set a login, and nothing listens on its port before that.
+
+1. In the app, open **Settings**, choose **Web page** and set a user name and a password (8 to 128 characters). The page
+   starts right away. Turn it off there again to remove the login.
+2. Open `https://<console-ip>:47990` in a browser (the **Base port** plus one, if you changed it). The host uses its own
+   self-signed certificate, so the browser warns once; accept it for this address.
+3. Sign in. A session ends after 12 hours without use, or when the login changes.
+
+- The page answers only the LAN and Tailscale addresses (100.64.0.0/10); every other address gets 403. **Don't forward
+  TCP 47990 to the internet.** Over [ps5-tailscale](#without-port-forwarding-tailscale) it is reachable only if 47990 is
+  among the ports it passes.
+- After 5 failed sign-ins from one address, the page waits 30 seconds before the next try, doubling up to 15 minutes; after
+  20 from all addresses together, every address waits the same way until the next good sign-in. Failed sign-ins are logged with the
+  address, never the password. The password is kept only as a salted PBKDF2-SHA256 hash in
+  `/data/prosperosunshine/web_login`.
+- Settings changed on the page apply when the host starts again: use **Save and restart host**. The Experimental switches
+  stay in the app, where they are checked against the firmware.
+
 ## Playing over the internet
 
 A friend in another house can join like a device on the LAN. A contributor played that way with two of four players over the
@@ -116,8 +141,9 @@ ports.
 1. **Pair the device at home first**, on the same network as the console, or pair over the internet once the ports are open;
    either way the PIN goes into the app on the console.
 2. **Forward these ports** on your router to the console (the defaults; they move with **Base port** in the app's Settings):
-   TCP 47984, 47989 and 48010, UDP 47998, 47999 and 48000. The host has no web interface, so there's nothing else to open.
-   Don't forward the control socket (TCP 47995); it only listens on the console itself anyway.
+   TCP 47984, 47989 and 48010, UDP 47998, 47999 and 48000. Nothing else needs to be open. Don't forward the
+   [web page](#web-page) (TCP 47990), which answers only the LAN and Tailscale, or the control socket (TCP 47995), which only
+   listens on the console itself anyway.
 3. In Moonlight, **add the host by your public address** (or a dynamic DNS name for it).
 4. **Lower the bitrate** in Moonlight to what the upload of your connection carries. Every player gets a copy of the stream,
    so two friends over the internet need twice the upload.
@@ -275,7 +301,8 @@ switch off and choose **Save and restart host**.
 ## Development control socket
 
 The host listens on TCP **47995** with a line-based control socket: `STATUS`, `PAIRINGS`, `PIN [<id>] <pin> [name]`,
-`DEVICES`, `STREAMS`, `ENDSTREAM <uuid>`, `RENAME <uuid> <name>`, `UNPAIR <uuid>`, `REPORT`, `AUTOLOAD [ON|OFF]` and `QUIT`. It is **unauthenticated**. By default it listens on `127.0.0.1` only (ROADMAP P9.1), so the app on the
+`DEVICES`, `STREAMS`, `ENDSTREAM <uuid>`, `RENAME <uuid> <name>`, `UNPAIR <uuid>`, `REPORT`, `AUTOLOAD [ON|OFF]`,
+`WEBLOGIN [SET <user> <password>|OFF]` and `QUIT`. It is **unauthenticated**. By default it listens on `127.0.0.1` only (ROADMAP P9.1), so the app on the
 console can use it but the LAN cannot. Creating the empty file `/data/prosperosunshine/control_lan` re-enables LAN
 access for development. Do this only on trusted networks.
 

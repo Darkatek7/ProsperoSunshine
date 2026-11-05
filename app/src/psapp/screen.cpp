@@ -3,6 +3,7 @@
 
 #include "app/psapp/experimental_list.h"
 #include "app/psapp/icons.hpp"
+#include "app/psapp/web.hpp"
 #include "platform/ps5/system.hpp"
 #include "ui/glyphs.hpp"
 
@@ -47,6 +48,12 @@ constexpr int kFirstSwitch = 8;
 // The Experimental row: the firmware switches, then surround sound, which no firmware check locks.
 constexpr int kSwitchTiles = PS_EXP_SWITCH_COUNT + 1;
 constexpr int kTiles = kFirstSwitch + kSwitchTiles;
+// Under the tiles: Save, Save and restart, Revert, and at the right end the web page.
+constexpr int kSettingsActions = 4;
+// The web page's sheet: its height, and where its rows start in it.
+constexpr float kWebSheetHeight = 730.0f;
+constexpr float kWebRowsTop = 470.0f;
+constexpr int kWebRows = 3;
 
 float approach(float value, float target, float dt, float speed)
 {
@@ -187,11 +194,19 @@ Rect Screen::tile_rect(int index) const
 
 Rect Screen::settings_action_rect(int index) const
 {
+    if (index == 3)
+        return {1824.0f - 360.0f, 736.0f, 360.0f, 84.0f}; // the web page, apart from the three about sunshine.conf
     static const float widths[3] = {250.0f, 400.0f, 340.0f};
     float x = 96.0f;
     for (int i = 0; i < index; ++i)
         x += widths[i] + 20.0f;
     return {x, 736.0f, widths[index], 84.0f};
+}
+
+Rect Screen::web_row_rect(int index) const
+{
+    const float top = 540.0f - kWebSheetHeight / 2.0f + 10.0f;
+    return {660.0f, top + kWebRowsTop + static_cast<float>(index) * 76.0f, 600.0f, 64.0f};
 }
 
 Rect Screen::focus_rect() const
@@ -315,7 +330,7 @@ void Screen::update(const hui::InputFrame &input, float dt, hui::ui::Feedback &f
     streams_amount_ = approach(streams_amount_,
                                page_ == Page::home && home_row_ == 1 && streams_shown() && home_card_ == visible_pairings() ? 1.0f : 0.0f,
                                dt, 14.0f);
-    for (int i = 0; i < kTiles + 3; ++i)
+    for (int i = 0; i < kTiles + kSettingsActions; ++i)
         tile_amount_[i] = approach(tile_amount_[i], page_ == Page::settings && tile_ == i ? 1.0f : 0.0f, dt, 14.0f);
     report_amount_ = approach(report_amount_, page_ == Page::diagnostics ? 1.0f : 0.0f, dt, 14.0f);
     const float tab_target = static_cast<float>(static_cast<int>(page_));
@@ -332,7 +347,7 @@ void Screen::update(const hui::InputFrame &input, float dt, hui::ui::Feedback &f
     if (live())
         pulse_ += dt;
     keyboard_.update(dt);
-    if (sheet_ == Sheet::choice || sheet_ == Sheet::devices || sheet_ == Sheet::streams)
+    if (sheet_ == Sheet::choice || sheet_ == Sheet::devices || sheet_ == Sheet::streams || sheet_ == Sheet::web)
     {
         sheet_highlight_.update(dt, style_);
     }
@@ -452,7 +467,9 @@ void Screen::handle_settings(const hui::InputFrame &input, hui::ui::Feedback &fe
             else if (input.nav == Direction::up)
                 next = switches ? from_switch : second ? tile_ - kRowLength : -1;
             else
-                next = switches ? kTiles + std::min(col, 2) : second ? std::min(to_switch, kFirstSwitch + last_switch) : tile_ + kRowLength;
+                next = switches ? kTiles + (col == last_switch ? 3 : std::min(col, 2))
+                       : second ? std::min(to_switch, kFirstSwitch + last_switch)
+                                : tile_ + kRowLength;
         }
         else
         {
@@ -460,9 +477,9 @@ void Screen::handle_settings(const hui::InputFrame &input, hui::ui::Feedback &fe
             if (input.nav == Direction::left)
                 next = index > 0 ? tile_ - 1 : -1;
             else if (input.nav == Direction::right)
-                next = index < 2 ? tile_ + 1 : -1;
+                next = index < kSettingsActions - 1 ? tile_ + 1 : -1;
             else if (input.nav == Direction::up)
-                next = kFirstSwitch + std::min(index, kSwitchTiles - 1);
+                next = kFirstSwitch + (index == 3 ? kSwitchTiles - 1 : std::min(index, kSwitchTiles - 1));
             else
                 next = -1;
         }
@@ -555,6 +572,12 @@ void Screen::run(Action action, hui::ui::Feedback &feedback)
         feedback.play(hui::audio::Cue::back);
         return;
     }
+    if (action == Action::web)
+    {
+        open_web();
+        feedback.play(hui::audio::Cue::modal_open);
+        return;
+    }
     if (busy())
     {
         feedback.play(hui::audio::Cue::error);
@@ -592,6 +615,7 @@ void Screen::run(Action action, hui::ui::Feedback &feedback)
         reload_edits_ = true;
         break;
     case Action::revert:
+    case Action::web:
         break;
     }
     feedback.play(hui::audio::Cue::select);
@@ -629,6 +653,7 @@ void Screen::open_tile(int index)
 
 void Screen::open_sheet(Sheet kind, const std::string &title, const std::string &help, const std::string &initial)
 {
+    web_step_ = WebStep::none; // the web page's steps set it again after this
     sheet_ = kind;
     sheet_drawn_ = kind;
     sheet_title_ = title;
@@ -679,8 +704,108 @@ void Screen::open_streams()
     open_sheet(Sheet::streams, "Streaming now", "End a device's stream. The game keeps running.", "");
 }
 
+void Screen::open_web()
+{
+    renaming_ = false;
+    pair_pin_.clear();
+    target_.clear();
+    web_user_.clear();
+    open_sheet(Sheet::web, "Web page", "Settings, devices and streams from a browser on your network.", "");
+    web_row_ = 0;
+    while (web_row_ < kWebRows - 1 && !web_row_enabled(static_cast<WebRow>(web_row_)))
+        ++web_row_;
+    sheet_highlight_.snap(web_row_rect(web_row_));
+}
+
+bool Screen::web_row_enabled(WebRow row) const
+{
+    // The host keeps the login: without a running host that knows WEBLOGIN there is nothing to change.
+    const bool host = snap_.polled && snap_.running && snap_.web_known;
+    switch (row)
+    {
+    case WebRow::set_login:
+        return host;
+    case WebRow::turn_off:
+        return host && !snap_.web_user.empty();
+    case WebRow::close:
+        return true;
+    }
+    return false;
+}
+
+std::string Screen::web_address() const
+{
+    const auto base = snap_.config.find("port");
+    const std::uint16_t port = web::port(base != snap_.config.end() ? base->second : std::nullopt);
+    const std::string address = web::address(snap_.address, port);
+    return address.empty() ? "Port " + std::to_string(port) + " on the console's IP" : address;
+}
+
+void Screen::handle_web(const hui::InputFrame &input, hui::ui::Feedback &feedback)
+{
+    // The rows that can't do anything now are skipped; the host's state may change under the focus.
+    if (!web_row_enabled(static_cast<WebRow>(web_row_)))
+    {
+        web_row_ = 0;
+        while (web_row_ < kWebRows - 1 && !web_row_enabled(static_cast<WebRow>(web_row_)))
+            ++web_row_;
+    }
+    if (input.nav == Direction::up || input.nav == Direction::down)
+    {
+        const int step = input.nav == Direction::up ? -1 : 1;
+        int next = web_row_ + step;
+        while (next >= 0 && next < kWebRows && !web_row_enabled(static_cast<WebRow>(next)))
+            next += step;
+        if (next >= 0 && next < kWebRows)
+        {
+            web_row_ = next;
+            feedback.play(hui::audio::Cue::focus);
+        }
+        else if (!input.nav_repeat)
+        {
+            feedback.play(hui::audio::Cue::error, 1.0f, 0.0f, 0.4f);
+        }
+    }
+    sheet_highlight_.target(web_row_rect(web_row_));
+    if (input.is_pressed(InputAction::back))
+    {
+        feedback.play(hui::audio::Cue::modal_close);
+        close_sheet();
+        return;
+    }
+    if (!input.is_pressed(InputAction::confirm))
+        return;
+    const WebRow row = static_cast<WebRow>(web_row_);
+    if (row == WebRow::close)
+    {
+        feedback.play(hui::audio::Cue::modal_close);
+        close_sheet();
+        return;
+    }
+    if (busy() || !web_row_enabled(row))
+    {
+        feedback.play(hui::audio::Cue::error);
+        return;
+    }
+    if (row == WebRow::turn_off)
+    {
+        host_.web_login_off();
+        feedback.play(hui::audio::Cue::select);
+        return;
+    }
+    open_sheet(Sheet::text, "Web page user", "1 to 32 letters, digits, '.', '_' or '-'. You log in with it.", snap_.web_user);
+    web_step_ = WebStep::user;
+    keyboard_.style.max_length = static_cast<int>(web::kUserMax);
+    feedback.play(hui::audio::Cue::select);
+}
+
 void Screen::handle_sheet(const hui::InputFrame &input, hui::ui::Feedback &feedback)
 {
+    if (sheet_ == Sheet::web)
+    {
+        handle_web(input, feedback);
+        return;
+    }
     if (sheet_ == Sheet::devices)
     {
         const int count = static_cast<int>(snap_.devices.size());
@@ -895,6 +1020,8 @@ void Screen::handle_sheet(const hui::InputFrame &input, hui::ui::Feedback &feedb
         feedback.play(hui::audio::Cue::modal_close);
         if (renaming_)
             open_devices();
+        else if (web_step_ != WebStep::none)
+            open_web(); // drops a typed password with the buffer
         else
             close_sheet();
         return;
@@ -915,6 +1042,47 @@ void Screen::handle_sheet(const hui::InputFrame &input, hui::ui::Feedback &feedb
         open_sheet(Sheet::text, "Name this device", "So you can tell it apart later. Options keeps this name.", pair_suggestion_);
         keyboard_.style.max_length = 24;
         feedback.play(hui::audio::Cue::select);
+        return;
+    }
+    if (web_step_ == WebStep::user)
+    {
+        const std::string problem = web::user_problem(buffer_);
+        if (!problem.empty())
+        {
+            sheet_error_ = problem;
+            feedback.play(hui::audio::Cue::error);
+            return;
+        }
+        // The password next; the name stays for it.
+        const std::string user = buffer_;
+        open_sheet(Sheet::text, "Password for " + user,
+                   "8 to 128 characters, spaces count. It is not shown here and goes only to the host.", "");
+        web_step_ = WebStep::password;
+        web_user_ = user;
+        keyboard_.style.max_length = static_cast<int>(web::kPasswordMax);
+        feedback.play(hui::audio::Cue::select);
+        return;
+    }
+    if (web_step_ == WebStep::password)
+    {
+        const std::string problem = web::password_problem(buffer_);
+        if (!problem.empty())
+        {
+            sheet_error_ = problem;
+            feedback.play(hui::audio::Cue::error);
+            return;
+        }
+        if (busy())
+        {
+            sheet_error_ = "One moment: the host is busy with something else";
+            feedback.play(hui::audio::Cue::error);
+            return;
+        }
+        host_.set_web_login(web_user_, buffer_);
+        std::fill(buffer_.begin(), buffer_.end(), '\0');
+        buffer_.clear();
+        feedback.play(hui::audio::Cue::select);
+        open_web(); // the outcome shows there
         return;
     }
     if (!pair_pin_.empty())
@@ -1169,6 +1337,11 @@ void Screen::draw_footer(hui::gfx::DrawList &list, std::uint32_t glass) const
     else if (sheet_ == Sheet::end_stream)
     {
         const hui::ui::Hint hints[] = {{hui::ui::Button::cross, "End stream"}, {hui::ui::Button::circle, "Keep it"}};
+        hui::ui::draw_hints(list, fonts_, glyphs, hints, 2, 1824.0f, true, layout);
+    }
+    else if (sheet_ == Sheet::web)
+    {
+        const hui::ui::Hint hints[] = {{hui::ui::Button::cross, "Select"}, {hui::ui::Button::circle, "Close"}};
         hui::ui::draw_hints(list, fonts_, glyphs, hints, 2, 1824.0f, true, layout);
     }
     else if (page_ == Page::home)
@@ -1539,6 +1712,9 @@ void Screen::draw_settings(hui::gfx::DrawList &list, std::uint32_t glass) const
                 tile_amount_[kTiles + 1], enabled);
     draw_button(list, glass, settings_action_rect(2), static_cast<int>(Icon::undo), "Revert changes", false,
                 tile_amount_[kTiles + 2], dirty());
+    const bool web_on = snap_.web_known && !snap_.web_user.empty();
+    draw_button(list, glass, settings_action_rect(3), static_cast<int>(Icon::globe),
+                !snap_.web_known ? "Web page" : web_on ? "Web page: on" : "Web page: off", false, tile_amount_[kTiles + 3], true);
 
     // What the focused part does.
     std::string help;
@@ -1559,8 +1735,17 @@ void Screen::draw_settings(hui::gfx::DrawList &list, std::uint32_t glass) const
         help = "Writes the changes to sunshine.conf. They apply when the host starts next.";
     else if (tile_ == kTiles + 1)
         help = "Writes the changes and restarts the host, which ends a running stream.";
-    else
+    else if (tile_ == kTiles + 2)
         help = "Puts back what sunshine.conf holds now.";
+    else
+    {
+        help = "The host's page for a browser on your network: " + web_address();
+        extra = !snap_.polled            ? std::string()
+                : !snap_.running         ? std::string("Host stopped")
+                : !snap_.web_known       ? std::string("Not in this host")
+                : snap_.web_user.empty() ? std::string("Off: no login")
+                                         : "On for " + snap_.web_user;
+    }
     const Rect bar{96.0f, 840.0f, 1728.0f, 64.0f};
     glass_card(list, glass, bar, 18.0f, 0.0f);
     list.circle(bar.x + 32.0f, bar.cy(), 6.0f, kAccent);
@@ -1650,6 +1835,62 @@ void Screen::draw_page(hui::gfx::DrawList &list, std::uint32_t glass) const
 
 // ---- drawing: the sheet -----------------------------------------------------------------------
 
+void Screen::draw_web(hui::gfx::DrawList &list, const Rect &card) const
+{
+    // Whether it is on and for whom.
+    const bool on = snap_.web_known && !snap_.web_user.empty();
+    std::string state;
+    Color dot = kFaint;
+    if (!snap_.polled)
+        state = "Checking the host...";
+    else if (!snap_.running)
+        state = "The host is stopped. Start it to set up the web page.";
+    else if (!snap_.web_known)
+        state = "The running host has no web page. Restart it to use this app's host.";
+    else if (!on)
+    {
+        state = "Off. Set a login to turn it on.";
+        dot = kMuted;
+    }
+    else
+    {
+        state = "On. Log in as " + snap_.web_user + ".";
+        dot = kGood;
+    }
+    const float state_w = fonts_.semibold.measure(state, 26.0f);
+    const float sx = card.cx() - (state_w + 30.0f) / 2.0f;
+    if (on)
+        list.glow({sx - 8.0f, card.y + 245.0f, 16.0f, 16.0f}, 8.0f, 10.0f, dot.with_alpha(0.5f));
+    list.circle(sx, card.y + 253.0f, 8.0f, dot);
+    hui::ui::text(list, fonts_.semibold, state, sx + 30.0f, card.y + 262.0f, 26.0f, kInk);
+
+    // The address to open.
+    const Rect field{card.x + 90.0f, card.y + 292.0f, card.w - 180.0f, 92.0f};
+    list.rounded_rect(field, 22.0f, Color::rgb(0x0a0f22, 0.8f));
+    list.bordered_rect(field, 22.0f, kClear, 1.5f, on ? kAccent.with_alpha(0.8f) : Color::rgb(0xffffff, 0.12f));
+    hui::ui::text(list, fonts_.semibold, shorten(fonts_.semibold, web_address(), 38.0f, field.w - 60.0f), field.cx(),
+                  field.y + 60.0f, 38.0f, on ? kInk : kMuted, Align::center);
+    hui::ui::text(list, fonts_.regular, "Open it in a browser on a phone or PC in this network.", card.cx(), card.y + 418.0f,
+                  22.0f, kMuted, Align::center);
+    hui::ui::text(list, fonts_.regular, "The browser warns about the host's own certificate the first time.", card.cx(),
+                  card.y + 448.0f, 22.0f, kFaint, Align::center);
+
+    // The rows, at the same place as in handle_web.
+    const Rect h = sheet_highlight_.rect(time_);
+    list.rounded_rect(h, 18.0f, kAccent.with_alpha(0.18f));
+    list.bordered_rect(h, 18.0f, kClear, 2.5f, kAccent);
+    const char *labels[kWebRows] = {snap_.web_user.empty() ? "Set login" : "Change login", "Turn off", "Close"};
+    const Icon row_icons[kWebRows] = {Icon::lock, Icon::power, Icon::undo};
+    for (int i = 0; i < kWebRows; ++i)
+    {
+        const Rect row = web_row_rect(i);
+        const bool enabled = web_row_enabled(static_cast<WebRow>(i));
+        const Color ink = !enabled ? kFaint : i == web_row_ ? kInk : kMuted;
+        icons::draw(list, row_icons[i], row.x + 40.0f, row.cy(), 28.0f, enabled ? kAccent : kFaint);
+        hui::ui::text(list, fonts_.semibold, labels[i], row.x + 76.0f, row.cy() + 9.0f, 26.0f, ink);
+    }
+}
+
 void Screen::draw_sheet(hui::gfx::DrawList &list, std::uint32_t glass) const
 {
     if (sheet_drawn_ == Sheet::none)
@@ -1664,6 +1905,8 @@ void Screen::draw_sheet(hui::gfx::DrawList &list, std::uint32_t glass) const
         height = 300.0f + static_cast<float>(spec->choices.size() + 1) * 76.0f;
     if (sheet_drawn_ == Sheet::remove_device || sheet_drawn_ == Sheet::end_stream)
         height = 270.0f;
+    if (sheet_drawn_ == Sheet::web)
+        height = kWebSheetHeight;
     const float width = sheet_drawn_ == Sheet::text ? 1120.0f : 880.0f;
     const Rect card = sheet_drawn_ == Sheet::devices || sheet_drawn_ == Sheet::streams
                           ? devices_card()
@@ -1677,7 +1920,9 @@ void Screen::draw_sheet(hui::gfx::DrawList &list, std::uint32_t glass) const
 
     const bool device_sheet = sheet_drawn_ == Sheet::devices || sheet_drawn_ == Sheet::remove_device || renaming_ ||
                               sheet_drawn_ == Sheet::streams || sheet_drawn_ == Sheet::end_stream;
+    const bool web_sheet = sheet_drawn_ == Sheet::web || web_step_ != WebStep::none;
     const Icon icon = sheet_drawn_ == Sheet::pin ? Icon::link
+                      : web_sheet                ? Icon::globe
                       : device_sheet             ? Icon::monitor
                       : spec != nullptr          ? kOptionIcons[std::min<std::size_t>(6, static_cast<std::size_t>(spec - option_specs().data()))]
                                                  : Icon::link; // the device's name when pairing
@@ -1711,9 +1956,30 @@ void Screen::draw_sheet(hui::gfx::DrawList &list, std::uint32_t glass) const
         const Rect field{card.x + 90.0f, card.y + 220.0f, card.w - 180.0f, 96.0f};
         list.rounded_rect(field, 22.0f, Color::rgb(0x0a0f22, 0.8f));
         list.bordered_rect(field, 22.0f, kClear, 3.0f, kAccent);
-        const float w = hui::ui::text(list, fonts_.semibold, buffer_, field.x + 30.0f, field.y + 62.0f, 38.0f, kInk);
+        float w = 0.0f;
+        if (web_step_ == WebStep::password)
+        {
+            // Never the password itself: a dot a character, as many as fit, and the count on the right.
+            const float count_w = buffer_.empty() ? 0.0f
+                                                  : hui::ui::text(list, fonts_.regular, std::to_string(buffer_.size()),
+                                                                  field.x + field.w - 30.0f, field.y + 60.0f, 24.0f, kMuted,
+                                                                  Align::right);
+            const int fit = static_cast<int>((field.w - 90.0f - count_w) / 22.0f);
+            const int dots = std::min(static_cast<int>(buffer_.size()), std::max(0, fit));
+            for (int i = 0; i < dots; ++i)
+                list.circle(field.x + 40.0f + static_cast<float>(i) * 22.0f, field.cy(), 7.0f, kInk);
+            w = static_cast<float>(dots) * 22.0f;
+        }
+        else
+        {
+            w = hui::ui::text(list, fonts_.semibold, buffer_, field.x + 30.0f, field.y + 62.0f, 38.0f, kInk);
+        }
         if (buffer_.empty())
-            hui::ui::text(list, fonts_.regular, spec != nullptr ? std::string("Default (network name)") : pair_suggestion_,
+            hui::ui::text(list, fonts_.regular,
+                          spec != nullptr                  ? std::string("Default (network name)")
+                          : web_step_ == WebStep::user     ? std::string("User name")
+                          : web_step_ == WebStep::password ? std::string("Password")
+                                                           : pair_suggestion_,
                           field.x + 30.0f, field.y + 62.0f, 32.0f, kFaint);
         if (std::fmod(time_, 1.0f) < 0.6f)
             list.rounded_rect({field.x + 34.0f + (buffer_.empty() ? 0.0f : w), field.y + 24.0f, 3.0f, 50.0f}, 1.5f, kAccent);
@@ -1753,6 +2019,8 @@ void Screen::draw_sheet(hui::gfx::DrawList &list, std::uint32_t glass) const
         }
         list.pop_transform();
     }
+    if (sheet_drawn_ == Sheet::web)
+        draw_web(list, card);
     if (sheet_drawn_ == Sheet::devices)
     {
         const int count = static_cast<int>(snap_.devices.size());

@@ -41,3 +41,5 @@ run_test mdns_test "$root/src/net/mdns.cpp"
 run_test ra_choose_test
 run_test quit_policy_test
 run_test encoder_qp_test
+run_test web_auth_test
+run_test web_lines_test

@@ -5,6 +5,7 @@
 #include "control/control_server.hpp"
 #include "control/listener_watch.hpp"
 #include "platform/ps5/mdns_responder.hpp"
+#include "web/web_server.hpp"
 #include "platform/ps5/capture.h"
 #include "platform/ps5/experimental.h"
 #include "src/config.h"
@@ -29,6 +30,10 @@
 #include <boost/log/expressions.hpp>
 #include <boost/log/sinks.hpp>
 #include <rs.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
 #include <thread>
 extern "C" {
 #include <ps5/kernel.h>
@@ -60,6 +65,39 @@ boost::shared_ptr<klog_sink> add_klog_sink() {
 
 using Ports = std::array<uint16_t, 3>;
 
+// "Restart host" on the web page: the host sends its own ELF to the loader, as the app does after QUIT. Declared first in
+// main, so it runs last, once everything else has let go of the ports, the pads and the capture.
+struct RelaunchOnExit {
+    ~RelaunchOnExit() {
+        if (!prospero::web::restart_requested()) return;
+        std::this_thread::sleep_for(2s);  // as the app waits after the control socket closed
+        const auto elf = platf::appdata() / "prospero_sunshine.elf";
+        std::ifstream in(elf, std::ios::binary);
+        const std::string data((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        const char *problem = data.empty() ? "no host ELF in the data folder" : nullptr;
+        const int sock = problem ? -1 : socket(AF_INET, SOCK_STREAM, 0);
+        if (!problem && sock < 0) problem = "no socket";
+        if (!problem) {
+            int one = 1;
+            setsockopt(sock, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one);
+            timeval timeout{10, 0};
+            setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof timeout);
+            sockaddr_in addr{};
+            addr.sin_family = AF_INET;
+            addr.sin_port = htons(9021);
+            addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+            if (connect(sock, reinterpret_cast<sockaddr *>(&addr), sizeof addr)) problem = "the ELF loader did not answer";
+            for (size_t sent = 0; !problem && sent < data.size();) {
+                const ssize_t n = send(sock, data.data() + sent, data.size() - sent, 0);
+                if (n <= 0) problem = "sending to the ELF loader failed";
+                else sent += static_cast<size_t>(n);
+            }
+        }
+        if (sock >= 0) close(sock);
+        ps_diag_log("ProsperoSunshine: host restart from the web page: %s\n", problem ? problem : "sent to the ELF loader");
+    }
+};
+
 // Returns false when the host was told to stop, true when rest mode has taken its ports: the process runs on, but
 // nothing answers until the services start anew (STATUS.md). RELISTEN on the control socket tests that path.
 bool wait_or_ports_lost(const std::shared_ptr<safe::event_t<bool>> &shutdown_event, const Ports &ports,
@@ -80,6 +118,7 @@ bool wait_or_ports_lost(const std::shared_ptr<safe::event_t<bool>> &shutdown_eve
 }
 
 int main(int argc, char *argv[]) {
+    const RelaunchOnExit relaunch;
     const auto klog = add_klog_sink();
     std::error_code ec;
     std::filesystem::create_directories(platf::appdata(), ec);
@@ -148,11 +187,13 @@ int main(int argc, char *argv[]) {
     const Ports ports{net::map_port(nvhttp::PORT_HTTP), net::map_port(nvhttp::PORT_HTTPS),
                       net::map_port(rtsp_stream::RTSP_SETUP_PORT)};
     prospero::ControlServer control(shutdown_event);
+    prospero::web::WebServer web(control, shutdown_event);
     for (bool again = true; again;) {
         std::jthread http_thread{nvhttp::start};
         std::jthread rtsp_thread{rtsp_stream::start};
         std::jthread control_thread([&](std::stop_token stop) { control.run(stop); });
         std::jthread report_thread([&](std::stop_token stop) { control.run_report(stop); });
+        std::jthread web_thread([&](std::stop_token stop) { web.run(stop); });
         // Moonlight discovery (P9.2); on any socket problem the responder logs and ends, the host runs on.
         std::jthread mdns_thread([name = config::nvhttp.sunshine_name](std::stop_token stop) {
             prospero::mdns::run_responder(stop, name, net::map_port(nvhttp::PORT_HTTP));
@@ -173,6 +214,7 @@ int main(int argc, char *argv[]) {
         }
         control_thread.request_stop();
         report_thread.request_stop();
+        web_thread.request_stop();
         mdns_thread.request_stop();
         proc::proc.terminate();
         mdns_thread.join();
@@ -180,6 +222,7 @@ int main(int argc, char *argv[]) {
         rtsp_thread.join();
         control_thread.join();
         report_thread.join();
+        web_thread.join();
         if (again) {
             shutdown_event->reset();
             while (!std::all_of(ports.begin(), ports.end(), prospero::port_free)) std::this_thread::sleep_for(2s);

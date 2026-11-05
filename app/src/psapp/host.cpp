@@ -5,6 +5,7 @@
 
 #include "app/psapp/autoload.hpp"
 #include "app/psapp/io.hpp"
+#include "app/psapp/web.hpp"
 #include "platform/ps5/system.hpp"
 
 #include <cerrno>
@@ -162,6 +163,14 @@ void Host::end_stream(const std::string &id, const std::string &name)
 {
     push({Kind::end_stream, id, name, {}, {}, false});
 }
+void Host::set_web_login(const std::string &user, const std::string &password)
+{
+    push({Kind::web_set, user, password, {}, {}, false});
+}
+void Host::web_login_off()
+{
+    push({Kind::web_off, {}, {}, {}, {}, false});
+}
 void Host::start_host()
 {
     push({Kind::start, {}, {}, {}, {}, false});
@@ -260,6 +269,10 @@ void Host::run()
                 break;
             case Kind::end_stream:
                 do_end_stream(job);
+                break;
+            case Kind::web_set:
+            case Kind::web_off:
+                do_web(job);
                 break;
             case Kind::start:
                 do_start();
@@ -474,6 +487,21 @@ void Host::poll()
                 streams.push_back(stream);
         }
     }
+    // The web page's login: whether there is one, and for whom.
+    bool web_known = false;
+    std::string web_user;
+    if (running && error.empty())
+    {
+        const io::Exchange reply = io::exchange(kControlPort, web::kQuery, any_line, 3000);
+        if (!reply.lines.empty())
+        {
+            if (const auto user = web::parse_user(reply.lines.front()))
+            {
+                web_known = true;
+                web_user = *user;
+            }
+        }
+    }
     // The host offers the report for some seconds after each of these.
     bool served = false;
     if (serve_ && running)
@@ -498,6 +526,8 @@ void Host::poll()
     state_.devices = devices;
     state_.streams_known = streams_known;
     state_.streams = streams;
+    state_.web_known = web_known;
+    state_.web_user = web_user;
 }
 
 bool Host::wait_control(bool open, int timeout_ms)
@@ -609,6 +639,36 @@ void Host::do_end_stream(const Job &job)
         finish(job.b + " is not streaming anymore", true);
     else
         finish("Could not end the stream of " + job.b, false);
+}
+
+// The request line holds the password: it goes to the socket and nowhere else, and the messages (which
+// finish() logs) hold only the user name and the host's reason.
+void Host::do_web(const Job &job)
+{
+    const bool set = job.kind == Kind::web_set;
+    set_busy(set ? "Setting the web page's login..." : "Turning the web page off...");
+    // The host hashes the password before it answers.
+    const io::Exchange reply =
+        io::exchange(kControlPort, set ? web::set_request(job.a, job.b) : std::string(web::kOff), any_line, 15000);
+    if (reply.connect_refused)
+    {
+        finish("Start the host first: it keeps the web page's login", false);
+        return;
+    }
+    if (reply.lines.empty())
+    {
+        finish("Web page: " + (reply.error.empty() ? std::string("no answer") : reply.error), false);
+        return;
+    }
+    const web::Outcome outcome = web::parse_outcome(reply.lines.front());
+    if (outcome.unknown)
+        finish("The running host has no web page yet. Restart it to use this app's host.", false);
+    else if (!outcome.ok)
+        finish("Web page: " + outcome.reason, false);
+    else if (set)
+        finish("The web page is on. Log in as " + job.a + ".", true);
+    else
+        finish("The web page is off", true);
 }
 
 void Host::do_start()
@@ -772,6 +832,7 @@ std::string Host::build_report()
                       std::to_string(kStreamPort) + " " + port(kStreamPort));
     if (!snap.poll_error.empty())
         line("Control socket", snap.poll_error);
+    line("Web page", !snap.web_known ? "unknown" : snap.web_user.empty() ? "off" : "on");
 
     out += "\nPaths (this title's view, uid " + std::to_string(::getuid()) + "):\n";
     for (const char *path : {kDataDir, kConfPath, kHostElf, kHostDiagPath, kHostLogPath, "/data/pldmgr", autoload::kListPath,
