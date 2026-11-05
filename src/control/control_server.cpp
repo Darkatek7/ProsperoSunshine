@@ -114,6 +114,15 @@ std::string ControlServer::handle_locked(const std::string &line, Caller caller)
         BOOST_LOG(info) << "Control: PIN submitted for a pending pairing"sv;
         return nvhttp::pin(id, pin, name) ? "OK paired" : "ERR pairing failed";
     }
+    if (command == "CANCELPIN") {
+        std::string id;
+        in >> id;
+        if (id.empty()) return "ERR usage: CANCELPIN <id>";
+        // Moonlight gets a refusal at once instead of waiting for a PIN that never comes.
+        if (!nvhttp::cancel_pairing(id)) return "ERR no such request";
+        BOOST_LOG(info) << "Control: a pending pairing was denied"sv;
+        return "OK cancelled";
+    }
     if (command == "DEVICES") {
         // Every device with a running session streams, also one that joined another's stream.
         std::vector<std::string> live;
@@ -219,13 +228,22 @@ std::string ControlServer::handle_locked(const std::string &line, Caller caller)
     if (command == "WEBLOGIN") {
         std::string action, user;
         in >> action;
-        if (action.empty()) return "OK user=" + web_login::user();
-        if (action == "OFF") {
-            web_login::clear();
-            BOOST_LOG(info) << "Control: the web page's login was removed"sv;
-            return "OK off";
+        if (action.empty())
+            return "OK user=" + web_login::stored_user() + " enabled=" + (web_login::enabled() ? "1" : "0");
+        if (action == "ON" || action == "OFF") {
+            const bool on = action == "ON";
+            if (!on && web_login::stored_user().empty()) return "OK off";  // off already
+            const std::string problem = web_login::set_enabled(on);
+            if (!problem.empty()) return "ERR " + problem;
+            BOOST_LOG(info) << "Control: the web page was turned "sv << (on ? "on"sv : "off"sv);
+            return on ? "OK on" : "OK off";
         }
-        if (action != "SET") return "ERR usage: WEBLOGIN [SET <user> <password> | OFF]";
+        if (action == "FORGET") {
+            web_login::forget();
+            BOOST_LOG(info) << "Control: the web page's login was removed"sv;
+            return "OK forgotten";
+        }
+        if (action != "SET") return "ERR usage: WEBLOGIN [SET <user> <password> | ON | OFF | FORGET]";
         in >> user;
         std::string password;
         std::getline(in, password);

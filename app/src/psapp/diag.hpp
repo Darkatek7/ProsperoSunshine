@@ -101,6 +101,16 @@ std::string pairing_label(const std::string &name);
 std::string suggested_device_name(const std::string &name, const std::vector<std::string> &paired);
 // What was typed as a device's name, without what the app's scan of the pairing file trips over.
 std::string clean_device_name(const std::string &text);
+// Denying a request (CANCELPIN on the control socket): the line to send, and what the host's answer means.
+enum class DenyOutcome
+{
+    denied,      // "OK cancelled": Moonlight was told no
+    gone,        // "ERR no such request": it ended or was answered meanwhile
+    unsupported, // "ERR unknown command": a host from before CANCELPIN
+    failed,      // anything else, or no answer
+};
+std::string deny_request(const std::string &id);
+DenyOutcome parse_deny(const std::string &answer);
 
 // A paired device, as the host's DEVICES lists it. The UUID and the mode stay in the app: neither
 // goes into the report.

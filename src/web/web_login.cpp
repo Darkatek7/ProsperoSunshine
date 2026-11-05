@@ -60,17 +60,9 @@ const std::optional<web::Login> &login() {
     }
     return current;
 }
-}  // namespace
 
-std::string set(std::string_view user, std::string_view password) {
-    if (!web::valid_user(user)) return "the user name takes 1 to 32 letters, digits, '.', '_' or '-'";
-    if (!web::valid_password(password)) return "the password takes 8 to 128 printable characters";
-    web::Login next{std::string(user), random_hex(16), iterations, {}};
-    if (next.salt.empty()) return "no random numbers";
-    next.hash = pbkdf2(password, next.salt, next.iterations);
-    if (next.hash.empty()) return "hashing failed";
-    std::lock_guard lock(mutex);
-    // Written beside it and renamed, so a cut never leaves half a file.
+// Under the mutex. Written beside the file and renamed, so a cut never leaves half a file; the empty string on success.
+std::string store(web::Login next) {
     const auto path = file();
     const auto temp = std::filesystem::path(path.string() + ".tmp");
     {
@@ -86,8 +78,28 @@ std::string set(std::string_view user, std::string_view password) {
     ++changes;
     return {};
 }
+}  // namespace
 
-void clear() {
+std::string set(std::string_view user, std::string_view password) {
+    if (!web::valid_user(user)) return "the user name takes 1 to 32 letters, digits, '.', '_' or '-'";
+    if (!web::valid_password(password)) return "the password takes 8 to 128 printable characters";
+    web::Login next{std::string(user), random_hex(16), iterations, {}, true};
+    if (next.salt.empty()) return "no random numbers";
+    next.hash = pbkdf2(password, next.salt, next.iterations);
+    if (next.hash.empty()) return "hashing failed";
+    std::lock_guard lock(mutex);
+    return store(std::move(next));
+}
+
+std::string set_enabled(bool on) {
+    std::lock_guard lock(mutex);
+    if (!login()) return "no login";
+    web::Login next = *login();
+    next.enabled = on;
+    return store(std::move(next));
+}
+
+void forget() {
     std::lock_guard lock(mutex);
     std::error_code ec;
     std::filesystem::remove(file(), ec);
@@ -98,7 +110,17 @@ void clear() {
 
 std::string user() {
     std::lock_guard lock(mutex);
+    return login() && login()->enabled ? login()->user : std::string();
+}
+
+std::string stored_user() {
+    std::lock_guard lock(mutex);
     return login() ? login()->user : std::string();
+}
+
+bool enabled() {
+    std::lock_guard lock(mutex);
+    return login() && login()->enabled;
 }
 
 bool verify(std::string_view user, std::string_view password) {
@@ -107,7 +129,7 @@ bool verify(std::string_view user, std::string_view password) {
         std::lock_guard lock(mutex);
         copy = login();
     }
-    if (!copy) return false;
+    if (!copy || !copy->enabled) return false;
     return web::check(*copy, user, password, pbkdf2);
 }
 

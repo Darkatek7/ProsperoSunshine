@@ -50,10 +50,11 @@ constexpr int kSwitchTiles = PS_EXP_SWITCH_COUNT + 1;
 constexpr int kTiles = kFirstSwitch + kSwitchTiles;
 // Under the tiles: Save, Save and restart, Revert, and at the right end the web page.
 constexpr int kSettingsActions = 4;
-// The web page's sheet: its height, and where its rows start in it.
-constexpr float kWebSheetHeight = 730.0f;
-constexpr float kWebRowsTop = 470.0f;
-constexpr int kWebRows = 3;
+// The web page's sheet: its height, where its rows start in it, and their pitch.
+constexpr float kWebSheetHeight = 770.0f;
+constexpr float kWebRowsTop = 474.0f;
+constexpr float kWebRowStep = 68.0f;
+constexpr int kWebRows = 4;
 
 float approach(float value, float target, float dt, float speed)
 {
@@ -87,7 +88,11 @@ Screen::Screen(Host &host, const hui::ui::Fonts &fonts) : host_(host), fonts_(fo
     keyboard_.style.theme.on_primary = Color::rgb(0x2a1604);
     keyboard_.style.panel = false;
     keyboard_.style.surfaces = false; // flat caps: frosted keys pick up the sun behind the sheet
+    // The kit's standard set (Square deletes, Triangle is space, L2 shift) with R2 as Done, as on the console's own
+    // keyboard; the symbols move to R1, which no keyboard sheet uses. Options stays Done too (handle_sheet).
     keyboard_.style.bindings = hui::ui::KeyboardBindings::standard();
+    keyboard_.style.bindings.layout = InputAction::page_next;
+    keyboard_.style.bindings.done = InputAction::jump_next;
 }
 
 // ---- state helpers ----------------------------------------------------------------------------
@@ -206,7 +211,7 @@ Rect Screen::settings_action_rect(int index) const
 Rect Screen::web_row_rect(int index) const
 {
     const float top = 540.0f - kWebSheetHeight / 2.0f + 10.0f;
-    return {660.0f, top + kWebRowsTop + static_cast<float>(index) * 76.0f, 600.0f, 64.0f};
+    return {660.0f, top + kWebRowsTop + static_cast<float>(index) * kWebRowStep, 600.0f, 60.0f};
 }
 
 Rect Screen::focus_rect() const
@@ -435,6 +440,22 @@ void Screen::handle_home(const hui::InputFrame &input, hui::ui::Feedback &feedba
             feedback.play(hui::audio::Cue::modal_open);
         }
     }
+    else if (input.is_pressed(InputAction::west) && home_row_ == 1 && home_card_ < cards)
+    {
+        // Square denies a request, after asking, as Square removes a paired device.
+        if (busy())
+        {
+            feedback.play(hui::audio::Cue::error);
+            return;
+        }
+        const Pairing &p = snap_.pairings[static_cast<std::size_t>(home_card_)];
+        target_ = p.id;
+        target_name_ = diag::pairing_label(p.name);
+        pair_pin_.clear();
+        open_sheet(Sheet::deny_pairing, "Deny " + target_name_ + "?",
+                   "Moonlight is told no at once. It can ask again later.", "");
+        feedback.play(hui::audio::Cue::modal_open);
+    }
     if (input.is_pressed(InputAction::north))
     {
         host_.refresh();
@@ -654,6 +675,7 @@ void Screen::open_tile(int index)
 void Screen::open_sheet(Sheet kind, const std::string &title, const std::string &help, const std::string &initial)
 {
     web_step_ = WebStep::none; // the web page's steps set it again after this
+    show_password_ = false;
     sheet_ = kind;
     sheet_drawn_ = kind;
     sheet_title_ = title;
@@ -723,10 +745,13 @@ bool Screen::web_row_enabled(WebRow row) const
     const bool host = snap_.polled && snap_.running && snap_.web_known;
     switch (row)
     {
+    case WebRow::toggle:
+        // Turn off while on; Turn on needs a stored login and a host that keeps one while off.
+        return host && (snap_.web_enabled || (snap_.web_switchable && !snap_.web_user.empty()));
     case WebRow::set_login:
         return host;
-    case WebRow::turn_off:
-        return host && !snap_.web_user.empty();
+    case WebRow::forget:
+        return host && snap_.web_switchable && !snap_.web_user.empty();
     case WebRow::close:
         return true;
     }
@@ -787,10 +812,20 @@ void Screen::handle_web(const hui::InputFrame &input, hui::ui::Feedback &feedbac
         feedback.play(hui::audio::Cue::error);
         return;
     }
-    if (row == WebRow::turn_off)
+    if (row == WebRow::toggle)
     {
-        host_.web_login_off();
-        feedback.play(hui::audio::Cue::select);
+        if (snap_.web_enabled)
+            host_.web_login_off();
+        else
+            host_.web_login_on();
+        feedback.play(hui::audio::Cue::toggle);
+        return;
+    }
+    if (row == WebRow::forget)
+    {
+        open_sheet(Sheet::forget_web, "Forget the login?",
+                   "The web page turns off. Turning it on again needs a new login.", "");
+        feedback.play(hui::audio::Cue::modal_open);
         return;
     }
     open_sheet(Sheet::text, "Web page user", "1 to 32 letters, digits, '.', '_' or '-'. You log in with it.", snap_.web_user);
@@ -919,6 +954,46 @@ void Screen::handle_sheet(const hui::InputFrame &input, hui::ui::Feedback &feedb
         }
         return;
     }
+    if (sheet_ == Sheet::deny_pairing)
+    {
+        if (input.is_pressed(InputAction::confirm))
+        {
+            if (busy())
+            {
+                feedback.play(hui::audio::Cue::error);
+                return;
+            }
+            host_.deny_pairing(target_, target_name_);
+            feedback.play(hui::audio::Cue::select);
+            close_sheet();
+        }
+        else if (input.is_pressed(InputAction::back))
+        {
+            feedback.play(hui::audio::Cue::modal_close);
+            close_sheet();
+        }
+        return;
+    }
+    if (sheet_ == Sheet::forget_web)
+    {
+        if (input.is_pressed(InputAction::confirm))
+        {
+            if (busy())
+            {
+                feedback.play(hui::audio::Cue::error);
+                return;
+            }
+            host_.web_login_forget();
+            feedback.play(hui::audio::Cue::select);
+            open_web();
+        }
+        else if (input.is_pressed(InputAction::back))
+        {
+            feedback.play(hui::audio::Cue::modal_close);
+            open_web();
+        }
+        return;
+    }
     if (sheet_ == Sheet::remove_device)
     {
         if (input.is_pressed(InputAction::confirm))
@@ -1007,6 +1082,11 @@ void Screen::handle_sheet(const hui::InputFrame &input, hui::ui::Feedback &feedb
     }
 
     // The keyboard: the PIN and the host name.
+    if (web_step_ == WebStep::password && input.is_pressed(InputAction::r3))
+    {
+        show_password_ = !show_password_;
+        feedback.play(hui::audio::Cue::toggle);
+    }
     const hui::ui::Event event = keyboard_.handle(input, feedback);
     for (int i = 0; i < keyboard_.erased() && !buffer_.empty(); ++i)
         buffer_.pop_back();
@@ -1055,8 +1135,7 @@ void Screen::handle_sheet(const hui::InputFrame &input, hui::ui::Feedback &feedb
         }
         // The password next; the name stays for it.
         const std::string user = buffer_;
-        open_sheet(Sheet::text, "Password for " + user,
-                   "8 to 128 characters, spaces count. It is not shown here and goes only to the host.", "");
+        open_sheet(Sheet::text, "Password for " + user, "8 to 128 characters, spaces count. It goes only to the host.", "");
         web_step_ = WebStep::password;
         web_user_ = user;
         keyboard_.style.max_length = static_cast<int>(web::kPasswordMax);
@@ -1293,11 +1372,32 @@ void Screen::draw_footer(hui::gfx::DrawList &list, std::uint32_t glass) const
     layout.text_size = 22.0f;
     if (sheet_ == Sheet::pin || sheet_ == Sheet::text)
     {
+        // The password step adds R3 to show it; the other bound keys carry their button on the key.
+        const bool password = web_step_ == WebStep::password;
         const hui::ui::Hint hints[] = {{hui::ui::Button::cross, "Type"},
                                        {hui::ui::Button::square, "Delete"},
-                                       {hui::ui::Button::options, "Done"},
+                                       {hui::ui::Button::right_stick, show_password_ ? "Hide password" : "Show password"},
+                                       {hui::ui::Button::r2, "Done"},
                                        {hui::ui::Button::circle, "Cancel"}};
-        hui::ui::draw_hints(list, fonts_, glyphs, hints, 4, 1824.0f, true, layout);
+        if (password)
+        {
+            hui::ui::draw_hints(list, fonts_, glyphs, hints, 5, 1824.0f, true, layout);
+        }
+        else
+        {
+            const hui::ui::Hint plain[] = {hints[0], hints[1], hints[3], hints[4]};
+            hui::ui::draw_hints(list, fonts_, glyphs, plain, 4, 1824.0f, true, layout);
+        }
+    }
+    else if (sheet_ == Sheet::deny_pairing)
+    {
+        const hui::ui::Hint hints[] = {{hui::ui::Button::cross, "Deny"}, {hui::ui::Button::circle, "Keep waiting"}};
+        hui::ui::draw_hints(list, fonts_, glyphs, hints, 2, 1824.0f, true, layout);
+    }
+    else if (sheet_ == Sheet::forget_web)
+    {
+        const hui::ui::Hint hints[] = {{hui::ui::Button::cross, "Forget"}, {hui::ui::Button::circle, "Keep it"}};
+        hui::ui::draw_hints(list, fonts_, glyphs, hints, 2, 1824.0f, true, layout);
     }
     else if (sheet_ == Sheet::number)
     {
@@ -1346,10 +1446,21 @@ void Screen::draw_footer(hui::gfx::DrawList &list, std::uint32_t glass) const
     }
     else if (page_ == Page::home)
     {
-        const hui::ui::Hint hints[] = {{hui::ui::Button::cross, "Select"},
+        // On a pairing card, Square denies the request.
+        const bool on_request = home_row_ == 1 && home_card_ < visible_pairings();
+        const hui::ui::Hint hints[] = {{hui::ui::Button::cross, on_request ? "Enter PIN" : "Select"},
+                                       {hui::ui::Button::square, "Deny"},
                                        {hui::ui::Button::triangle, "Reload"},
                                        {hui::ui::Button::l1, "Pages", hui::ui::Button::r1}};
-        hui::ui::draw_hints(list, fonts_, glyphs, hints, 3, 1824.0f, true, layout);
+        if (on_request)
+        {
+            hui::ui::draw_hints(list, fonts_, glyphs, hints, 4, 1824.0f, true, layout);
+        }
+        else
+        {
+            const hui::ui::Hint plain[] = {hints[0], hints[2], hints[3]};
+            hui::ui::draw_hints(list, fonts_, glyphs, plain, 3, 1824.0f, true, layout);
+        }
     }
     else if (page_ == Page::diagnostics)
     {
@@ -1543,6 +1654,10 @@ void Screen::draw_home(hui::gfx::DrawList &list, std::uint32_t glass) const
         list.rounded_rect(pill, 23.0f, kAccent.with_alpha(0.18f + 0.3f * f));
         hui::ui::draw_button(list, fonts_, hui::ui::GlyphStyle::dark(), hui::ui::Button::cross, pill.x + 16.0f, pill.cy(), 28.0f);
         hui::ui::text(list, fonts_.semibold, "Enter PIN", pill.x + 58.0f, pill.cy() + 8.0f, 23.0f, kInk);
+        const Rect deny{pill.x + pill.w + 16.0f, pill.y, 150.0f, pill.h};
+        list.rounded_rect(deny, 23.0f, Color::rgb(0xffffff, 0.06f + 0.06f * f));
+        hui::ui::draw_button(list, fonts_, hui::ui::GlyphStyle::dark(), hui::ui::Button::square, deny.x + 16.0f, deny.cy(), 28.0f);
+        hui::ui::text(list, fonts_.semibold, "Deny", deny.x + 58.0f, deny.cy() + 8.0f, 23.0f, kMuted);
     }
     if (snap_.pairings.size() > static_cast<std::size_t>(cards))
         hui::ui::text(list, fonts_.regular, "+" + std::to_string(snap_.pairings.size() - static_cast<std::size_t>(cards)) + " more",
@@ -1712,7 +1827,7 @@ void Screen::draw_settings(hui::gfx::DrawList &list, std::uint32_t glass) const
                 tile_amount_[kTiles + 1], enabled);
     draw_button(list, glass, settings_action_rect(2), static_cast<int>(Icon::undo), "Revert changes", false,
                 tile_amount_[kTiles + 2], dirty());
-    const bool web_on = snap_.web_known && !snap_.web_user.empty();
+    const bool web_on = snap_.web_known && snap_.web_enabled;
     draw_button(list, glass, settings_action_rect(3), static_cast<int>(Icon::globe),
                 !snap_.web_known ? "Web page" : web_on ? "Web page: on" : "Web page: off", false, tile_amount_[kTiles + 3], true);
 
@@ -1743,8 +1858,9 @@ void Screen::draw_settings(hui::gfx::DrawList &list, std::uint32_t glass) const
         extra = !snap_.polled            ? std::string()
                 : !snap_.running         ? std::string("Host stopped")
                 : !snap_.web_known       ? std::string("Not in this host")
+                : snap_.web_enabled      ? "On for " + snap_.web_user
                 : snap_.web_user.empty() ? std::string("Off: no login")
-                                         : "On for " + snap_.web_user;
+                                         : "Off, login " + snap_.web_user + " kept";
     }
     const Rect bar{96.0f, 840.0f, 1728.0f, 64.0f};
     glass_card(list, glass, bar, 18.0f, 0.0f);
@@ -1838,7 +1954,7 @@ void Screen::draw_page(hui::gfx::DrawList &list, std::uint32_t glass) const
 void Screen::draw_web(hui::gfx::DrawList &list, const Rect &card) const
 {
     // Whether it is on and for whom.
-    const bool on = snap_.web_known && !snap_.web_user.empty();
+    const bool on = snap_.web_known && snap_.web_enabled;
     std::string state;
     Color dot = kFaint;
     if (!snap_.polled)
@@ -1847,9 +1963,14 @@ void Screen::draw_web(hui::gfx::DrawList &list, const Rect &card) const
         state = "The host is stopped. Start it to set up the web page.";
     else if (!snap_.web_known)
         state = "The running host has no web page. Restart it to use this app's host.";
-    else if (!on)
+    else if (!on && snap_.web_user.empty())
     {
         state = "Off. Set a login to turn it on.";
+        dot = kMuted;
+    }
+    else if (!on)
+    {
+        state = "Off. The login " + snap_.web_user + " is kept for Turn on.";
         dot = kMuted;
     }
     else
@@ -1879,8 +2000,9 @@ void Screen::draw_web(hui::gfx::DrawList &list, const Rect &card) const
     const Rect h = sheet_highlight_.rect(time_);
     list.rounded_rect(h, 18.0f, kAccent.with_alpha(0.18f));
     list.bordered_rect(h, 18.0f, kClear, 2.5f, kAccent);
-    const char *labels[kWebRows] = {snap_.web_user.empty() ? "Set login" : "Change login", "Turn off", "Close"};
-    const Icon row_icons[kWebRows] = {Icon::lock, Icon::power, Icon::undo};
+    const char *labels[kWebRows] = {snap_.web_enabled ? "Turn off" : "Turn on",
+                                    snap_.web_user.empty() ? "Set login" : "Change login", "Forget login", "Close"};
+    const Icon row_icons[kWebRows] = {Icon::power, Icon::lock, Icon::trash, Icon::undo};
     for (int i = 0; i < kWebRows; ++i)
     {
         const Rect row = web_row_rect(i);
@@ -1903,7 +2025,8 @@ void Screen::draw_sheet(hui::gfx::DrawList &list, std::uint32_t glass) const
     float height = keys ? 780.0f : 640.0f;
     if (sheet_drawn_ == Sheet::choice && spec != nullptr)
         height = 300.0f + static_cast<float>(spec->choices.size() + 1) * 76.0f;
-    if (sheet_drawn_ == Sheet::remove_device || sheet_drawn_ == Sheet::end_stream)
+    if (sheet_drawn_ == Sheet::remove_device || sheet_drawn_ == Sheet::end_stream || sheet_drawn_ == Sheet::deny_pairing ||
+        sheet_drawn_ == Sheet::forget_web)
         height = 270.0f;
     if (sheet_drawn_ == Sheet::web)
         height = kWebSheetHeight;
@@ -1920,8 +2043,8 @@ void Screen::draw_sheet(hui::gfx::DrawList &list, std::uint32_t glass) const
 
     const bool device_sheet = sheet_drawn_ == Sheet::devices || sheet_drawn_ == Sheet::remove_device || renaming_ ||
                               sheet_drawn_ == Sheet::streams || sheet_drawn_ == Sheet::end_stream;
-    const bool web_sheet = sheet_drawn_ == Sheet::web || web_step_ != WebStep::none;
-    const Icon icon = sheet_drawn_ == Sheet::pin ? Icon::link
+    const bool web_sheet = sheet_drawn_ == Sheet::web || sheet_drawn_ == Sheet::forget_web || web_step_ != WebStep::none;
+    const Icon icon = sheet_drawn_ == Sheet::pin || sheet_drawn_ == Sheet::deny_pairing ? Icon::link
                       : web_sheet                ? Icon::globe
                       : device_sheet             ? Icon::monitor
                       : spec != nullptr          ? kOptionIcons[std::min<std::size_t>(6, static_cast<std::size_t>(spec - option_specs().data()))]
@@ -1959,16 +2082,31 @@ void Screen::draw_sheet(hui::gfx::DrawList &list, std::uint32_t glass) const
         float w = 0.0f;
         if (web_step_ == WebStep::password)
         {
-            // Never the password itself: a dot a character, as many as fit, and the count on the right.
+            // A dot a character, as many as fit, and the count on the right; R3 shows the text itself (its end where
+            // it is longer than the field), which is only drawn, never logged.
             const float count_w = buffer_.empty() ? 0.0f
                                                   : hui::ui::text(list, fonts_.regular, std::to_string(buffer_.size()),
                                                                   field.x + field.w - 30.0f, field.y + 60.0f, 24.0f, kMuted,
                                                                   Align::right);
-            const int fit = static_cast<int>((field.w - 90.0f - count_w) / 22.0f);
-            const int dots = std::min(static_cast<int>(buffer_.size()), std::max(0, fit));
-            for (int i = 0; i < dots; ++i)
-                list.circle(field.x + 40.0f + static_cast<float>(i) * 22.0f, field.cy(), 7.0f, kInk);
-            w = static_cast<float>(dots) * 22.0f;
+            const float room = field.w - 90.0f - count_w;
+            if (show_password_)
+            {
+                std::size_t from = 0;
+                while (from < buffer_.size() && fonts_.semibold.measure(buffer_.substr(from), 38.0f) > room)
+                    ++from;
+                // The ellipsis takes about one character's room.
+                const std::string shown =
+                    from == 0 ? buffer_ : "\xE2\x80\xA6" + buffer_.substr(std::min(from + 1, buffer_.size()));
+                w = hui::ui::text(list, fonts_.semibold, shown, field.x + 30.0f, field.y + 62.0f, 38.0f, kInk);
+            }
+            else
+            {
+                const int fit = static_cast<int>(room / 22.0f);
+                const int dots = std::min(static_cast<int>(buffer_.size()), std::max(0, fit));
+                for (int i = 0; i < dots; ++i)
+                    list.circle(field.x + 40.0f + static_cast<float>(i) * 22.0f, field.cy(), 7.0f, kInk);
+                w = static_cast<float>(dots) * 22.0f;
+            }
         }
         else
         {

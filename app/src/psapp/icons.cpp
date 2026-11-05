@@ -136,6 +136,17 @@ void draw(hui::gfx::DrawList &l, Icon icon, float cx, float cy, float size, Colo
         stroke_arc(l, cx, Y(19.0f), 4.0f * s, w, -0.75f, 1.5f, c);
         l.circle(cx, Y(19.0f), 1.6f * s, c);
         break;
+    case Icon::trash:
+        line(4.0f, 6.5f, 20.0f, 6.5f);
+        line(9.5f, 6.5f, 9.5f, 3.5f);
+        line(9.5f, 3.5f, 14.5f, 3.5f);
+        line(14.5f, 3.5f, 14.5f, 6.5f);
+        line(6.5f, 6.5f, 7.5f, 20.5f);
+        line(7.5f, 20.5f, 16.5f, 20.5f);
+        line(16.5f, 20.5f, 17.5f, 6.5f);
+        line(10.5f, 10.0f, 10.5f, 17.0f);
+        line(13.5f, 10.0f, 13.5f, 17.0f);
+        break;
     }
 }
 

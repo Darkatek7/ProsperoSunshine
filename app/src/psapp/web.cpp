@@ -98,12 +98,34 @@ std::string set_request(std::string_view user, std::string_view password)
     return line;
 }
 
-std::optional<std::string> parse_user(const std::string &line)
+std::optional<LoginState> parse_state(const std::string &line)
 {
     static const std::string prefix = "OK user=";
     if (line.rfind(prefix, 0) != 0)
         return std::nullopt;
-    return line.substr(prefix.size());
+    // The user name is one word; the fields after it are "key=value" words.
+    const std::string rest = line.substr(prefix.size());
+    const std::size_t space = rest.find(' ');
+    LoginState state;
+    state.user = rest.substr(0, space);
+    std::size_t at = space;
+    while (at != std::string::npos)
+    {
+        const std::size_t start = at + 1;
+        at = rest.find(' ', start);
+        const std::string field = rest.substr(start, at == std::string::npos ? std::string::npos : at - start);
+        if (field.rfind("enabled=", 0) == 0)
+        {
+            state.switchable = true;
+            state.enabled = field == "enabled=1";
+        }
+    }
+    if (!state.switchable)
+        state.enabled = !state.user.empty();
+    // Without a login there is nothing to turn on.
+    if (state.user.empty())
+        state.enabled = false;
+    return state;
 }
 
 Outcome parse_outcome(const std::string &line)

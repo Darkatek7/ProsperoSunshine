@@ -33,12 +33,22 @@ std::string address(const std::string &ip, std::uint16_t port);
 
 // The control lines. The request with the password must never be logged.
 inline constexpr const char *kQuery = "WEBLOGIN\n";
-inline constexpr const char *kOff = "WEBLOGIN OFF\n";
+inline constexpr const char *kOn = "WEBLOGIN ON\n";         // with the stored login
+inline constexpr const char *kOff = "WEBLOGIN OFF\n";       // keeps the login (an older host removes it)
+inline constexpr const char *kForget = "WEBLOGIN FORGET\n"; // removes the login
 std::string set_request(std::string_view user, std::string_view password);
 
-// The answer to kQuery, "OK user=<name>" (an empty name: no login, the page is off). Nothing for any
-// other line, which is what a host without the web page answers ("ERR unknown command").
-std::optional<std::string> parse_user(const std::string &line);
+// The answer to kQuery.
+struct LoginState
+{
+    std::string user;        // the stored login's user; empty: none
+    bool enabled = false;    // the page is on
+    bool switchable = false; // the host keeps a login while the page is off (ON, OFF and FORGET)
+};
+// "OK user=<name> enabled=<0|1>"; a host from before the switch answers "OK user=<name>", where a name
+// means on and OFF removes the login. Nothing for any other line, which is what a host without the web
+// page answers ("ERR unknown command").
+std::optional<LoginState> parse_state(const std::string &line);
 
 // The answer to a SET or OFF: ok, or the host's reason ("ERR <reason>" without the "ERR ").
 struct Outcome

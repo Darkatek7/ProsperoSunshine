@@ -458,6 +458,22 @@ std::string clean_device_name(const std::string &text)
     return name.substr(first, name.find_last_not_of(' ') - first + 1);
 }
 
+std::string deny_request(const std::string &id)
+{
+    return "CANCELPIN " + id + "\n";
+}
+
+DenyOutcome parse_deny(const std::string &answer)
+{
+    if (answer == "OK cancelled" || answer == "OK")
+        return DenyOutcome::denied;
+    if (answer == "ERR no such request")
+        return DenyOutcome::gone;
+    if (answer == "ERR unknown command")
+        return DenyOutcome::unsupported;
+    return DenyOutcome::failed;
+}
+
 bool parse_device_line(const std::string &line, Device *device)
 {
     if (line.rfind("OK ", 0) != 0)

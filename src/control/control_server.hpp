@@ -6,6 +6,8 @@
 //   PAIRINGS                    -> "OK <id> <client name>" per pending request, then "END"
 //   PIN <pin> [name]            -> approves the only pending request ("OK paired" / "ERR ...")
 //   PIN <id> <pin> [name]       -> approves the given request
+//   CANCELPIN <id>              -> denies the given request; Moonlight is told at once ("OK cancelled" /
+//                                  "ERR no such request" when it is gone or the id is wrong)
 //   DEVICES                     -> "OK <uuid> <streaming 0|1> <last mode or -> <name>" per paired device, then "END"
 //   STREAMS                     -> per running stream "OK uuid=<uuid> address=<ip> codec=<H.264|HEVC|AV1> hdr=<0|1>
 //                                  mode=<WxH@fps> kbps=<n> secs=<n> pads=<n> role=<capture|joined|starting> channel=<0|1|->
@@ -16,9 +18,12 @@
 //   UNPAIR <uuid>               -> removes a paired device and ends its stream ("OK removed" / "ERR ...")
 //   REPORT                      -> "OK port=<n>": for some seconds, <appdata>/diagnostics.txt is on that port
 //   AUTOLOAD [ON|OFF]           -> the Payload Manager's autoload list, for the app (autoload_host.hpp)
-//   WEBLOGIN                    -> "OK user=<name>", empty without a login (the web page is off then)
-//   WEBLOGIN SET <user> <pass>  -> sets the web page's login and turns it on; the password is the rest of the line
-//   WEBLOGIN OFF                -> removes the login and turns the web page off
+//   WEBLOGIN                    -> "OK user=<name> enabled=<0|1>": the stored login, also while the page is off; the
+//                                  name is empty without one (enabled=0 then). The page serves while enabled=1.
+//   WEBLOGIN SET <user> <pass>  -> sets the web page's login and turns it on ("OK set"); the password is the rest of the line
+//   WEBLOGIN ON                 -> turns the page on with the stored login ("OK on" / "ERR no login")
+//   WEBLOGIN OFF                -> turns the page off and keeps the login ("OK off", also without one)
+//   WEBLOGIN FORGET             -> removes the login, which turns the page off ("OK forgotten")
 //   QUIT                        -> raises the host's shutdown event
 // It has no authentication, so it listens on 127.0.0.1 only (the PS5 app); the empty file
 // <appdata>/control_lan opens it to the LAN for development on trusted networks (ROADMAP P9.1).

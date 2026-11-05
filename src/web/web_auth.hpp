@@ -15,18 +15,20 @@ namespace prospero::web {
 
 using Clock = std::chrono::steady_clock;
 
-// The login the owner sets in the app. The password is kept only as a salted PBKDF2-SHA256 hash.
+// The login the owner sets in the app. The password is kept only as a salted PBKDF2-SHA256 hash. Turning the page off keeps
+// the login (enabled false), so it can be turned on again without typing it anew.
 struct Login {
     std::string user;
     std::string salt;
     unsigned iterations = 0;
     std::string hash;  // hex
+    bool enabled = true;
 };
 
 // One "key=value" line each; unknown keys are ignored, so the format can grow.
 inline std::string format_login(const Login &login) {
     return "user=" + login.user + "\nsalt=" + login.salt + "\niterations=" + std::to_string(login.iterations) +
-           "\nhash=" + login.hash + "\n";
+           "\nhash=" + login.hash + "\nenabled=" + (login.enabled ? "1" : "0") + "\n";
 }
 
 inline std::optional<Login> parse_login(std::string_view text) {
@@ -42,6 +44,11 @@ inline std::optional<Login> parse_login(std::string_view text) {
         if (key == "user") login.user = value;
         else if (key == "salt") login.salt = value;
         else if (key == "hash") login.hash = value;
+        else if (key == "enabled") {
+            // A file from before the switch has no such line and stays on.
+            if (value != "0" && value != "1") return std::nullopt;
+            login.enabled = value == "1";
+        }
         else if (key == "iterations") {
             unsigned n = 0;
             for (const char c : value) {

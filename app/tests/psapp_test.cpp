@@ -517,6 +517,14 @@ static void diag_tests()
     CHECK(diag::clean_device_name("  PS Vita ") == "PS Vita");
     CHECK(diag::clean_device_name("a\"b\\c[d]") == "abc[d]");
     CHECK(diag::clean_device_name("   ").empty());
+
+    // Denying a pending request.
+    CHECK(diag::deny_request("0123abcd") == "CANCELPIN 0123abcd\n");
+    CHECK(diag::parse_deny("OK cancelled") == diag::DenyOutcome::denied);
+    CHECK(diag::parse_deny("ERR no such request") == diag::DenyOutcome::gone);
+    CHECK(diag::parse_deny("ERR unknown command") == diag::DenyOutcome::unsupported);
+    CHECK(diag::parse_deny("ERR usage: CANCELPIN <id>") == diag::DenyOutcome::failed);
+    CHECK(diag::parse_deny("") == diag::DenyOutcome::failed);
     {
         diag::Device d;
         CHECK(diag::parse_device_line("OK 4D7B-22 0 1280x720@60 PS Vita", &d));
@@ -607,15 +615,36 @@ static void web_tests()
     CHECK(web::set_request("u", " lead1234") == "WEBLOGIN SET u  lead1234\n");
     CHECK(std::string(web::kQuery) == "WEBLOGIN\n");
     CHECK(std::string(web::kOff) == "WEBLOGIN OFF\n");
-    CHECK(web::parse_user("OK user=admin") == std::optional<std::string>("admin"));
-    CHECK(web::parse_user("OK user=") == std::optional<std::string>(""));
-    CHECK(!web::parse_user("ERR unknown command"));
-    CHECK(!web::parse_user("OK"));
-    CHECK(!web::parse_user(""));
+    CHECK(std::string(web::kOn) == "WEBLOGIN ON\n");
+    CHECK(std::string(web::kForget) == "WEBLOGIN FORGET\n");
+
+    // The state: a host with the switch says enabled=, also for a login kept while the page is off.
+    const auto on = web::parse_state("OK user=admin enabled=1");
+    CHECK(on && on->user == "admin" && on->enabled && on->switchable);
+    const auto kept = web::parse_state("OK user=admin enabled=0");
+    CHECK(kept && kept->user == "admin" && !kept->enabled && kept->switchable);
+    const auto none = web::parse_state("OK user= enabled=0");
+    CHECK(none && none->user.empty() && !none->enabled && none->switchable);
+    const auto odd_none = web::parse_state("OK user= enabled=1"); // nothing to be on with
+    CHECK(odd_none && odd_none->user.empty() && !odd_none->enabled);
+    const auto later = web::parse_state("OK user=admin enabled=1 more=x"); // fields added later are skipped
+    CHECK(later && later->user == "admin" && later->enabled);
+    // A host from before the switch: a name means on, and OFF removes the login.
+    const auto old_on = web::parse_state("OK user=admin");
+    CHECK(old_on && old_on->user == "admin" && old_on->enabled && !old_on->switchable);
+    const auto old_off = web::parse_state("OK user=");
+    CHECK(old_off && old_off->user.empty() && !old_off->enabled && !old_off->switchable);
+    CHECK(!web::parse_state("ERR unknown command"));
+    CHECK(!web::parse_state("OK"));
+    CHECK(!web::parse_state(""));
 
     const web::Outcome set = web::parse_outcome("OK set");
     CHECK(set.ok && !set.unknown && set.reason.empty());
     CHECK(web::parse_outcome("OK off").ok);
+    CHECK(web::parse_outcome("OK on").ok);
+    CHECK(web::parse_outcome("OK forgotten").ok);
+    const web::Outcome no_login = web::parse_outcome("ERR no login");
+    CHECK(!no_login.ok && !no_login.unknown && no_login.reason == "no login");
     const web::Outcome bad = web::parse_outcome("ERR the password takes 8 to 128 printable characters");
     CHECK(!bad.ok && !bad.unknown && bad.reason == "the password takes 8 to 128 printable characters");
     const web::Outcome old = web::parse_outcome("ERR unknown command");

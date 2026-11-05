@@ -21,6 +21,23 @@ int main() {
     assert(!parse_login("user=a\nsalt=b\niterations=x\nhash=c\n"));
     assert(!parse_login("user=a\nsalt=b\niterations=99999999999\nhash=c\n"));
 
+    // On or off: written as enabled=, a file from before the switch is on, and turning it off keeps the rest.
+    assert(parsed->enabled);
+    assert(format_login(login).find("\nenabled=1\n") != std::string::npos);
+    const auto old_file = parse_login("user=a\nsalt=b\niterations=3\nhash=c\n");
+    assert(old_file && old_file->enabled);
+    Login off = login;
+    off.enabled = false;
+    assert(format_login(off).find("\nenabled=0\n") != std::string::npos);
+    const auto parsed_off = parse_login(format_login(off));
+    assert(parsed_off && !parsed_off->enabled && parsed_off->user == "owner" && parsed_off->hash == login.hash &&
+           parsed_off->salt == login.salt && parsed_off->iterations == login.iterations);
+    assert(parse_login("user=a\nsalt=b\niterations=3\nhash=c\nenabled=1\n")->enabled);
+    assert(!parse_login("user=a\r\nsalt=b\r\niterations=3\r\nhash=c\r\nenabled=0\r\n")->enabled);
+    assert(!parse_login("user=a\nsalt=b\niterations=3\nhash=c\nenabled=yes\n"));
+    assert(!parse_login("user=a\nsalt=b\niterations=3\nhash=c\nenabled=\n"));
+    assert(!parse_login("enabled=1\n"));
+
     // Names and passwords.
     assert(valid_user("owner") && valid_user("my.name_1-2"));
     assert(!valid_user("") && !valid_user("two words") && !valid_user("a/b") && !valid_user(std::string(33, 'a')));
