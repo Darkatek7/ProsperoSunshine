@@ -1,0 +1,33 @@
+ProsperoSunshine: don't crash when the control port can't be bound
+
+net::host_create read host->socket right after enet_host_create, which returns nullptr when the UDP socket can't be
+created or bound, for example when another process holds the control port. The RTSP thread then crashed with a null
+read during ANNOUNCE, which took the whole host down (GitHub issue 24, firmware 11.40). Now host_create logs the port
+and errno and returns the empty host, so control_server_t::bind fails, start_broadcast logs "Couldn't bind Control
+server" and the session ends while the host keeps running.
+
+--- a/src/network.cpp
++++ b/src/network.cpp
+@@ -4,6 +4,8 @@
+  */
+ // standard includes
+ #include <algorithm>
++#include <cerrno>
++#include <cstring>
+ #include <sstream>
+ 
+ // local includes
+@@ -218,6 +220,13 @@
+ 
+     // Maximum of 128 clients, which should be enough for anyone
+     auto host = host_t {enet_host_create(af == IPV4 ? AF_INET : AF_INET6, &addr, 128, 0, 0, 0)};
++    if (!host) {
++      // ENet returns nullptr when the socket can't be created or bound (another process holds the port). The caller
++      // reports that and ends the session; reading host->socket here would crash the host.
++      const int bind_errno = errno;
++      BOOST_LOG(error) << "ENet couldn't open UDP port "sv << port << ": "sv << std::strerror(bind_errno) << " (errno "sv << bind_errno << ')';
++      return host;
++    }
+ 
+     // Enable opportunistic QoS tagging (automatically disables if the network appears to drop tagged packets)
+     enet_socket_set_option(host->socket, ENET_SOCKOPT_QOS, 1);
