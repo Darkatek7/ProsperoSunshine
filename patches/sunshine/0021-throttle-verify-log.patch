@@ -1,0 +1,85 @@
+ProsperoSunshine: log a failed client certificate check once, not on every poll
+
+Moonlight asks every host it knows for /serverinfo every few seconds. A client that is not paired (or no longer is)
+fails the certificate check on each of these, and upstream logged a warning every time, which filled sunshine.log.
+
+The warning is now logged the first time per client certificate, then at most once every 10 minutes with the number of
+failures in between; the others go to the debug level. The line names the certificate by a short fingerprint and the
+client's address. The rate limit is src/net/log_throttle.hpp (64 certificates, the one seen longest ago is forgotten),
+tested in tests/log_throttle_test.cpp.
+
+--- a/src/nvhttp.cpp
++++ b/src/nvhttp.cpp
+@@ -31,6 +31,7 @@
+ #include "globals.h"
+ #include "httpcommon.h"
+ #include "logging.h"
++#include "net/log_throttle.hpp"
+ #include "network.h"
+ #include "nvhttp.h"
+ #include "platform/common.h"
+@@ -1739,6 +1740,44 @@
+    */
+   std::pair<bool, std::string> get_client_status(const std::string_view cert_pem);
+ 
++  namespace {
++    /**
++     * @brief Unpaired clients that failed the certificate check: the first failure per certificate is logged, then
++     *        one every 10 minutes. Moonlight polls /serverinfo every few seconds, each poll used to log a warning.
++     * @note Used under `client_auth_mutex()`.
++     */
++    prospero::LogThrottle verify_error_log {10min, 64};
++
++    /**
++     * @brief A short fingerprint of a client certificate: the first 8 bytes of its SHA-256, in hex.
++     */
++    std::string certificate_fingerprint(X509 *certificate) {
++      std::array<unsigned char, EVP_MAX_MD_SIZE> digest {};
++      unsigned int size = 0;
++      if (X509_digest(certificate, EVP_sha256(), digest.data(), &size) != 1 || size < 8) {
++        return "unknown"s;
++      }
++      std::string fingerprint;
++      for (std::size_t i = 0; i < 8; ++i) {
++        fingerprint += std::format("{:02x}", digest[i]);
++      }
++      return fingerprint;
++    }
++
++    /**
++     * @brief The address of the other end of a TLS connection, or an empty string.
++     */
++    std::string peer_address(SSL *ssl) {
++      boost::asio::ip::tcp::endpoint endpoint;
++      auto size = static_cast<socklen_t>(endpoint.capacity());
++      if (getpeername(SSL_get_fd(ssl), endpoint.data(), &size) != 0) {
++        return {};
++      }
++      endpoint.resize(size);
++      return net::addr_to_normalized_string(endpoint.address());
++    }
++  }  // namespace
++
+   void start() {
+     platf::set_thread_name("nvhttp");
+     auto shutdown_event = mail::man->event<bool>(mail::shutdown);
+@@ -1791,7 +1830,18 @@
+       std::lock_guard lock {client_auth_mutex()};
+       auto err_str = verify_client_certificate(x509.get());
+       if (err_str) {
+-        BOOST_LOG(warning) << "SSL Verification error :: "sv << err_str;
++        auto fingerprint = certificate_fingerprint(x509.get());
++        auto address = peer_address(ssl);
++        std::size_t held_back = 0;
++        auto line = std::format("SSL Verification error :: {} (client {}{}{})", err_str, fingerprint, address.empty() ? "" : " at ", address);
++        if (verify_error_log.due(fingerprint, std::chrono::steady_clock::now(), held_back)) {
++          if (held_back) {
++            line += std::format(", {} more since the last line", held_back);
++          }
++          BOOST_LOG(warning) << line;
++        } else {
++          BOOST_LOG(debug) << line;
++        }
+ 
+         return verified;
+       }

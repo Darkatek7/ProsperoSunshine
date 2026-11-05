@@ -18,6 +18,16 @@
   socket has `WEBLOGIN [SET <user> <password>|OFF]` for it (GitHub issue #21). Measured on 13.00, and the page was checked in
   a phone's browser.
 
+### Fixed
+
+- **A broken `sunshine_state.json` no longer stops pairing.** After a console hang a tester's file was all zeros; from
+  then on the host advertised an empty `uniqueid` and never saved a new pairing again. The file is now written to a
+  temporary file, synced and renamed over the old one, so a cut leaves the old or the new file. One that can't be read is
+  kept as `sunshine_state.json.corrupt` and the host starts over without pairings (PR #27).
+- **An unpaired Moonlight no longer fills `sunshine.log`.** Moonlight asks for `/serverinfo` every few seconds, and each
+  failed certificate check logged a warning. Now it is logged once per client certificate, with its address, and then at
+  most every 10 minutes.
+
 ## 0.3.2 (2026-11-05)
 
 ### Changed
