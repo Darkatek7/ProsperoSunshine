@@ -32,6 +32,42 @@
     Notices stay at the top of the window.
   - In the app's keyboards R2 is **Done**, and R3 shows the web page's password while it is typed.
   - Clients over ps5-tailscale all arrive as 127.0.0.1, so they share one lockout; the log and the README say so.
+- **A friend without a controller can play with keyboard and mouse.** While a device has no controller, its keyboard and
+  mouse become a controller of its own instead of going to the console's keyboard and mouse, which few games take. If you
+  already play with keyboard and mouse on a PC, the controls should feel like home: W A S D move, the mouse turns the
+  camera, the mouse buttons are the triggers, Esc pauses, Tab opens the map. It takes a player slot like a controller,
+  from the first key or mouse button that is one of its buttons (moving the mouse alone doesn't, so someone who only
+  watches takes no slot), and the console asks "Who's using this controller?" unless its device is the host. PS (F1) and
+  Create (F2) work for the host only, unless **PS for all players** is on. Moonlight's own shortcuts (Ctrl+Alt+Shift and a
+  key) stay Moonlight's. The arrows, Enter, Backspace and Esc walk menus the same in every profile, and holding the key
+  right of the space bar (right Alt, AltGr, a Mac's ⌘) gives the menu keys: `standard`'s, with W A S D on the D-pad, which
+  every menu takes.
+- **Seven profiles, one per way of playing:** `standard`, `action` (third-person and souls-likes: Space jumps, Shift
+  dodges, Ctrl walks), `shooter` (Shift runs, C crouches, R reloads, the wheel changes weapon), `driving` (W and S are
+  throttle and brake and ease in, A and D steer), `fighting` (W A S D on the D-pad, U I O / J K L the attacks),
+  `platformer` (arrows and Z X C) and `sports` (the right stick also on the numeric keypad). Pick one with
+  `keyboard_mouse_profile` in `sunshine.conf`; the tables are in the README.
+- **A vehicle layer for open worlds:** in `standard`, `action` and `shooter`, Caps Lock turns W and S into throttle and
+  brake, A and D into steering and Space into the handbrake, for games where you walk and drive (GTA, Cyberpunk, Far Cry),
+  and its light shows when it is on. The other keys and the mouse stay as on foot.
+- **The profile by game (advanced, off by default):** with `keyboard_mouse_profile_by_game = 1`, the game in front picks
+  the profile from a map of about 3,000 PS4 and PS5 games the host carries, made from Wikidata (CC0) by
+  `tools/title_profiles.py`: Gran Turismo 7 drives, Tekken 8 fights, Elden Ring plays as action. With no game running
+  (none open, not even suspended behind the home screen) the keys are the menu keys whatever the profile, so W A S D move
+  on the home screen.
+- **Your own list:** `keyboard_profiles.txt` next to `sunshine.conf` picks the profile per title, for any title ID, also
+  homebrew and forwarders (say, your own Mario Kart 8 Deluxe forwarder as `driving`), and holds profiles of your own with
+  some keys changed. The host writes your installed games into it as comments, each with the profile it would get.
+  `docs/keyboard-profiles.md` has every table and the file's format.
+- **A controller connected later takes that player's place quietly.** It gets the same slot and user, so the console
+  doesn't ask again; from then on the keyboard and mouse are the console's keyboard and mouse again. If it drops, the
+  console says so, and the next key takes a controller again. A second controller on that device is a new player.
+- **The mouse sensitivity, set while playing:** Ctrl+Alt and the wheel turn it up or down a step, from 10 % to 1000 %.
+  Nothing shows on the console, which everyone streaming would see. The host keeps it per device and profile, as it
+  depends on the device and the game.
+- **Settings in `sunshine.conf`:** `keyboard_mouse_pad = 0` keeps the old behaviour, `keyboard_mouse_profile` picks the
+  profile, `keyboard_mouse_sensitivity` (in percent, 100 by default) is where a new device's mouse starts. Not in the app
+  yet.
 
 ### Fixed
 

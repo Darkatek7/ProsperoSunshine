@@ -7,6 +7,8 @@ that archive and fails if a licence text is missing. Licence analysis: `docs/lic
 
 ```
 prospero_sunshine.elf
+firmware_probe.elf           docs/firmware-probe.md; sent to the ELF loader by hand or by the host's PROBE
+host_restart.elf             restarts the host without the app
 SHA256SUMS
 CHANGELOG.md
 LICENSE                      GPL-3.0 text of ProsperoSunshine (repository file LICENSE)

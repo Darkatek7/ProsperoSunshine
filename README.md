@@ -20,7 +20,8 @@ patches) for the console and replaces the parts that talk to PC hardware:
 - **Audio:** game audio as PCM from the same capture service, encoded by Sunshine's Opus path. Stereo, or 5.1 and 7.1 with
   the experimental Surround switch.
 - **Input:** a native virtual DualSense per Moonlight gamepad, with touchpad and motion sensors, and a virtual keyboard and
-  mouse for Moonlight's keyboard and mouse.
+  mouse for Moonlight's keyboard and mouse. A device without a controller plays with its keyboard and mouse as a
+  controller of its own.
 - **App list:** "PS5 Screen" and the console's installed games, with their covers. Sunshine's web UI is replaced by the PS5
   app and a small [web page](#web-page) of the host's own, which is off until you set a login.
 
@@ -134,6 +135,74 @@ It is off until you set a login, and nothing listens on its port before that.
   then a banner says the saved settings aren't applied yet. The Experimental switches stay in the app, where they are
   checked against the firmware.
 
+## Keyboard and mouse as a controller
+
+A device without a controller plays with its keyboard and mouse: they become a controller of their own, a player like any
+other. If you already play with keyboard and mouse on a PC, it should feel familiar: W A S D move, the mouse turns the
+camera, the mouse buttons are the triggers, Esc pauses. The controller appears with the first key or mouse button that is
+one of its buttons; moving the mouse or turning the wheel alone doesn't add it, so someone who only watches takes no player
+slot. Like any controller, it plays as the console's user if its device is the host (see above), and otherwise the
+console asks "Who's using this controller?".
+
+| Keys (every profile) | Controller |
+|---|---|
+| Enter | ✕ |
+| Backspace | ○ |
+| Esc | Options (pause) |
+| Tab | touchpad (the map or inventory in most games) |
+| F1 / F2 | PS / Create, the host only (as on every controller, see above) |
+
+The rest depends on the profile, `keyboard_mouse_profile` in `sunshine.conf` (`standard` unless set). They follow the
+keyboard layouts of PC games of each kind; [docs/keyboard-profiles.md](docs/keyboard-profiles.md) has every table and why.
+All of it is optional: without settings, `standard` applies.
+
+| Profile | For | What changes |
+|---|---|---|
+| `standard` | menus, most games | W A S D left stick, I J K L right stick, arrows D-pad, Space ✕, Q □, E △, Z / C L1 / R1, 1 / 3 L2 / R2, F / G L3 / R3, T touchpad; mouse: right stick, left button R2, right L2, middle R3, side buttons L1 / R1, wheel D-pad |
+| `action` | third-person action, open worlds, souls-likes | Space ✕ (jump), Shift ○ (dodge, run), Q or R □, E △, Ctrl walks (half the stick); left mouse button R1, right L1, side buttons L2 / R2 |
+| `shooter` | shooters (Call of Duty, Battlefield, Destiny 2, Apex, Far Cry, Cyberpunk) | Space ✕ (jump), Shift L3 (run), C or Ctrl ○ (crouch), E, F or R □ (interact, reload), V R3 (melee), Q L1, G R1; the wheel changes weapon (△) |
+| `driving` | racing | W R2 (throttle), S L2 (brake), A / D steer, all three easing in over 0.2 s; Space ○ (handbrake), Shift △, E / Q ✕ / □ (gears), F L1 (look back), Ctrl halves throttle, brake and steering; the mouse doesn't steer |
+| `fighting` | fighting games | W A S D and Space (up) on the D-pad, exact diagonals; U I O □ △ R1, J K L ✕ ○ R2, P L1, ; L2; no mouse |
+| `platformer` | 2D platformers and metroidvanias | arrows move, Z ✕, X □, C R2, A ○, S L2, D △, E R1, Tab L1, I touchpad; no mouse |
+| `sports` | football, basketball | W A S D left stick, I J K L or the numeric keypad right stick, Space ✕, F or Num 5 □, R △, E ○, Shift R2 (sprint), Ctrl L2, Q L1; no mouse |
+
+**Vehicles:** in `standard`, `action` and `shooter`, Caps Lock switches a vehicle layer on and off, for games where you
+walk and drive, and its light shows when it is on. Only W (throttle, R2), S (brake, L2), A and D (steering), Space
+(handbrake, R1) and Ctrl (half throttle, brake and steering) change, easing in as in `driving`; every other key and the
+mouse stay as on foot, so getting out, shooting from the car and the camera are where they were. The host can't see
+whether you are in a car, so switch it yourself; if the light is the wrong way round, press Caps Lock twice. It suits GTA V
+and the GTA Trilogy (Modern controls), Cyberpunk 2077, Far Cry 5 and 6, Watch Dogs, Days Gone, Death Stranding and Fortnite;
+there the handbrake may sit on another button (○ in Far Cry 6 and Days Gone, L1 in Fortnite). Leave it off for horses
+(Red Dead Redemption 2, Ghost of Tsushima, Horizon's mounts, Assassin's Creed): they ride like walking. Planes and
+helicopters have no layer of their own yet.
+
+A key gives full deflection, two keys on one stick a diagonal, and opposite keys cancel out, also on the D-pad. The mouse
+turns the right stick faster the faster it moves and lets go shortly after it stops. **Ctrl+Alt and the wheel** set how
+fast while you play, a step at a time (nothing shows on the console, which everyone sees); the host keeps it per device and
+profile. Where Ctrl is a button (`shooter`, `sports`), press Alt before Ctrl, or Ctrl adds the controller like any button. It works in Moonlight's relative mouse mode (Ctrl+Alt+Shift+M), which games use.
+Each wheel step is a short tap on the D-pad. Moonlight's own shortcuts (Ctrl+Alt+Shift and a key) stay Moonlight's.
+
+**Menus:** the arrows, Enter, Backspace and Esc are the same in every profile. Hold **the key right of the space bar**
+(right Alt or AltGr, the right ⌘ on a Mac) for the menu keys in any profile: `standard`'s, with W A S D on the D-pad,
+which every menu takes; some, the console's own among them, ignore the stick. With no game running (none open, not even
+suspended behind the home screen), the keys are the menu keys anyway.
+
+**Typing:** the keyboard is a controller here, so it doesn't type into the console's text fields. Use the console's
+on-screen keyboard (✕ on Enter picks a letter), connect a controller, or set `keyboard_mouse_pad = 0` to send the keys to the
+console as before.
+
+**By game:** with `keyboard_mouse_profile_by_game = 1` (off by default) the running game picks the profile, from a map
+of about 3,000 PS4 and PS5 games made from Wikidata. `keyboard_profiles.txt` next to `sunshine.conf` is your own list,
+which counts either way: a profile per title (any title ID, also homebrew and forwarders, such as your own Mario Kart 8
+Deluxe forwarder set to `driving`) and profiles of your own with some keys changed. The host writes your installed games
+into it as comments, so choosing one is removing a `#`. See [docs/keyboard-profiles.md](docs/keyboard-profiles.md).
+
+**When a controller connects** to that device, it takes the keyboard's place quietly: the same player, so the console
+doesn't ask again. From then on the keyboard and mouse are the console's keyboard and mouse, as before. If that
+controller drops (a flat battery, a loose cable), the console says so; the next key on the keyboard takes a controller
+again. `keyboard_mouse_pad = 0` in `sunshine.conf` turns all of this off. The settings aren't in the app yet; the host
+reads them when it starts.
+
 ## Playing over the internet
 
 A friend in another house can join like a device on the LAN. A contributor played that way with two of four players over the
@@ -222,6 +291,12 @@ address.
   stream ends. The console takes keys in its menus and in text fields once the on-screen keyboard is open. The mouse works
   only in games that support one (Planet Zoo does); the console's browser ignores it. Keys are sent by position as on a
   US keyboard, and the console's keyboard language setting decides what they type. Tested on 13.00 only.
+- A device without a controller doesn't get the console's keyboard and mouse: its keyboard and mouse are a controller of
+  its own ([Keyboard and mouse as a controller](#keyboard-and-mouse-as-a-controller)), also for the host, who then can't
+  type into text fields with the keyboard; use the console's on-screen keyboard, connect a controller, or set
+  `keyboard_mouse_pad = 0` in `sunshine.conf`. In Moonlight's absolute mouse mode the mouse stops at the edge of the
+  window. Keys are remapped in `keyboard_profiles.txt` only, not yet in the app, and a game's own dead zone and top turning
+  speed make the mouse feel unlike on a PC.
 - Sound is stereo unless you turn on **Surround** under Experimental in the app's Settings. With it, a Moonlight that asks for
   5.1 or 7.1 gets the console's own multichannel sound. Which channel goes to which speaker is a guess so far (the order of the
   console's 8-channel audio output): the console used for testing outputs stereo, and then only front left and right carry
@@ -304,7 +379,7 @@ switch off and choose **Save and restart host**.
 ## Development control socket
 
 The host listens on TCP **47995** with a line-based control socket: `STATUS`, `PAIRINGS`, `PIN [<id>] <pin> [name]`,
-`DEVICES`, `STREAMS`, `ENDSTREAM <uuid>`, `RENAME <uuid> <name>`, `UNPAIR <uuid>`, `REPORT`, `AUTOLOAD [ON|OFF]`,
+`DEVICES`, `STREAMS`, `ENDSTREAM <uuid>`, `RENAME <uuid> <name>`, `UNPAIR <uuid>`, `REPORT`, `AUTOLOAD [ON|OFF]`, `RELISTEN`, `PROBE`,
 `CANCELPIN <id>`, `WEBLOGIN [SET <user> <password>|ON|OFF|FORGET]` and `QUIT`. It is **unauthenticated**. By default it listens on `127.0.0.1` only (ROADMAP P9.1), so the app on the
 console can use it but the LAN cannot. Creating the empty file `/data/prosperosunshine/control_lan` re-enables LAN
 access for development. Do this only on trusted networks.

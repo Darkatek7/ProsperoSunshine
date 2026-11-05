@@ -2,8 +2,10 @@
 // Host entry point; replaces Sunshine's main.cpp/entry_handler.cpp. Starts the GameStream HTTP(S)
 // and RTSP services with the PS5 platform layer and offers a small line-based control socket for
 // development (ROADMAP P2.3): pairing PIN, status and shutdown.
+#include "apps/titles.hpp"
 #include "control/control_server.hpp"
 #include "control/listener_watch.hpp"
+#include "input/title_profile.hpp"
 #include "platform/ps5/mdns_responder.hpp"
 #include "web/web_server.hpp"
 #include "platform/ps5/capture.h"
@@ -78,6 +80,23 @@ bool wait_or_ports_lost(const std::shared_ptr<safe::event_t<bool>> &shutdown_eve
     }
     return false;
 }
+
+// The keyboard pad's own list (input/title_profile.hpp): the installed titles it doesn't mention yet go in as commented
+// lines with the profile the title map gives them, so the player picks one by removing a #. The player's lines stay.
+void note_installed_titles(const std::filesystem::path &file) {
+    std::vector<prospero::ListedTitle> listed;
+    for (const auto &title : prospero::list_titles("/user")) {
+        const auto meta = prospero::read_title_meta("/user", title.id);
+        const auto choice = prospero::choose_profile(title.id, meta ? meta->concept_id : 0, meta ? meta->english : title.name,
+                                                     {}, prospero::Profile::standard);
+        const bool mapped = choice.source != prospero::ProfileSource::chosen;
+        listed.push_back({title.id, title.name, mapped ? std::optional{choice.profile} : std::nullopt});
+    }
+    const auto added = prospero::profile_list_additions(file_handler::read_file(file.c_str()), listed);
+    if (added.empty()) return;
+    std::ofstream(file, std::ios::app) << added;
+    BOOST_LOG(info) << "keyboard_profiles.txt: noted the installed titles it didn't mention"sv;
+}
 }
 
 int main(int argc, char *argv[]) {
@@ -135,6 +154,8 @@ int main(int argc, char *argv[]) {
     auto proc_guard = proc::init();
     reed_solomon_init();
     auto input_guard = input::init();
+    if (const auto it = settings.find("keyboard_mouse_pad"); prospero::keyboard_pad_enabled(it == settings.end() ? "" : it->second))
+        note_installed_titles(std::filesystem::path(config::sunshine.config_file).parent_path() / "keyboard_profiles.txt");
     if (video::probe_encoders()) {
         ps_diag_log("ProsperoSunshine: host video capture unavailable\n");
         BOOST_LOG(fatal) << "Video capture unavailable"sv;

@@ -2,6 +2,7 @@
 #include "control/control_server.hpp"
 #include "control/autoload_host.hpp"
 #include "control/stream_list.hpp"
+#include "host_control.hpp"
 #include "sunshine/video_ps5.hpp"
 #include "web/web_login.hpp"
 #include "src/logging.h"
@@ -252,6 +253,15 @@ std::string ControlServer::handle_locked(const std::string &line, Caller caller)
         if (!problem.empty()) return "ERR " + problem;
         BOOST_LOG(info) << "Control: the web page's login was set"sv;
         return "OK set";
+    }
+    if (command == "PROBE") {
+        // The firmware probe stops the host, and with it any stream, so not while one runs. It runs as its own payload:
+        // it asks STATUS again, quits this host and starts the installed one at the end (docs/firmware-probe.md).
+        if (rtsp_stream::session_count() > 0) return "ERR a stream is running";
+        std::string detail;
+        if (!host_control::send_elf(host_control::kProbe, detail)) return "ERR " + detail;
+        BOOST_LOG(info) << "Control: the firmware probe was sent to the ELF loader"sv;
+        return "OK started";
     }
     if (command == "QUIT") {
         shutdown_->raise(true);

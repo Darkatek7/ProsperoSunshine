@@ -1,0 +1,128 @@
+ProsperoSunshine: the keyboard pad's profile picked by the game in front
+
+The keyboard and mouse of a client without a controller map with the profile of the game in front: from the player's
+own list, keyboard_profiles.txt next to sunshine.conf ("PPSA01234 = driving" per line, any title ID including homebrew
+and forwarders, and profiles of their own in [name] sections), and with keyboard_mouse_profile_by_game = 1 (off by
+default) from the title map tools/title_profiles.py makes from Wikidata, by title ID, the Store concept in param.json,
+or the English name. Anything else keeps keyboard_mouse_profile, and with no game running (none open, not even
+suspended behind the home screen) it is the menu keys, standard's with W A S D on the D-pad, whatever the profile. The
+running title (sceLncUtilGetAppIdOfRunningBigApp, through ps_title_running) is looked up at most every two seconds
+while the keys and mouse are in use, the list read anew when it changes; a new profile lets go of what the old one
+held.
+
+--- a/src/input.cpp
++++ b/src/input.cpp
+@@ -33,10 +33,13 @@
+ #include "config.h"
+ #include "file_handler.h"
+ #include "globals.h"
++#include "apps/titles.hpp"
+ #include "input.h"
+ #include "input/keyboard_pad.hpp"
++#include "input/title_profile.hpp"
+ #include "logging.h"
+ #include "platform/common.h"
++#include "platform/ps5/title_launch.h"
+ #include "thread_pool.h"
+ #include "utility.h"
+ 
+@@ -219,6 +222,8 @@
+   static int mouse_sensitivity = prospero::default_sensitivity;  ///< The mouse's speed on the right stick, in percent, until a client sets its own.
+   static prospero::SensitivityList mouse_sensitivities;  ///< What each client set per profile with Ctrl+Alt and the wheel.
+   static std::filesystem::path sensitivity_file;  ///< keyboard_sensitivity.txt, next to sunshine.conf.
++  static bool keyboard_pad_by_game = false;  ///< keyboard_mouse_profile_by_game: the game in front picks the profile.
++  static std::filesystem::path keyboard_profile_list;  ///< The player's own title → profile list, next to sunshine.conf.
+ 
+   /**
+    * @brief Release all platform resources associated with a virtual gamepad.
+@@ -843,13 +848,63 @@
+   }
+ 
+   /**
+-   * @brief The name of the profile the keyboard pad plays with.
++   * @brief The name of the profile the keyboard pad plays with: a profile's, or one of the player's own.
+    *
+    * @param pad The stream's keyboard pad.
+    * @return The name, as keyboard_sensitivity.txt keeps it.
+    */
+   std::string keyboard_pad_profile_name(const prospero::KeyboardPad &pad) {
+-    return std::string(prospero::profile_name(pad.profile()));
++    return pad.own_profile() ? pad.own_profile()->name : std::string(prospero::profile_name(pad.profile()));
++  }
++
++  /**
++   * @brief The keyboard pad profile for the running game.
++   *
++   * ProsperoSunshine: the player's own list (keyboard_profiles.txt), then, with keyboard_mouse_profile_by_game on, the
++   * title map from Wikidata (src/input/title_profiles.hpp), else keyboard_mouse_profile. With no game running (none open,
++   * not even suspended behind the home screen) it is the menu keys, whatever the profile: W A S D on the D-pad. The
++   * running title is sceLncUtilGetAppIdOfRunningBigApp's, so a suspended game keeps its profile in the console's menus,
++   * and an app of the console's such as Settings is a title without one (keyboard_mouse_profile). The game is looked up
++   * at most every two seconds while the keys and the mouse are in use, and its profile and the list anew only when it
++   * changes, so an edited list counts from the next game on.
++   *
++   * @return The profile to play with.
++   */
++  prospero::ProfileChoice keyboard_pad_game_profile() {
++    static std::chrono::steady_clock::time_point checked;
++    static std::string title;
++    static std::string list_text;
++    static prospero::ProfileList list;
++    static prospero::ProfileChoice choice {prospero::Profile::standard, nullptr, prospero::ProfileSource::chosen, true};
++    const auto now = std::chrono::steady_clock::now();
++    if (checked != std::chrono::steady_clock::time_point {} && now - checked < 2s) {
++      return choice;
++    }
++    checked = now;
++    char running[16];
++    const std::string in_front = ps_title_running(running) > 0 ? running : "";
++    if (in_front == title) {
++      return choice;
++    }
++    title = in_front;
++    if (auto text = file_handler::read_file(keyboard_profile_list.c_str()); text != list_text) {
++      list_text = std::move(text);
++      list = prospero::parse_profile_list(list_text);
++      for (const auto &problem : list.problems) {
++        BOOST_LOG(warning) << "keyboard_profiles.txt "sv << problem;
++      }
++    }
++    if (title.empty()) {
++      choice = {prospero::Profile::standard, nullptr, prospero::ProfileSource::chosen, true};
++      BOOST_LOG(info) << "Keyboard pad: menu keys, no game running"sv;
++      return choice;
++    }
++    const auto meta = prospero::read_title_meta("/user", title);
++    choice = prospero::choose_profile(title, meta ? meta->concept_id : 0, meta ? meta->english : "", list, keyboard_pad_profile,
++                                      keyboard_pad_by_game);
++    BOOST_LOG(info) << "Keyboard pad profile "sv << (choice.own ? choice.own->name : std::string(prospero::profile_name(choice.profile)))
++                    << " for "sv << title << ", from "sv << prospero::source_name(choice.source);
++    return choice;
+   }
+ 
+   /**
+@@ -858,7 +913,9 @@
+    * @param input Stream input state.
+    */
+   void update_keyboard_pad_profile(input_t &input) {
+-    input.keyboard_pad.set_profile(keyboard_pad_profile);
++    const auto choice = keyboard_pad_game_profile();
++    input.keyboard_pad.set_profile(choice.profile, choice.own);
++    input.keyboard_pad.set_outside_game(choice.outside);
+     input.keyboard_pad.set_sensitivity(
+       mouse_sensitivities.find(input.keyboard_pad_client, keyboard_pad_profile_name(input.keyboard_pad)).value_or(mouse_sensitivity)
+     );
+@@ -2760,9 +2817,12 @@
+     if (!profile.empty() && !prospero::parse_profile(profile)) {
+       BOOST_LOG(warning) << "Unknown keyboard_mouse_profile ["sv << profile << "], using standard"sv;
+     }
++    keyboard_pad_by_game = setting("keyboard_mouse_profile_by_game") == "1";
++    keyboard_profile_list = std::filesystem::path(config::sunshine.config_file).parent_path() / "keyboard_profiles.txt";
+     if (keyboard_pad_on) {
+       BOOST_LOG(info) << "A client without a controller plays with its keyboard and mouse, profile "sv
+-                      << prospero::profile_name(keyboard_pad_profile) << ", mouse sensitivity "sv << mouse_sensitivity << '%';
++                      << prospero::profile_name(keyboard_pad_profile) << (keyboard_pad_by_game ? " unless the game picks one"sv : ""sv)
++                      << ", mouse sensitivity "sv << mouse_sensitivity << '%';
+     } else {
+       BOOST_LOG(info) << "Keyboard and mouse go to the shared keyboard and mouse (keyboard_mouse_pad = 0)"sv;
+     }

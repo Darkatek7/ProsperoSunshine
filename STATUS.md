@@ -504,6 +504,106 @@ Die Grenze hängt also am Bit je Bild, nicht am HEVC-Budget `cfg+0x10c`, das H.2
 
 Nicht geprüft: echtes Moonlight auf dem Build mit Deckel, ein kleiner Modus, der seinen Deckel wirklich ausschöpft, eine echte PS Vita auf 13.00 (auf 10.20 lief sie, „Modi unter 1080p auf Firmware 10.20“).
 
+### Firmware-Sonde auf 10.20 und 10.40 (2026-11-05, Bericht eines Mitwirkenden)
+
+`firmware_probe.elf` aus diesem Stand (`docs/firmware-probe.md`), je ein Lauf ohne Optionen und ohne Proben, auf dem
+Startbildschirm. PS5 Pro mit 10.20: Host 0.3.1 lief, `QUIT` hielt ihn an, am Ende lief das installierte ELF wieder. PS5 mit
+10.40: kein Host lief, keiner wurde gestartet. Beide Läufe 147 s, der Startbildschirm blieb im Vordergrund. Hier nicht
+nachgemessen; die Angaben stammen aus den beiden `report.txt`.
+
+| | 10.20 (Pro) | 10.40 |
+| --- | --- | --- |
+| Datensatz des Hosts | `0x2c8` (−0x18), als einzige Größe von −0x40 bis +0x20 angenommen; Baukasten = `configure()` | ebenso |
+| H.264 1080p60, 3 s | 180 Bilder, 34 Slices je Bild | 180 Bilder, 34 Slices |
+| HEVC 8/10 Bit nur mit `cfg+0x24` | 17 Slices | 17 Slices |
+| QP 20/24 in `0xc4`/`0xc8` gegen ohne | 3,5-fache Bytes; 52 scheitert an `Start` (`0x80c78000`) | 4,8-fache Bytes; 52 ebenso |
+| `SetVideoBitrate` von 6 auf 20 Mbit/s | danach 1 Bild, dann `0x80c78000` | 0 Bilder, dann `0x80c78000` |
+| ResourceArbitrator | per NID, Firmware in der Tabelle | per NID (`0xde0`, `0xfe0`, `0x1220`, `0x1360`), 10.40 nicht in der Tabelle |
+
+- Auf beiden lehnt der Validator dieselben Wörter ab (`0x80`, `0x188`, `0x1fc`, `0x2b0`), die Bitratenfelder von 13.00
+  lassen `Start` scheitern, ebenso H.264 10 Bit (`0x80c70004`) und HEVC mit den Remote-Play-Feldern von 13.00 (`0x81950001`).
+- Alle zwölf Modi liefern Bilder (360p60, 540p60, 720p60, 1080p30, 1440p60, 2160p60 in H.264 und HEVC).
+- **H.264-Slices:** Die Slice-Felder von 0.3.1 (`0x40`/`0x44`/`0x48`) nimmt die Firmware an, die Zahl der Slices ändern
+  sie nicht: 360p 23, 540p und 1080p 34, 720p, 1440p und 2160p 45. HEVC: 6, 9, 12, 17, 23, 34. Über 32 Slices lehnen die
+  Hardware-Decoder von FFmpeg unter Windows ab.
+
+### Profil je Spiel und eigene Liste (2026-11-04, 10.20, PS5 Pro)
+
+Gemessen wie oben (Moonlight für Linux, Hostlog), Host aus `keyboard-mouse-pad` mit Patch 0016 und 0017,
+`keyboard_mouse_profile_by_game = 1`.
+
+- **Liste beim Start:** Der Host legte `keyboard_profiles.txt` an, mit den 41 installierten Titeln als Kommentarzeilen:
+  Spiele, Homebrew (auch mit eigenen Präfixen wie `WBRT`), Forwarder und die Steam-Spiele von Playden (`FAKE…`). Titel aus
+  der Karte stehen mit ihrem Profil darin, etwa `PPSA10595 = fighting # TEKKEN™8 (from the title map)`.
+- **Eigene Liste:** `PPSA03527 = shooter` aktiviert: „Keyboard pad profile shooter for PPSA03527, from your list“. Danach
+  ein eigenes Profil `[gta]` auf Basis von `shooter` (Leertaste springt, Shift rennt, E und F steigen ein, R lädt nach,
+  das Rad wechselt die Waffe): „Keyboard pad profile gta for PPSA03527, from your list“; laut Besitzer wie in der
+  PC-Fassung.
+- **Karte:** It Takes Two (`PPSA02343`) und Elden Ring (`PPSA04609`) bekamen `action`, „from the title map“.
+- **Abdeckung der installierten Spiele:** Von etwa 25 PS5-Spielen auf der Konsole fand die Karte 18 (Titel-ID, Store-Konzept
+  aus `param.json` oder englischer Name). Es fehlen u. a. F1 25, EA FC 26, WWE 2K26 und GTA III Definitive Edition, die bei
+  Wikidata nicht als PS5-Spiele mit Genre stehen; für sie ist die eigene Liste da.
+- Unit-Tests `title_profile_test` (Titelschlüssel, Namen, sortierte Tabellen, Liste, eigene Profile, neue Titel) und
+  `titles_test` (Store-Konzept, englischer Name).
+
+Nicht geprüft: die Menütasten außerhalb eines Spiels live (kein Logeintrag in dieser Sitzung), ein Spielwechsel während
+eines Streams, PS4-Titel live.
+
+### Tastatur und Maus als Controller (2026-11-04, 10.20, PS5 Pro)
+
+Gemessen vom Besitzer mit Moonlight für Linux auf einem PC ohne Controller, dazu Hostlog (`sunshine.log`) und Kernel-Log der
+Konsole. Host aus `keyboard-mouse-pad` (0.3.0 mit dem Tastatur-Patch, heute 0017), per ELF-Loader gestartet.
+
+- **Pad beim ersten Tastendruck:** „The keyboard and mouse of a client without a controller play as virtual pad 0“, im
+  Kernel-Log `DEVICE_ADDED` und `DEVICE_OWNER_CHANGED` auf den Benutzer der Konsole. Kein „Keyboard connected“: die geteilte
+  Tastatur und Maus der Konsole entstehen für dieses Gerät nicht.
+- **GTA III Definitive Edition (Profil `shooter`):** Laufen mit W A S D, Kamera mit der Maus, Zielen und Schießen mit den
+  Maustasten, der Waffen-Cheat (R2 R2 L1 R2 ← ↓ → ↑ ← ↓ → ↑) über 3, Q und die Pfeiltasten eingegeben. Im Auto mit der
+  Fahrzeugebene (Feststelltaste): Gas, Bremse und Lenkung mit Anlauf; laut Besitzer „perfekt“.
+- **Ein Controller übernimmt:** Ein DualShock 4 am selben Gerät (USB): „Controller [0] takes over the keyboard's virtual pad
+  0“, keine Frage „Who's using this controller?“. Beim Abziehen „virtual pad 0 detached“, die Konsole meldet die Trennung;
+  die nächste Taste legte nach 8 s wieder Pad 0 an. Ein zweiter Controller am selben Gerät wurde Pad 1 mit Frage.
+- **Zwei Geräte:** Ein DualShock 4 an einem anderen Gerät als Spieler 1 (It Takes Two), danach die Tastatur dieses PCs:
+  „virtual pad 1 attached, the console asks who uses it“. F1 (PS) bewirkte für Spieler 2 nichts. Am Ende beide Pads gelöst.
+- **Menütasten:** Ein Menü in Elden Ring reagiert nur auf das Steuerkreuz, nicht auf den linken Stick. Mit gehaltener Taste
+  rechts der Leertaste (Rechts-Alt auf einer spanischen Tastatur) W und S auf dem Steuerkreuz: Das Menü ließ sich bedienen,
+  sechs Wechsel im Log („menu keys“, „back to action“).
+- **Mausempfindlichkeit:** Strg+Alt mit dem Mausrad, je Schritt im Log und in `keyboard_sensitivity.txt` je Gerät und Profil
+  gespeichert. GTA III und Elden Ring begrenzen die Drehgeschwindigkeit des rechten Sticks selbst: Über etwa 1000 % drehte
+  die Kamera laut Besitzer nicht schneller (ein Versuchsbuild ging bis 10 000 %).
+- **Moonlight-Clients:** Ein Gerät mit einem gepaarten, aber ausgeschalteten Controller bekam das Tastatur-Pad; ein noch per
+  USB steckender Controller übernahm es sofort beim Verbinden (Moonlight-Log „Gamepad 0 (player 0) is: PS4 Controller“).
+- Unit-Test `keyboard_pad_test`: Tasten, Sticks, Moonlight-Kürzel, Maus, Radtipps, sieben Profile, Anlauf, Fahrzeugebene,
+  Menütasten in jedem Tastaturlayout, Create und PS, Empfindlichkeit je Gerät, Einstellungen.
+
+Nicht geprüft: die Profile `driving`, `fighting`, `platformer` und `sports` in einem Spiel, Moonlight für Windows, macOS,
+Android und iOS, Mac-, japanische und koreanische Tastaturen (nur im Unit-Test), der absolute Mausmodus, die Kürzel
+Strg+Alt+Shift während des Spiels, Firmware 13.00.
+
+### Tastatur-Pad nach dem Review von PR 20 (2026-11-05, 10.20, PS5 Pro)
+
+Host aus `keyboard-mouse-pad` (0.3.2 mit den Patches 0017 und 0018 und den Korrekturen aus dem Review), vorübergehend per
+ELF-Loader gestartet. Moonlight für Linux auf einem PC ohne Controller, dazu Hostlog und Kernel-Log der Konsole.
+
+- **Maus und Rad allein öffnen kein Pad:** Im zweiten Stream (gut 1,5 Minuten) bewegte der Besitzer nur die Maus und drehte
+  das Rad, dazu ein Klick, um das Fenster nach vorn zu holen. Kein „play as virtual pad“, im Kernel-Log kein `DEVICE_ADDED`.
+  Im ersten Stream hatte ein Klick ins Bild das Pad geöffnet (die linke Maustaste ist in `standard` R2), wie vorgesehen.
+- **Die erste Taste öffnet es:** im dritten Stream 3 s nach dem Verbinden „PS5 virtual pad 0 attached as the host's
+  controller“ (die Rolle aus 0.3.2). Die Konsole wies es dem Benutzer zu, ohne „Wer benutzt diesen Controller?“.
+- **Spiel und Menüs:** „menu keys, no game running“ auf dem Home-Bildschirm, `gta` für GTA III aus der eigenen Liste. Dort
+  laut Besitzer Laufen, Kamera, Zielen und Schießen mit der Maus und der Waffen-Cheat (3 3 Q 3 und die Pfeiltasten)
+  einwandfrei.
+- **Streamende:** „pad 0 detached (0), the host role is free“; im nächsten Stream öffnete die erste Taste das Pad wieder.
+- **Mausempfindlichkeit:** Strg+Alt mit dem Rad, rund 60 Schritte im Log, bei schon offenem Pad. `keyboard_sensitivity.txt`
+  hielt danach den letzten Wert (750 % für `standard`), eine `.new`-Datei blieb nicht übrig.
+
+- **Nach dem zweiten Review (das Pad entsteht beim Druck, bevor es ihn sieht):** gut 40 s Maus, Rad, Shift und M einzeln
+  und Strg+Alt mit dem Rad (drei Schritte im Log; in `standard` ist Strg kein Knopf): kein Pad, kein `DEVICE_ADDED`. W
+  öffnete es als Pad des Hosts, dem Benutzer zugewiesen; am Streamende „the host role is free“.
+
+Nicht geprüft (nur im Unit-Test oder im Code): kein Pad frei (vier belegt) und der neue Versuch nach 10 s, Strg zuerst in
+`shooter` oder `sports`, eine Taste, die nach dem Abziehen eines Controllers wiederholt wird.
+
 ### Host-Rolle am Gerät (2026-11-05, 13.00, Testclient, Home-Bildschirm, nicht veröffentlicht)
 
 Host `commit=roles-1` (der Stand dieses Commits ohne die Doku), drei gepairte Identitäten des Linux-Testclients (A, B, C),

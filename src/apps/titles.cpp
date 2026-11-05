@@ -2,6 +2,7 @@
 #include "apps/titles.hpp"
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <cstring>
 #include <fstream>
 #include <iterator>
@@ -193,10 +194,11 @@ int title_app_id(std::string_view id) {
 std::optional<TitleMeta> parse_param_json(std::string_view json) {
     JsonReader reader(trimmed(json));
     long category = -1;
-    std::string language, name;
+    std::string language, name, concept_id;
     std::map<std::string, std::string> names;
     const bool ok = reader.object([&](const std::string &key) {
         if (key == "applicationCategoryType") return reader.integer(category);
+        if (key == "conceptId") return reader.string(concept_id);
         if (key != "localizedParameters") return reader.skip();
         return reader.object([&](const std::string &local) {
             if (local == "defaultLanguage") return reader.string(language);
@@ -220,7 +222,11 @@ std::optional<TitleMeta> parse_param_json(std::string_view json) {
                 break;
             }
     if (name.empty()) return std::nullopt;
-    return TitleMeta{name, category == 0};
+    uint32_t concept_number = 0;
+    std::from_chars(concept_id.data(), concept_id.data() + concept_id.size(), concept_number);
+    const auto english = names.find("en-US");
+    return TitleMeta{name, category == 0, concept_number,
+                     english != names.end() && !english->second.empty() ? english->second : name};
 }
 
 std::optional<TitleMeta> parse_param_sfo(std::span<const uint8_t> sfo) {
@@ -242,7 +248,11 @@ std::optional<TitleMeta> parse_param_sfo(std::span<const uint8_t> sfo) {
         if (key_name == "CATEGORY") category = text;
     }
     if (name.empty()) return std::nullopt;
-    return TitleMeta{name, category == "gd"};
+    return TitleMeta{name, category == "gd", 0, name};
+}
+
+std::optional<TitleMeta> read_title_meta(const std::filesystem::path &user_dir, const std::string &id) {
+    return read_meta(user_dir, id);
 }
 
 std::vector<Title> list_titles(const std::filesystem::path &user_dir) {

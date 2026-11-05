@@ -217,6 +217,7 @@ Eine Homebrew-App auf der Konsole (Vorbild: PS5SD) macht den Host ohne PC bedien
 | P8.7 | Icon (`icon0.png`, 512²) und Home-Hintergrund (`pic0.png`, 1920×1080), Quellen in `assets/app/`; Einordnung im Media-Tab wie Prospero Themes | S | Kachel im Media-Tab mit neuem Icon, App startet von dort |
 | P8.8 | App-ID: `PPSA47989` gegen den ProsperoStore-Katalog und installierte Titel prüfen und vor dem Release erneut prüfen; bei Kollision eine freie ID wählen | S | ID taucht im Katalog nicht auf |
 | P8.9 | Release im ProsperoStore (Kategorie `streaming`, ZIP mit Titelordner, Version = `contentVersion`), zusammen mit P7.4 | S | App lässt sich aus dem Store installieren und startet |
+| P8.10 | Tastatur und Maus als Controller in der App: die Einstellungen (`keyboard_mouse_pad`, `keyboard_mouse_profile`, `keyboard_mouse_sensitivity`, `keyboard_mouse_profile_by_game`) und eine Seite, auf der man ein installiertes Spiel (auch Homebrew und Forwarder) wählt und ihm ein Profil gibt; sie schreibt `keyboard_profiles.txt` (`docs/keyboard-profiles.md`) | M | Profil für ein Spiel in der App setzen, Spiel starten, Profil im Log |
 
 **Abnahme Phase 8:** Ein Nutzer ohne PC kann den Host einrichten, Moonlight pairen und Autoload festlegen.
 

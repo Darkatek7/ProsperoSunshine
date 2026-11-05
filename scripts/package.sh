@@ -10,14 +10,17 @@ stage="$root/dist/$name"
 expected_licenses="boost enet ffmpeg libdisplaydevice moonlight-common-c nanors nlohmann-json openssl opus
 simple-web-server sunshine"
 
-test -f "$root/out/prospero_sunshine.elf" || { echo "out/prospero_sunshine.elf is missing, build first" >&2; exit 1; }
+for elf in prospero_sunshine firmware_probe host_restart; do
+    test -f "$root/out/$elf.elf" || { echo "out/$elf.elf is missing, build first" >&2; exit 1; }
+done
 for licence in $expected_licenses; do
     test -f "$root/out/deps/licenses/$licence.txt" || { echo "licence text $licence.txt is missing" >&2; exit 1; }
 done
 
 rm -rf "$stage" "$root/dist/$name.tar.gz"
 mkdir -p "$stage/licenses"
-cp "$root/out/prospero_sunshine.elf" "$root/CHANGELOG.md" "$root/LICENSE" "$root/licenses/THIRD_PARTY.md" "$stage/"
+cp "$root/out/prospero_sunshine.elf" "$root/out/firmware_probe.elf" "$root/out/host_restart.elf" "$root/CHANGELOG.md" "$root/LICENSE" \
+    "$root/licenses/THIRD_PARTY.md" "$stage/"
 cp "$root/LICENSE" "$stage/licenses/prosperosunshine.txt"
 for licence in $expected_licenses; do cp "$root/out/deps/licenses/$licence.txt" "$stage/licenses/"; done
 cp -r "$root/licenses/ps5-payload-sdk-runtime" "$stage/licenses/"

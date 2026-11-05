@@ -59,7 +59,13 @@ int main() {
     meta = parse_param_json(param_json("Game", 0) + std::string(3, '\0'));
     assert(meta && meta->name == "Game");
     meta = parse_param_json(R"({"applicationCategoryType":0,"localizedParameters":{"fr-FR":{"titleName":"Seul"}}})");
-    assert(meta && meta->name == "Seul");
+    assert(meta && meta->name == "Seul" && meta->english == "Seul" && meta->concept_id == 0);
+    // The Store concept and the English name, for the keyboard pad's profile by game.
+    meta = parse_param_json(R"({"applicationCategoryType":0,"conceptId":"10003550","localizedParameters":{"defaultLanguage":"ja-JP",)"
+                            R"("ja-JP":{"titleName":"\u30b2\u30fc\u30e0"},"en-US":{"titleName":"Game"}}})");
+    assert(meta && meta->name == "ゲーム" && meta->english == "Game" && meta->concept_id == 10003550);
+    meta = parse_param_json(param_json("Game", 0));
+    assert(meta->concept_id == 0 && meta->english == "Game");
     for (const char *bad : {"", "{", "[]", R"({"localizedParameters":{}})", R"({"a":)", R"({"localizedParameters":{"en-US":{"titleName":"x)"})
         assert(!parse_param_json(bad));
     std::string deep = "{\"a\":";
@@ -97,9 +103,11 @@ int main() {
     assert(titles[1].id == "CUSA00001" && titles[1].cover.empty());
     assert(titles[2].id == "PPSA00005" && titles[2].cover == root / "app" / "PPSA00005" / "sce_sys" / "icon0.png");
     assert(titles[3].id == "PPSA00002" && titles[3].app_id == title_app_id("PPSA00002"));
+    assert(read_title_meta(root, "PPSA00005")->name == "Own sce_sys" && read_title_meta(root, "CUSA00001")->english == "Middle");
+    assert(!read_title_meta(root, "PPSA00004"));
     fs::remove_all(root);
     assert(list_titles(root).empty());
 
-    std::puts("PASS: titles (IDs, param.json, param.sfo, games only, covers, order)");
+    std::puts("PASS: titles (IDs, param.json, param.sfo, games only, covers, order, Store concept, English name)");
     return 0;
 }

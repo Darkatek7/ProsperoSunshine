@@ -83,9 +83,10 @@ Toolchain: PS5 Payload SDK v0.45 in the Docker image `prosperosunshine-sdk:v0.45
 
 - The host is an ELF payload (ELF loader on port 9021); state lives in `/data/prosperosunshine/`.
   Control socket on TCP 47995, 127.0.0.1 only (the empty file `control_lan` there opens it to the LAN):
-  `STATUS`, `PAIRINGS`, `PIN [<id>] <pin> [name]`, `DEVICES`, `STREAMS`, `ENDSTREAM <uuid>`, `RENAME <uuid> <name>`, `UNPAIR <uuid>`, `REPORT`, `AUTOLOAD [ON|OFF]`, `RELISTEN`, `CANCELPIN <id>`, `WEBLOGIN [SET <user> <password>|ON|OFF|FORGET]`, `QUIT` (one client at a time). `STREAMS` lists the running streams, one `OK uuid=... address=... codec=... hdr=... mode=... kbps=... secs=... pads=... role=... channel=... name=...` line each, then `END` (format in `src/control/stream_list.hpp`); `ENDSTREAM` ends one device's stream while the game and the others go on. `REPORT` makes the
+  `STATUS`, `PAIRINGS`, `PIN [<id>] <pin> [name]`, `DEVICES`, `STREAMS`, `ENDSTREAM <uuid>`, `RENAME <uuid> <name>`, `UNPAIR <uuid>`, `REPORT`, `AUTOLOAD [ON|OFF]`, `RELISTEN`, `PROBE`, `CANCELPIN <id>`, `WEBLOGIN [SET <user> <password>|ON|OFF|FORGET]`, `QUIT` (one client at a time). `STREAMS` lists the running streams, one `OK uuid=... address=... codec=... hdr=... mode=... kbps=... secs=... pads=... role=... channel=... name=...` line each, then `END` (format in `src/control/stream_list.hpp`); `ENDSTREAM` ends one device's stream while the game and the others go on. `REPORT` makes the
   host answer on TCP 47996 for some seconds with `diagnostics.txt` (a title may not listen on the network).
   `RELISTEN` starts the host's services anew as after rest mode took its ports; `out/relisten_probe.elf` sends it.
+  `PROBE` sends `/data/prosperosunshine/firmware_probe.elf` to the ELF loader unless a stream runs (`docs/firmware-probe.md`).
 - Before touching the console, check `http://<console>:47989/serverinfo`: go on only at `SUNSHINE_SERVER_FREE`, someone may
   be streaming. Don't take screenshots during a stream.
 - Logs: `sunshine.log` (older ones `.1`, `.2`, ...; `min_log_level = debug` in `sunshine.conf` also logs motors, light bar

@@ -266,6 +266,21 @@ void ps_capture_override_extra(int slot, size_t field, uint32_t value)
     atomic_store(&extra_field[slot], field);
 }
 
+// Research hooks (capture.h). Set from the probe's one thread before it opens, so plain statics will do.
+static ps_capture_record_hook record_hook;
+static void *record_context;
+static _Atomic int open_only, open_attempts;
+
+void ps_capture_set_record_hook(ps_capture_record_hook hook, void *context)
+{
+    record_hook = hook;
+    record_context = context;
+}
+
+void ps_capture_set_open_only(int value) { atomic_store(&open_only, value != 0); }
+
+void ps_capture_set_open_attempts(int attempts) { atomic_store(&open_attempts, attempts > 0 ? attempts : 0); }
+
 // Firmware 13.60: the block at 0xb8 is 8 bytes larger, and what 13.00 keeps from 0x198 on sits 8 higher. Not measured
 // here, taken from two public projects that run on it (docs/firmware-porting.md). 13.40 refused 13.00's record at OpenVideo
 // with 0x80c70010, as 13.60 did before it got this one (GitHub issues 14 and 1), so it gets 13.60's, and so does
@@ -397,6 +412,7 @@ static void configure(int slot, uint8_t *p, uint32_t mode, int variant)
     if (atomic_load(&override_field)) u32(p, atomic_load(&override_field), atomic_load(&override_value));
     for (int i = 0; i < 3; i++)
         if (atomic_load(&extra_field[i])) u32(p, atomic_load(&extra_field[i]), atomic_load(&extra_value[i]));
+    if (record_hook) record_hook(p, PS_CAPTURE_RECORD_CAPACITY, record_shift(), record_context);
 }
 
 int ps_capture_close(ps_capture *s)
@@ -436,6 +452,13 @@ int ps_capture_close(ps_capture *s)
 static const char *_Atomic failure_step[PS_CAPTURE_SLOTS] = {"", ""};
 static _Atomic int failure_rc[PS_CAPTURE_SLOTS], reached_encoder[PS_CAPTURE_SLOTS];
 static _Atomic int check_first_frame[PS_CAPTURE_SLOTS];
+
+// Slot 0, where ps_capture_open opens.
+int ps_capture_last_failure(const char **step)
+{
+    if (step) *step = atomic_load(&failure_step[0]);
+    return atomic_load(&failure_rc[0]);
+}
 
 // How long a first frame may take before an unproven open counts as failed. A frame takes 17 ms at 60 fps.
 #ifndef PS_FIRST_FRAME_MS
@@ -630,7 +653,7 @@ static int open_slot(int slot, ps_capture **out)
     SLOG(slot, "video out mode %#x\n", output);
     if (output & 3) { error = PS_CAPTURE_VR; goto fail; }
     atomic_store(&reached_encoder[slot], 1);
-    uint8_t config[0x2e8] = {0};
+    uint8_t config[PS_CAPTURE_RECORD_CAPACITY] = {0};
     mode_snapshot(slot, s->mode);
     slice_fields = uses_slice_fields(slot);
     configure(slot, config, (uint32_t)output, (int)s->mode[6]);
@@ -658,7 +681,8 @@ static int open_slot(int slot, ps_capture **out)
     // moment; stay below the 2 s a client waits for the stream (Initial Ping Timeout). A larger mode gets the same code
     // when the console's output is too small for it, and needs the time left for the open at 1080p, as does a smaller one.
     // It also answers this when the output's mode changed since it was read, as while a title comes up, so that is read anew.
-    const int repeats = atomic_load(&video_resolution[slot]) != 4 ? 5 : 25;
+    const int repeats = atomic_load(&open_attempts) ? atomic_load(&open_attempts) - 1
+                        : atomic_load(&video_resolution[slot]) != 4 ? 5 : 25;
     int changed = 0;
     for (int attempt = 0;; attempt++) {
         rc = open_video(&s->handle, config, 0);
@@ -687,6 +711,10 @@ static int open_slot(int slot, ps_capture **out)
     }
     if (rc) goto fail;
     s->opened = 1;
+    if (atomic_load(&open_only)) {
+        step = "open only";
+        goto fail;
+    }
     step = "Start";
     rc = start(s->handle);
     SLOG(slot, "Start rc=%#x\n", rc);
@@ -704,9 +732,10 @@ static int open_slot(int slot, ps_capture **out)
     SLOG(slot, "open ok\n");
     return 0;
 fail:
-    if (slice_fields && error != PS_CAPTURE_REVOKED && atomic_load(&reached_encoder[slot]) &&
+    if (slice_fields && error != PS_CAPTURE_REVOKED && atomic_load(&reached_encoder[slot]) && !atomic_load(&open_only) &&
         !(strcmp(step, "OpenVideo") == 0 && atomic_load(&failure_rc[slot]) == RESOURCE_NOT_ACTIVE)) {
-        // The firmware may not know the fields: ps_capture_slot_open tries once more without them.
+        // The firmware may not know the fields: ps_capture_slot_open tries once more without them. Not after the probe's
+        // open only, which stops on purpose.
         atomic_store(&retry_without_slices[slot], 1);
     }
     atomic_store(&failure_step[slot], step);
