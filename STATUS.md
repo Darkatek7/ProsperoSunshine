@@ -654,6 +654,27 @@ ohne Befund.
 Nicht geprüft: ein Browser am PC gegen die Konsole, PIN, „End
 stream“, Umbenennen und Entfernen über die Seite, eine Adresse außerhalb des LAN, echter Ruhemodus.
 
+### Webseite nach der Testrunde auf 10.20 (2026-11-05, 13.00, Testbuild `v0.3.2-webui-2`)
+
+Host `bc38f990` aus dem Testbuild, App-Ordner und ELF per FTP aufgespielt, der alte Host beendet und das ELF gesendet.
+
+- Zertifikat der Seite, mit `openssl s_client` vom PC gelesen: CN „ProsperoSunshine web page“, `CA:FALSE`, Key Usage
+  Digital Signature, EKU TLS Web Server Authentication, SAN `localhost`, die Adresse der Konsole und 127.0.0.1, gültig
+  825 Tage. `web_cert.pem` und `web_key.pem` lagen danach im Datenordner.
+- `sunshine_state.json` gesichert und durch 15.283 Null-Bytes ersetzt, Host neu gestartet: „Moved the unreadable ...
+  to sunshine_state.json.corrupt“, `/serverinfo` mit einer neuen uniqueid, die neue Datei 112 Bytes. Ein frischer
+  Testclient (`pair.py`) paarte sich (PairStatus=1), die Datei wuchs auf 1.378 Bytes. Danach die Sicherung zurückgespielt;
+  nach dem nächsten Start war die alte uniqueid wieder da.
+- Ablehnen einer Anfrage (dafür lag kurz `control_lan` im Datenordner, danach umbenannt): `PAIRINGS` zeigte die Anfrage,
+  `CANCELPIN <id>` „OK cancelled“, ein zweites „ERR no such request“, ohne ID „ERR usage“. Der wartende Client bekam
+  HTTP 400 „Pairing request cancelled by operator“; derselbe Client paarte sich gleich danach ohne Wartezeit.
+- „Restart host“ hat der Besitzer am Handy auf der Seite gedrückt: im Kernel-Log „restart asked for“, „host stopped“,
+  dann vom Helfer „relaunch after the old host was gone (1250 ms): sent the host to the ELF loader“ und der neue Host bis
+  „Web page on port 47990“. Danach lief nur noch ein Host-Prozess, der Steuer-Socket war wieder nur lokal.
+
+Nicht geprüft: der Neustart auf 10.20, Safari auf dem iPhone mit dem neuen Zertifikat, „Turn on“/„Forget login“ und
+„Deny“ in der App, R2/R3 in der Tastatur der App, „End stream“ auf dem Geräte-Tab, das gedrosselte Zertifikats-Log.
+
 ### Testbuild für 13.40 (2026-11-05, 13.00)
 
 Pre-Release `v0.3.1-fw1340-1` für Issue #14: 13.40 und alles bis 13.60 bekommt den Datensatz von 13.60. Gemessen nur auf
