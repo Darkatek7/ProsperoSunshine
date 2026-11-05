@@ -116,20 +116,23 @@ diagnostic report as the app's (ready to paste into an issue), and restart the h
 It is off until you set a login, and nothing listens on its port before that.
 
 1. In the app, open **Settings**, choose **Web page** and set a user name and a password (8 to 128 characters). The page
-   starts right away. Turn it off there again to remove the login.
-2. Open `https://<console-ip>:47990` in a browser (the **Base port** plus one, if you changed it). The host uses its own
-   self-signed certificate, so the browser warns once; accept it for this address.
+   starts right away. Turn it off there again; the login stays stored for the next time.
+2. Open `https://<console-ip>:47990` in a browser (the **Base port** plus one, if you changed it). The page has its own
+   self-signed certificate (made on the console, renewed by the host), so the browser warns once; accept it for this
+   address. On an iPhone in Safari that takes a few taps: **Show Details**, **visit this website**, then **Visit Website**.
 3. Sign in. A session ends after 12 hours without use, or when the login changes.
 
 - The page answers only the LAN and Tailscale addresses (100.64.0.0/10); every other address gets 403. **Don't forward
   TCP 47990 to the internet.** Over [ps5-tailscale](#without-port-forwarding-tailscale) it is reachable only if 47990 is
-  among the ports it passes.
+  among the ports it passes. ps5-tailscale forwards its clients from the console itself, so the page sees all of them as
+  127.0.0.1: they share one counter for failed sign-ins, and the log names 127.0.0.1 for each of them.
 - After 5 failed sign-ins from one address, the page waits 30 seconds before the next try, doubling up to 15 minutes; after
-  20 from all addresses together, every address waits the same way until the next good sign-in. Failed sign-ins are logged with the
-  address, never the password. The password is kept only as a salted PBKDF2-SHA256 hash in
+  20 from all addresses together, every address waits the same way until the next good sign-in. Failed sign-ins are
+  logged with the address, never the password. The password is kept only as a salted PBKDF2-SHA256 hash in
   `/data/prosperosunshine/web_login`.
-- Settings changed on the page apply when the host starts again: use **Save and restart host**. The Experimental switches
-  stay in the app, where they are checked against the firmware.
+- Settings changed on the page apply when the host starts again. After **Save** the page offers to restart it, and until
+  then a banner says the saved settings aren't applied yet. The Experimental switches stay in the app, where they are
+  checked against the firmware.
 
 ## Playing over the internet
 
@@ -302,7 +305,7 @@ switch off and choose **Save and restart host**.
 
 The host listens on TCP **47995** with a line-based control socket: `STATUS`, `PAIRINGS`, `PIN [<id>] <pin> [name]`,
 `DEVICES`, `STREAMS`, `ENDSTREAM <uuid>`, `RENAME <uuid> <name>`, `UNPAIR <uuid>`, `REPORT`, `AUTOLOAD [ON|OFF]`,
-`WEBLOGIN [SET <user> <password>|OFF]` and `QUIT`. It is **unauthenticated**. By default it listens on `127.0.0.1` only (ROADMAP P9.1), so the app on the
+`CANCELPIN <id>`, `WEBLOGIN [SET <user> <password>|ON|OFF|FORGET]` and `QUIT`. It is **unauthenticated**. By default it listens on `127.0.0.1` only (ROADMAP P9.1), so the app on the
 console can use it but the LAN cannot. Creating the empty file `/data/prosperosunshine/control_lan` re-enables LAN
 access for development. Do this only on trusted networks.
 

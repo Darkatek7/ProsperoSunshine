@@ -39,7 +39,11 @@
       </div>
     </header>
 
-    <p id="notice" class="notice" role="status" hidden></p>
+    <p id="notice" class="notice" role="status" title="Tap to close" hidden></p>
+    <div id="pending" class="pending" role="status" hidden>
+      <span>Saved settings aren't applied yet: the host reads them when it starts.</span>
+      <button id="pending-restart" class="primary">Restart host</button>
+    </div>
 
     <section id="tab-overview" class="tab">
       <div class="card">

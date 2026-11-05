@@ -47,14 +47,16 @@ function el(tag, props = {}, ...children) {
 }
 
 let noticeTimer = null;
-function notice(text, bad = false) {
+// Shown at the top of the window, wherever the page is scrolled to; a tap closes it.
+function notice(text, bad = false, sticky = false) {
   const box = $('notice');
   box.textContent = text;
   box.classList.toggle('bad', bad);
   box.hidden = false;
   clearTimeout(noticeTimer);
-  noticeTimer = setTimeout(() => { box.hidden = true; }, bad ? 8000 : 4000);
+  if (!sticky) noticeTimer = setTimeout(() => { box.hidden = true; }, bad ? 8000 : 5000);
 }
+$('notice').addEventListener('click', () => { $('notice').hidden = true; });
 
 function failed(error) {
   if (error instanceof HttpError && error.status === 401) return;
@@ -85,6 +87,7 @@ $('login-form').addEventListener('submit', async (event) => {
     await api('/api/login', { user: $('login-user').value, password: $('login-password').value });
     $('login-password').value = '';
     showApp();
+    api('/api/session').then((s) => showPending(s.settings_pending), () => {});
   } catch (e) {
     error.textContent = e.body && e.body.wait ? `Too many failed logins. Try again in ${e.body.wait} s.` : e.message;
   } finally {
@@ -132,6 +135,7 @@ async function refresh() {
   try {
     const data = await api('/api/overview');
     renderHost(data.host, data.status);
+    showPending(data.host.settings_pending);
     renderStatus(data.host, data.status);
     renderPairings(data.pairings);
     renderStreams(data.streams);
@@ -171,7 +175,8 @@ function renderPairings(pairings) {
     el('div', { class: 'grow' },
       el('div', { class: 'title', text: p.name || 'Moonlight' }),
       el('div', { class: 'sub', text: p.address || '' })),
-    el('span', { class: 'badge', text: 'waiting for PIN' }))));
+    el('span', { class: 'badge', text: 'waiting for PIN' }),
+    el('button', { class: 'danger', text: 'Deny', onclick: () => denyPairing(p) }))));
   // With several waiting, the PIN goes to the one picked here.
   if (pairings.length > 1) {
     $('pin-form').dataset.ids = JSON.stringify(pairings.map((p) => p.id));
@@ -189,15 +194,22 @@ function renderStreams(streams) {
   list.replaceChildren(...streams.map((s) => {
     const parts = [s.codec, s.hdr === '1' ? 'HDR' : null, s.mode, s.kbps !== '-' ? `${s.kbps} kbps` : null,
       s.sent_kbps && s.sent_kbps !== '-' ? `sending ${s.sent_kbps} kbps` : null,
-      s.rtt_ms && s.rtt_ms !== '-' ? `${s.rtt_ms} ms` : null, `${s.pads} pad${s.pads === '1' ? '' : 's'}`,
-      duration(s.secs)].filter(Boolean);
+      `${s.pads} pad${s.pads === '1' ? '' : 's'}`, duration(s.secs)].filter(Boolean);
     return el('li', {},
       el('div', { class: 'grow' },
         el('div', { class: 'title', text: s.name || s.address }),
-        el('div', { class: 'sub', text: `${s.address} · ${parts.join(' · ')}` })),
+        el('div', { class: 'sub' }, `${s.address} · ${parts.join(' · ')}`, latency(s.rtt_ms))),
       el('span', { class: 'badge live', text: s.role === 'joined' ? 'joined' : 'live' }),
       s.uuid ? el('button', { class: 'danger', text: 'End stream', onclick: () => endStream(s) }) : null);
   }));
+}
+
+// The round trip, coloured as cloud gaming services rate it: below 40 ms good, up to 80 ms playable, above that poor.
+function latency(rtt) {
+  const ms = Number(rtt);
+  if (!rtt || rtt === '-' || !Number.isFinite(ms)) return null;
+  const rating = ms < 40 ? 'good' : ms <= 80 ? 'fair' : 'poor';
+  return el('span', { class: `latency ${rating}`, title: 'Round trip to the device', text: ` · ${ms} ms` });
 }
 
 function duration(secs) {
@@ -206,7 +218,7 @@ function duration(secs) {
   return h ? `${h} h ${m} min` : m ? `${m} min ${s} s` : `${s} s`;
 }
 
-function renderDevices(devices) {
+function renderDevices(devices, streams = []) {
   const list = $('devices');
   if (!devices.length) {
     list.replaceChildren(el('li', { class: 'empty', text: 'No device is paired yet.' }));
@@ -214,20 +226,42 @@ function renderDevices(devices) {
   }
   // A rename in progress keeps its field while the list refreshes.
   if (list.querySelector('input:focus')) return;
-  list.replaceChildren(...devices.map((d) => el('li', {},
-    el('div', { class: 'grow' },
-      el('div', { class: 'title', text: d.name || d.uuid }),
-      el('div', { class: 'sub', text: d.mode ? `last mode ${d.mode}` : 'not streamed yet' })),
-    d.streaming === '1' ? el('span', { class: 'badge live', text: 'streaming' }) : null,
-    el('button', { text: 'Rename', onclick: () => rename(d) }),
-    el('button', { class: 'danger', text: 'Unpair', onclick: () => unpair(d) }))));
+  list.replaceChildren(...devices.map((d) => {
+    const stream = streams.find((s) => s.uuid === d.uuid);
+    return el('li', {},
+      el('div', { class: 'grow' },
+        el('div', { class: 'title', text: d.name || d.uuid }),
+        el('div', { class: 'sub', text: d.mode ? `last mode ${d.mode}` : 'not streamed yet' })),
+      d.streaming === '1' ? el('span', { class: 'badge live', text: 'streaming' }) : null,
+      d.streaming === '1' ? el('button', { class: 'danger', text: 'End stream',
+        onclick: () => endStream(stream || { uuid: d.uuid, name: d.name }) }) : null,
+      el('button', { text: 'Rename', onclick: () => rename(d) }),
+      el('button', { class: 'danger', text: 'Unpair', onclick: () => unpair(d) }));
+  }));
 }
 
+// Ending a stream lets the device connect again right away; unpairing as well keeps it out until it pairs with a PIN.
 async function endStream(stream) {
-  if (!confirm(`End the stream to ${stream.name || stream.address}? The game and other streams go on.`)) return;
+  const who = stream.name || stream.address || 'this device';
+  if (!confirm(`End the stream to ${who}? The game and other streams go on.`)) return;
+  const alsoUnpair = confirm(`Also unpair ${who}, so it can't connect again without a new PIN?\n\nOK: end and unpair. Cancel: only end the stream.`);
   try {
-    await api('/api/streams/end', { uuid: stream.uuid });
-    notice('The stream was ended.');
+    if (alsoUnpair) {
+      await api('/api/devices/unpair', { uuid: stream.uuid });
+      notice('The stream was ended and the device unpaired.');
+    } else {
+      await api('/api/streams/end', { uuid: stream.uuid });
+      notice('The stream was ended.');
+    }
+    refresh();
+  } catch (e) { failed(e); }
+}
+
+async function denyPairing(pairing) {
+  if (!confirm(`Deny the pairing request from ${pairing.name || 'Moonlight'}${pairing.address ? ` (${pairing.address})` : ''}?`)) return;
+  try {
+    await api('/api/pin/cancel', { id: pairing.id });
+    notice('The pairing request was denied.');
     refresh();
   } catch (e) { failed(e); }
 }
@@ -243,7 +277,7 @@ async function rename(device) {
 }
 
 async function unpair(device) {
-  if (!confirm(`Unpair ${device.name || device.uuid}? It has to pair again with a PIN to stream.`)) return;
+  if (!confirm(`Unpair ${device.name || device.uuid}? A running stream of it ends, and it has to pair again with a PIN to stream.`)) return;
   try {
     await api('/api/devices/unpair', { uuid: device.uuid });
     notice('The device was unpaired.');
@@ -321,10 +355,20 @@ function settingValues() {
 async function saveSettings(restartAfter) {
   try {
     await api('/api/settings', { values: settingValues() });
-    if (restartAfter) await restartHost(true);
-    else notice('Saved. The settings apply when the host starts again.');
+    showPending(true);
+    if (restartAfter || confirm('Saved. The host reads its settings when it starts.\n\nRestart the host now to apply them? Running streams end.')) {
+      await restartHost(true);
+    } else {
+      notice('Saved. The settings apply when the host starts again.');
+    }
   } catch (e) { failed(e); }
 }
+
+// The banner stays while sunshine.conf differs from what the running host read at its start.
+function showPending(pending) {
+  $('pending').hidden = !pending;
+}
+$('pending-restart').addEventListener('click', () => restartHost(false));
 
 $('settings-form').addEventListener('submit', (event) => {
   event.preventDefault();
@@ -332,14 +376,14 @@ $('settings-form').addEventListener('submit', (event) => {
 });
 $('save-restart').addEventListener('click', () => saveSettings(true));
 
-// Restart: the host stops, sends itself to the ELF loader again and comes back after some seconds.
+// Restart: the host hands a small helper to the ELF loader and stops; once it is gone, the helper starts it again.
 async function restartHost(asked) {
   if (!asked && !confirm('Restart the host? Running streams end.')) return;
   try {
     await api('/api/restart', {});
   } catch (e) { failed(e); return; }
   stopPolling();
-  notice('The host is restarting…');
+  notice('The host is restarting…', false, true);
   const started = Date.now();
   await new Promise((resolve) => setTimeout(resolve, 6000));
   while (Date.now() - started < 60000) {
@@ -376,4 +420,5 @@ $('log-refresh').addEventListener('click', loadLog);
 document.addEventListener('visibilitychange', () => { if (!document.hidden && pollTimer) refresh(); });
 
 // Start: signed in already (a cookie from before), or the login.
-api('/api/session').then(showApp, (e) => { if (!(e instanceof HttpError && e.status === 401)) showLogin(); });
+api('/api/session').then((s) => { showApp(); showPending(s.settings_pending); },
+  (e) => { if (!(e instanceof HttpError && e.status === 401)) showLogin(); });

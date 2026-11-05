@@ -30,10 +30,6 @@
 #include <boost/log/expressions.hpp>
 #include <boost/log/sinks.hpp>
 #include <rs.h>
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
 #include <thread>
 extern "C" {
 #include <ps5/kernel.h>
@@ -65,39 +61,6 @@ boost::shared_ptr<klog_sink> add_klog_sink() {
 
 using Ports = std::array<uint16_t, 3>;
 
-// "Restart host" on the web page: the host sends its own ELF to the loader, as the app does after QUIT. Declared first in
-// main, so it runs last, once everything else has let go of the ports, the pads and the capture.
-struct RelaunchOnExit {
-    ~RelaunchOnExit() {
-        if (!prospero::web::restart_requested()) return;
-        std::this_thread::sleep_for(2s);  // as the app waits after the control socket closed
-        const auto elf = platf::appdata() / "prospero_sunshine.elf";
-        std::ifstream in(elf, std::ios::binary);
-        const std::string data((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-        const char *problem = data.empty() ? "no host ELF in the data folder" : nullptr;
-        const int sock = problem ? -1 : socket(AF_INET, SOCK_STREAM, 0);
-        if (!problem && sock < 0) problem = "no socket";
-        if (!problem) {
-            int one = 1;
-            setsockopt(sock, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one);
-            timeval timeout{10, 0};
-            setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof timeout);
-            sockaddr_in addr{};
-            addr.sin_family = AF_INET;
-            addr.sin_port = htons(9021);
-            addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-            if (connect(sock, reinterpret_cast<sockaddr *>(&addr), sizeof addr)) problem = "the ELF loader did not answer";
-            for (size_t sent = 0; !problem && sent < data.size();) {
-                const ssize_t n = send(sock, data.data() + sent, data.size() - sent, 0);
-                if (n <= 0) problem = "sending to the ELF loader failed";
-                else sent += static_cast<size_t>(n);
-            }
-        }
-        if (sock >= 0) close(sock);
-        ps_diag_log("ProsperoSunshine: host restart from the web page: %s\n", problem ? problem : "sent to the ELF loader");
-    }
-};
-
 // Returns false when the host was told to stop, true when rest mode has taken its ports: the process runs on, but
 // nothing answers until the services start anew (STATUS.md). RELISTEN on the control socket tests that path.
 bool wait_or_ports_lost(const std::shared_ptr<safe::event_t<bool>> &shutdown_event, const Ports &ports,
@@ -118,7 +81,6 @@ bool wait_or_ports_lost(const std::shared_ptr<safe::event_t<bool>> &shutdown_eve
 }
 
 int main(int argc, char *argv[]) {
-    const RelaunchOnExit relaunch;
     const auto klog = add_klog_sink();
     std::error_code ec;
     std::filesystem::create_directories(platf::appdata(), ec);

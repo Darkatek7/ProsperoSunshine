@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "web/web_server.hpp"
 #include "web/web_auth.hpp"
+#include "web/web_cert.hpp"
 #include "web/web_lines.hpp"
 #include "web/web_report.hpp"
 #include "web/web_login.hpp"
@@ -22,6 +23,10 @@
 #include <fstream>
 #include <sstream>
 #include <thread>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <unistd.h>
 #include <ps5/kernel.h>
 
 using namespace std::literals;
@@ -34,6 +39,9 @@ struct prospero_web_asset {
 };
 extern const prospero_web_asset prospero_web_assets[];
 extern const std::size_t prospero_web_asset_count;
+// src/relaunch_helper.cpp, built as a payload and embedded by CMakeLists.txt.
+extern const unsigned char prospero_relaunch_helper[];
+extern const std::size_t prospero_relaunch_helper_size;
 
 namespace prospero::web {
 
@@ -43,7 +51,6 @@ using Response = std::shared_ptr<Server::Response>;
 using Request = std::shared_ptr<Server::Request>;
 using json = nlohmann::json;
 
-std::atomic_bool restart{false};
 constexpr const char *cookie_name = "pss";
 // Every log is read from its end; the page shows this much.
 constexpr size_t log_limit = 256 * 1024;
@@ -138,6 +145,50 @@ bool write_file(const std::filesystem::path &path, const std::string &text) {
     std::error_code ec;
     std::filesystem::rename(temp, path, ec);
     return !ec;
+}
+
+// "Restart host": the host can't send its own ELF to the loader, which would start the new host while the old one is
+// still going away (on 10.20 the console hung once right then, PR 27). It writes its process id, hands the embedded
+// relaunch helper to the loader, and only then stops; the helper waits until this process is gone and starts the host.
+std::string start_relaunch() {
+    const auto pid_file = platf::appdata() / "relaunch.pid";
+    {
+        std::ofstream out(pid_file, std::ios::trunc);
+        out << getpid() << '\n';
+        if (!out.flush()) return "cannot write " + pid_file.string();
+    }
+    const int sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0) return "no socket";
+    int one = 1;
+    setsockopt(sock, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one);
+    timeval timeout{5, 0};
+    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof timeout);
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(9021);
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    std::string problem;
+    if (connect(sock, reinterpret_cast<sockaddr *>(&addr), sizeof addr) != 0) problem = "the ELF loader on port 9021 did not answer";
+    for (size_t sent = 0; problem.empty() && sent < prospero_relaunch_helper_size;) {
+        const ssize_t n = ::send(sock, prospero_relaunch_helper + sent, prospero_relaunch_helper_size - sent, 0);
+        if (n <= 0) problem = "sending the relaunch helper to the ELF loader failed";
+        else sent += static_cast<size_t>(n);
+    }
+    close(sock);
+    if (!problem.empty()) {
+        std::error_code ec;
+        std::filesystem::remove(pid_file, ec);
+    }
+    return problem;
+}
+
+// sunshine.conf as the running host read it at its start: while the file differs, saved settings aren't applied yet.
+std::string config_at_start;
+bool settings_pending() { return read_file(config::sunshine.config_file) != config_at_start; }
+
+// ps5-tailscale forwards its clients from the console itself, so they all arrive as 127.0.0.1 and share one lockout.
+std::string_view forwarded(std::string_view address) {
+    return address == "127.0.0.1" ? " (the console itself, or a local forward such as ps5-tailscale)"sv : ""sv;
 }
 
 std::string firmware_text() {
@@ -309,14 +360,14 @@ void routes(Server &server, State &state, ControlServer &control, const std::sha
         const std::string password = body ? text_field(*body, "password") : std::string();
         if (!web_login::verify(user, password)) {
             state.lockout.failed(key, now);
-            BOOST_LOG(warning) << "Web page: failed login from "sv << address;
+            BOOST_LOG(warning) << "Web page: failed login from "sv << address << forwarded(address);
             return send_error(response, StatusCode::client_error_unauthorized, "wrong user name or password");
         }
         state.lockout.succeeded(key);
         const std::string token = web_login::random_token();
         if (token.empty()) return send_error(response, StatusCode::server_error_internal_server_error, "no random numbers");
         state.sessions.add(token, now);
-        BOOST_LOG(info) << "Web page: login from "sv << address;
+        BOOST_LOG(info) << "Web page: login from "sv << address << forwarded(address);
         send_json(response, json{{"user", user}}, StatusCode::success_ok,
                   {{"Set-Cookie", std::string(cookie_name) + "=" + token + "; Path=/; Secure; HttpOnly; SameSite=Strict"}});
     };
@@ -328,7 +379,7 @@ void routes(Server &server, State &state, ControlServer &control, const std::sha
                   {{"Set-Cookie", std::string(cookie_name) + "=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0"}});
     };
     get("^/api/session$", [](const Response &response, const Request &) {
-        send_json(response, json{{"user", web_login::user()}});
+        send_json(response, json{{"user", web_login::user()}, {"settings_pending", settings_pending()}});
     });
 
     // What the host is doing: its status, pending pairings, paired devices and running streams.
@@ -339,7 +390,8 @@ void routes(Server &server, State &state, ControlServer &control, const std::sha
                   {"commit", PROJECT_VERSION_COMMIT},
                   {"firmware", firmware_text()},
                   {"name", config::nvhttp.sunshine_name},
-                  {"port", net::map_port(0)}};
+                  {"port", net::map_port(0)},
+                  {"settings_pending", settings_pending()}};
         send_json(response, json{{"host", host},
                                  {"status", status_lines.empty() ? json::object() : json(status(status_lines.front()))},
                                  {"pairings", records(ok_lines(control.handle("PAIRINGS", Caller::web)), pairing)},
@@ -353,6 +405,12 @@ void routes(Server &server, State &state, ControlServer &control, const std::sha
         std::string line = "PIN " + (id.empty() ? pin : id + " " + pin);
         if (!name.empty()) line += " " + name;
         send_answer(response, control.handle(line, ControlServer::Caller::web));
+    });
+    // Denies a pending pairing: Moonlight hears that the operator cancelled it, and the device may ask again at once.
+    post("^/api/pin/cancel$", [&control](const Response &response, const json &body) {
+        const std::string id = text_field(body, "id");
+        if (!word(id, 64)) return send_error(response, SimpleWeb::StatusCode::client_error_bad_request, "no pairing request");
+        send_answer(response, control.handle("CANCELPIN " + id, ControlServer::Caller::web));
     });
     post("^/api/devices/rename$", [&control](const Response &response, const json &body) {
         const std::string uuid = text_field(body, "uuid"), name = text_field(body, "name");
@@ -397,7 +455,11 @@ void routes(Server &server, State &state, ControlServer &control, const std::sha
     });
     post("^/api/restart$", [shutdown](const Response &response, const json &) {
         BOOST_LOG(info) << "Web page: restart asked for"sv;
-        restart = true;
+        if (const std::string problem = start_relaunch(); !problem.empty()) {
+            BOOST_LOG(error) << "Web page: restart failed: "sv << problem;
+            return send_error(response, SimpleWeb::StatusCode::server_error_internal_server_error,
+                              "The host can't restart itself: " + problem + ". It keeps running.");
+        }
         send_json(response, json{{"ok", true}});
         // A moment for the answer to leave before the services stop.
         std::thread([shutdown] {
@@ -409,7 +471,9 @@ void routes(Server &server, State &state, ControlServer &control, const std::sha
 }  // namespace
 
 WebServer::WebServer(ControlServer &control, std::shared_ptr<safe::event_t<bool>> shutdown)
-    : control_(control), shutdown_(std::move(shutdown)) {}
+    : control_(control), shutdown_(std::move(shutdown)) {
+    config_at_start = read_file(config::sunshine.config_file);
+}
 
 void WebServer::run(std::stop_token stop) {
     bool said_off = false;
@@ -417,7 +481,7 @@ void WebServer::run(std::stop_token stop) {
         // The generation first: a login removed after it is a change the watcher sees.
         const unsigned generation = web_login::generation();
         if (web_login::user().empty()) {
-            if (!said_off) BOOST_LOG(info) << "Web page off: no login set in the app"sv;
+            if (!said_off) BOOST_LOG(info) << (web_login::stored_user().empty() ? "Web page off: no login set in the app"sv : "Web page off: turned off in the app, the login is kept"sv);
             said_off = true;
             std::this_thread::sleep_for(500ms);
             continue;
@@ -427,8 +491,12 @@ void WebServer::run(std::stop_token stop) {
         const uint16_t port = net::map_port(1);
         bool failed = false;
         try {
-            // The certificate and key load here, and that throws when they can't be read.
-            Server server(config::nvhttp.cert, config::nvhttp.pkey);
+            // The page's own certificate (web_cert.hpp); Sunshine's as a fallback. They load here, and that throws when
+            // they can't be read.
+            std::string cert_problem;
+            const auto files = web_cert::ensure(cert_problem);
+            if (!files) BOOST_LOG(warning) << "Web page: own certificate failed ("sv << cert_problem << "), using the host's"sv;
+            Server server(files ? files->cert : config::nvhttp.cert, files ? files->key : config::nvhttp.pkey);
             server.config.reuse_address = true;
             server.config.address = net::get_bind_address(net::af_from_enum_string(config::sunshine.address_family));
             server.config.port = port;
@@ -462,6 +530,5 @@ void WebServer::run(std::stop_token stop) {
     }
 }
 
-bool restart_requested() { return restart; }
 
 }  // namespace prospero::web

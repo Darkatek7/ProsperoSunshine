@@ -9,6 +9,7 @@
   --accent-text: #ffffff;
   --danger: #c62828;
   --ok: #1f8a4c;
+  --warn: #b26a00;
   --radius: 10px;
 }
 @media (prefers-color-scheme: dark) {
@@ -22,6 +23,7 @@
     --accent-text: #0b0d12;
     --danger: #ff6b6b;
     --ok: #4cc38a;
+    --warn: #f0a640;
   }
 }
 * { box-sizing: border-box; }
@@ -71,10 +73,20 @@ input:focus, select:focus, button:focus-visible { outline: 2px solid var(--accen
 .tab { max-width: 960px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
 .notice {
-  max-width: 960px; margin: 12px auto 0; padding: .6rem 16px;
-  border-left: 3px solid var(--accent); background: var(--card);
+  position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 10;
+  width: min(560px, calc(100% - 32px)); margin: 0; padding: .7rem 16px; cursor: pointer;
+  border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px;
+  background: var(--card); box-shadow: 0 6px 24px rgba(0, 0, 0, .25);
 }
 .notice.bad { border-left-color: var(--danger); }
+.pending {
+  max-width: 960px; margin: 12px auto 0; padding: .6rem 16px;
+  display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: center; justify-content: space-between;
+  border: 1px solid var(--warn); border-radius: 8px; background: var(--card);
+}
+.latency.good { color: var(--ok); }
+.latency.fair { color: var(--warn); }
+.latency.poor { color: var(--danger); }
 
 .facts { display: grid; grid-template-columns: max-content 1fr; gap: .3rem 1rem; margin: 0; }
 .facts dt { color: var(--muted); }

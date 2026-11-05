@@ -21,7 +21,4 @@ private:
     std::shared_ptr<safe::event_t<bool>> shutdown_;
 };
 
-// Whether the page asked for a restart: main sends the host's ELF to the loader again after it has shut down.
-bool restart_requested();
-
 }  // namespace prospero::web

@@ -53,7 +53,7 @@ and how the last request went.
 | Restart host | Stop, then start: the way new settings take effect. |
 | Start at boot | The switch for the Payload Manager's autoload (below). A line under it warns when the Payload Manager's own autoload is off (with a running host, which can read `pldmgr_config.txt`; a title may not). |
 | Notice | One line above the pairing part when there is something to know about this console: the firmware is untested, the last capture attempt failed, and why (HDR on, capture in use, firmware not supported, the step that failed), or an Experimental switch failed or started and the Diagnostics report is wanted. It comes from the firmware and the host's `host_diag.log`. |
-| Pairing | A card per Moonlight client waiting to pair, with its name and address; a new request takes the focus and chimes. Cross opens the PIN keyboard: type the four digits Moonlight shows and press Done (or Options). The app waits until Moonlight has finished pairing and says whether it worked. Beside it, the paired devices (from `sunshine_state.json`). |
+| Pairing | A card per Moonlight client waiting to pair, with its name and address; a new request takes the focus and chimes. Cross opens the PIN keyboard: type the four digits Moonlight shows and press Done (R2 or Options). Square on a card denies the request (`CANCELPIN`), and Moonlight hears that the operator cancelled it. The app waits until Moonlight has finished pairing and says whether it worked. Beside it, the paired devices (from `sunshine_state.json`). |
 | Streaming now | While someone streams, a card with the first two devices (from the host's `STREAMS`): name, codec and HDR, resolution and frame rate, bitrate, controllers and how long it has been streaming; "joined" marks a device that gets another device's picture. It takes the second pairing card's place, or the empty pairing card's. Cross opens the list of all streams with their addresses; Cross on one asks "End the stream of ...?", and a second Cross ends that device's stream (`ENDSTREAM`). The game and the other streams go on, and the device can connect again. |
 
 While a stream runs, Stop, Restart and Save and restart need a second Cross within four seconds: the
@@ -94,9 +94,14 @@ reads itself. Every other line of the file, comments included, is kept as it is.
 sets a key that appears more than once, it keeps the first line's place and removes the others.
 
 **Web page** sets the user name and password for the host's [web page](../README.md#web-page) (`WEBLOGIN SET`), which turns
-it on, or removes them (`WEBLOGIN OFF`), which turns it off. It isn't a `sunshine.conf` key: the host keeps the login, the password
-only as a salted hash, in `/data/prosperosunshine/web_login`, and the change applies at once, without a restart. The page edits the
-same settings except the Experimental switches, which stay here with their firmware checks.
+it on. **Turn off** (`WEBLOGIN OFF`) stops the page and keeps the login for **Turn on** (`WEBLOGIN ON`); **Forget login**
+(`WEBLOGIN FORGET`) removes it. It isn't a `sunshine.conf` key: the host keeps the login, the password only as a salted hash,
+in `/data/prosperosunshine/web_login`, and every change applies at once, without a restart. While the password is typed it
+shows as dots; R3 shows it. The page edits the same settings except the Experimental switches that depend on the firmware,
+which stay here with their checks.
+
+In every on-screen keyboard (PIN, names, the web login) R2 is **Done** (Options too), R1 switches to symbols, L2 is shift,
+Square deletes and Triangle types a space.
 
 The third row, **Experimental**, is for testers on firmware where a function isn't verified. Its tiles come from one list,
 `app/src/psapp/experimental_list.h`, which also holds the keys, the names and where each function is verified, for the app and the host
@@ -160,7 +165,8 @@ request:
 | `ENDSTREAM <uuid>` | `OK ended`, `ERR not streaming` or `ERR no such device`, once that device's stream has ended |
 | `REPORT` | `OK port=47996`: for 8 s the host answers there with `diagnostics.txt` |
 | `AUTOLOAD [ON\|OFF]` | `OK list=<0\|1> manager=<0\|1> slot=<0\|1>` or `ERR ...`: the autoload list, as the host sees it or after its change |
-| `WEBLOGIN [SET <user> <password>\|OFF]` | `OK user=<name>` (empty without a login), `OK set` or `ERR <reason>`, `OK off`: the web page's login; the password is the rest of the line |
+| `CANCELPIN <id>` | `OK cancelled` or `ERR no such request`: denies a pending pairing |
+| `WEBLOGIN [SET <user> <password>\|ON\|OFF\|FORGET]` | `OK user=<name> enabled=<0\|1>` (the name empty without a login), `OK set` or `ERR <reason>`, `OK on` or `ERR no login`, `OK off` (the login is kept), `OK forgotten`: the web page's login; the password is the rest of the line |
 | `QUIT` | `OK bye`, then the host ends |
 
 The socket serves one client at a time and has no authentication; it is meant for the local network

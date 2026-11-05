@@ -15,8 +15,23 @@
   internet. After 5 failed sign-ins from one address it waits 30 seconds, doubling up to 15 minutes, and after 20 from all
   addresses together every address waits the same way until the next good sign-in; failed sign-ins are
   logged with the address, never the password, and the password is stored only as a salted PBKDF2-SHA256 hash. The control
-  socket has `WEBLOGIN [SET <user> <password>|OFF]` for it (GitHub issue #21). Measured on 13.00, and the page was checked in
-  a phone's browser.
+  socket has `WEBLOGIN [SET <user> <password>|ON|OFF|FORGET]` for it (GitHub issue #21). Measured on 13.00, and the page
+  was checked in a phone's browser.
+- **After a tester's round on 10.20 (PR #27):**
+  - "Restart host" on the page no longer has the host send itself to the loader while it is still going away; once on
+    10.20 that hung the console. The host hands a small helper to the loader and stops, and the helper starts the host
+    once the old process is gone, as the app does.
+  - The page has its own certificate (serverAuth, the console's addresses, 825 days, renewed by the host), so iPhones show
+    a plain warning instead of refusing. Moonlight's pinned certificate stays as it is.
+  - Turning the page off in the app keeps the login for **Turn on**; **Forget login** removes it.
+  - Deny a pending pairing, on the page and in the app (`CANCELPIN`): Moonlight hears that the operator cancelled it, and
+    the device can ask again right away instead of getting "a pairing session already exists" for 5 minutes.
+  - **End stream** on the Devices tab too, and it offers to unpair the device as well; the round trip is coloured (below
+    40 ms, up to 80 ms, above).
+  - After **Save** the page offers to restart the host, and a banner stays while saved settings aren't applied yet.
+    Notices stay at the top of the window.
+  - In the app's keyboards R2 is **Done**, and R3 shows the web page's password while it is typed.
+  - Clients over ps5-tailscale all arrive as 127.0.0.1, so they share one lockout; the log and the README say so.
 
 ### Fixed
 

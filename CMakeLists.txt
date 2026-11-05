@@ -77,6 +77,8 @@ prospero_probe(pad_output_probe)
 prospero_probe(kbm_probe prospero_pad)
 prospero_probe(pad_user_probe prospero_pad SceUserService)
 prospero_probe(relisten_probe)
+# Not a probe: the host embeds it and hands it to the loader for "Restart host" on the web page.
+prospero_probe(relaunch_helper)
 prospero_probe(rest_probe)
 prospero_probe(mdns_probe prospero_mdns)
 prospero_probe(avcap_spike prospero_capture)
@@ -171,8 +173,16 @@ struct prospero_web_asset {
 @WEB_TABLE@};
 extern const std::size_t prospero_web_asset_count = sizeof prospero_web_assets / sizeof prospero_web_assets[0];
 ")
+    # The relaunch helper payload, embedded for "Restart host" on the web page (src/relaunch_helper.cpp).
+    add_custom_command(OUTPUT "${CMAKE_BINARY_DIR}/generated/relaunch_helper_elf.cpp"
+        COMMAND "${CMAKE_COMMAND}" "-DINPUT=$<TARGET_FILE:relaunch_helper>"
+            "-DOUTPUT=${CMAKE_BINARY_DIR}/generated/relaunch_helper_elf.cpp" -DSYMBOL=prospero_relaunch_helper
+            -P "${CMAKE_SOURCE_DIR}/cmake/embed_file.cmake"
+        DEPENDS relaunch_helper "${CMAKE_SOURCE_DIR}/cmake/embed_file.cmake")
     add_executable(prospero_sunshine "${CMAKE_BINARY_DIR}/generated/cover_png.cpp"
+        "${CMAKE_BINARY_DIR}/generated/relaunch_helper_elf.cpp"
         "${CMAKE_BINARY_DIR}/generated/web_page.cpp" src/web/web_server.cpp src/web/web_login.cpp src/web/web_report.cpp
+        src/web/web_cert.cpp
         app/src/psapp/conf.cpp app/src/psapp/diag.cpp
         ${SUNSHINE_KEPT}
         "${MOONLIGHT_SRC}/src/RtspParser.c"
