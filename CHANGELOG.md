@@ -39,6 +39,8 @@
     **Sign out** end every remembered session.
   - The video sent is coloured against the bit rate asked for, like the round trip: from 85 % good, from 60 % fair,
     below that poor. A still picture needs less, so the colour waits for the first 10 seconds and says so in its tooltip.
+  - The app's home screen counts the paired devices from the running host, as **Manage** does, so a device paired on the
+    page shows up there right away instead of after **Reload**.
 - **A friend without a controller can play with keyboard and mouse.** While a device has no controller, its keyboard and
   mouse become a controller of its own instead of going to the console's keyboard and mouse, which few games take. If you
   already play with keyboard and mouse on a PC, the controls should feel like home: W A S D move, the mouse turns the
