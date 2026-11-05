@@ -902,7 +902,7 @@ std::string Host::build_report()
                          (io::same_content(kBundledElf, kHostElf) ? "same as the app's" : "differs from the app's"));
     line("Capture", diag::capture_summary(host_log));
     line("Notice", snap.notice.text.empty() ? "none" : snap.notice.text);
-    line("Paired devices", std::to_string(snap.paired.size()));
+    line("Paired devices", std::to_string(diag::paired_names(snap.running && snap.devices_known, snap.devices, snap.paired).size()));
     line("Network", snap.address.empty() ? "no LAN address" : "has a LAN address");
     const auto port = [](std::uint16_t number) { return std::string(io::port_open(number) ? "open" : "closed"); };
     line("Ports", "ELF loader " + std::to_string(kLoaderPort) + " " + port(kLoaderPort) + ", control " +
@@ -934,6 +934,8 @@ std::string Host::build_report()
         out += "  none\n";
 
     std::vector<std::string> names = snap.paired;
+    for (const diag::Device &device : snap.devices)
+        names.push_back(device.name);
     const auto name = snap.config.find("sunshine_name");
     if (name != snap.config.end() && name->second)
         names.push_back(*name->second);

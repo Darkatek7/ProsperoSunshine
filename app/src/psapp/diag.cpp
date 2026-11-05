@@ -505,6 +505,18 @@ std::string device_info(const Device &device)
     return device.mode.empty() ? "No stream recorded yet" : "Last asked for " + device.mode;
 }
 
+std::vector<std::string> paired_names(bool devices_known, const std::vector<Device> &devices,
+                                      const std::vector<std::string> &from_file)
+{
+    if (!devices_known)
+        return from_file;
+    std::vector<std::string> names;
+    names.reserve(devices.size());
+    for (const Device &device : devices)
+        names.push_back(device_label(device));
+    return names;
+}
+
 namespace
 {
 long long field_number(const std::string &text)

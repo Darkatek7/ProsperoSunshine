@@ -125,6 +125,10 @@ struct Device
 bool parse_device_line(const std::string &line, Device *device);
 std::string device_label(const Device &device);
 std::string device_info(const Device &device);
+// The paired devices' names: what the running host lists with DEVICES when it answered, so a device paired from the web
+// page shows up at once; otherwise named_devices from sunshine_state.json, which the app reads only now and then.
+std::vector<std::string> paired_names(bool devices_known, const std::vector<Device> &devices,
+                                      const std::vector<std::string> &from_file);
 
 // A running stream, as the host's STREAMS lists it. Like a Device, it stays in the app.
 struct Stream

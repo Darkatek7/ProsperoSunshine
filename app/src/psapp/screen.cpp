@@ -1118,7 +1118,8 @@ void Screen::handle_sheet(const hui::InputFrame &input, hui::ui::Feedback &feedb
         }
         // Moonlight doesn't say which device it is, so the name is asked here, as Sunshine's web page does.
         pair_pin_ = buffer_;
-        pair_suggestion_ = diag::suggested_device_name(target_name_, snap_.paired);
+        pair_suggestion_ = diag::suggested_device_name(
+            target_name_, diag::paired_names(snap_.running && snap_.devices_known, snap_.devices, snap_.paired));
         open_sheet(Sheet::text, "Name this device", "So you can tell it apart later. Options keeps this name.", pair_suggestion_);
         keyboard_.style.max_length = 24;
         feedback.play(hui::audio::Cue::select);
@@ -1549,7 +1550,8 @@ void Screen::draw_home(hui::gfx::DrawList &list, std::uint32_t glass) const
     const std::string lan = saved("lan_encryption_mode", "0");
     chip(Icon::lock, lan == "0" ? "LAN unencrypted" : lan == "1" ? "LAN encrypted when supported" : "LAN encrypted", lan != "0");
     chip(Icon::boot, snap_.autoload ? "Starts at boot" : "Manual start", snap_.autoload);
-    chip(Icon::monitor, std::to_string(snap_.paired.size()) + (snap_.paired.size() == 1 ? " paired device" : " paired devices"), false);
+    const std::size_t paired = diag::paired_names(snap_.running && snap_.devices_known, snap_.devices, snap_.paired).size();
+    chip(Icon::monitor, std::to_string(paired) + (paired == 1 ? " paired device" : " paired devices"), false);
     list.pop_transform();
     list.pop_opacity();
 
@@ -1712,14 +1714,15 @@ void Screen::draw_home(hui::gfx::DrawList &list, std::uint32_t glass) const
             hui::ui::draw_button(list, fonts_, hui::ui::GlyphStyle::dark(), hui::ui::Button::cross, r.x + r.w - 30.0f - label - 46.0f, r.y + 38.0f, 28.0f);
             list.pop_opacity();
         }
-        if (snap_.paired.empty())
+        const std::vector<std::string> paired = diag::paired_names(snap_.running && snap_.devices_known, snap_.devices, snap_.paired);
+        if (paired.empty())
         {
             hui::ui::text(list, fonts_.regular, "None yet.", r.x + 30.0f, r.y + 96.0f, 24.0f, kFaint);
         }
         float cx = r.x + 30.0f, cy = r.y + 70.0f;
-        for (std::size_t i = 0; i < snap_.paired.size(); ++i)
+        for (std::size_t i = 0; i < paired.size(); ++i)
         {
-            const std::string name = shorten(fonts_.semibold, snap_.paired[i], 21.0f, 220.0f);
+            const std::string name = shorten(fonts_.semibold, paired[i], 21.0f, 220.0f);
             const float w = fonts_.semibold.measure(name, 21.0f) + 62.0f;
             if (cx + w > r.x + r.w - 24.0f)
             {

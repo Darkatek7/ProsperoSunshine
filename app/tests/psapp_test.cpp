@@ -537,6 +537,12 @@ static void diag_tests()
         CHECK(d.streaming && d.mode.empty() && d.name.empty());
         CHECK(diag::device_label(d) == "Unnamed device");
         CHECK(diag::device_info(d) == "Streaming now");
+        diag::Device vita;
+        vita.name = "PS Vita";
+        const std::vector<std::string> file{"Old PC"};
+        CHECK(diag::paired_names(false, {vita}, file) == file);
+        CHECK((diag::paired_names(true, {vita, d}, file) == std::vector<std::string>{"PS Vita", "Unnamed device"}));
+        CHECK(diag::paired_names(true, {}, file).empty());
         d.streaming = false;
         CHECK(diag::device_info(d) == "No stream recorded yet");
         CHECK(!diag::parse_device_line("END", &d));
