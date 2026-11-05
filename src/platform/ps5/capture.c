@@ -274,13 +274,15 @@ void ps_capture_override_extra(int slot, size_t field, uint32_t value)
 // 13.00's rate fields land on other encoder fields there (Start returns 0x80c78000). The measured record also leaves out
 // 13.00's inner sub-block headers, so 10.x writes neither, and the encoder sets no rate. Its QP follows the client's
 // bitrate there instead (encoder_qp.h).
+// Firmware 8.x and 9.x get 10.x's record. 8.40 refused 13.00's at OpenVideo with 0x81950008 (GitHub issue 23), as 10.40
+// did before it got 10.x's (issue 2). Not measured on 8.x or 9.x.
 // HEVC is offered on 13.00 and 10.20 (ps_capture_hevc_verified). On 10.20 cfg+0x24 alone starts it, 8 and 10 bit, so
 // Remote Play's fields and the encoder memory are left out on 10.x. On 13.60 its fields would stay at 13.00's offsets;
 // PS_EXP_FULL moves those from 0x198 on with the rest. Where the inner ones sit there is unknown.
 static ptrdiff_t record_shift(void)
 {
     const uint32_t firmware = kernel_get_fw_version();
-    if ((firmware & 0xff000000u) == 0x10000000u) return -0x18;
+    if (firmware < 0x11000000u) return -0x18;
     return firmware >= 0x13400000u && firmware < 0x14000000u ? 8 : 0;
 }
 

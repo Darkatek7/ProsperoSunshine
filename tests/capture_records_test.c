@@ -27,7 +27,7 @@ static void hex(const uint8_t *bytes, size_t size)
 
 int main(int argc, char **argv)
 {
-    static const uint32_t firmwares[] = {0x12400000u, 0x13000040u, 0x13400002u, 0x13600000u, 0x10200006u, 0x10400000u};
+    static const uint32_t firmwares[] = {0x12400000u, 0x13000040u, 0x13400002u, 0x13600000u, 0x10200006u, 0x10400000u, 0x08400005u};
     static const uint32_t rates[] = {20000000u, 150000000u};
     const int hashes = argc > 1 && !strcmp(argv[1], "--hashes"), full = argc > 1 && !strcmp(argv[1], "--full");
     FILE *golden = hashes || full ? NULL : fopen(GOLDEN, "r");
