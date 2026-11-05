@@ -84,7 +84,8 @@ $('login-form').addEventListener('submit', async (event) => {
   const button = event.submitter || $('login-form').querySelector('button');
   button.disabled = true;
   try {
-    await api('/api/login', { user: $('login-user').value, password: $('login-password').value });
+    await api('/api/login', { user: $('login-user').value, password: $('login-password').value,
+      remember: $('login-remember').checked });
     $('login-password').value = '';
     showApp();
     api('/api/session').then((s) => showPending(s.settings_pending), () => {});
@@ -192,13 +193,12 @@ function renderStreams(streams) {
     return;
   }
   list.replaceChildren(...streams.map((s) => {
-    const parts = [s.codec, s.hdr === '1' ? 'HDR' : null, s.mode, s.kbps !== '-' ? `${s.kbps} kbps` : null,
-      s.sent_kbps && s.sent_kbps !== '-' ? `sending ${s.sent_kbps} kbps` : null,
-      `${s.pads} pad${s.pads === '1' ? '' : 's'}`, duration(s.secs)].filter(Boolean);
+    const parts = [s.address, s.codec, s.hdr === '1' ? 'HDR' : null, s.mode, s.kbps !== '-' ? `${s.kbps} kbps` : null,
+      sending(s), `${s.pads} pad${s.pads === '1' ? '' : 's'}`, duration(s.secs)].filter(Boolean);
     return el('li', {},
       el('div', { class: 'grow' },
         el('div', { class: 'title', text: s.name || s.address }),
-        el('div', { class: 'sub' }, `${s.address} · ${parts.join(' · ')}`, latency(s.rtt_ms))),
+        el('div', { class: 'sub' }, ...parts.flatMap((part, i) => (i ? [' · ', part] : [part])), latency(s.rtt_ms))),
       el('span', { class: 'badge live', text: s.role === 'joined' ? 'joined' : 'live' }),
       s.uuid ? el('button', { class: 'danger', text: 'End stream', onclick: () => endStream(s) }) : null);
   }));
@@ -210,6 +210,19 @@ function latency(rtt) {
   if (!rtt || rtt === '-' || !Number.isFinite(ms)) return null;
   const rating = ms < 40 ? 'good' : ms <= 80 ? 'fair' : 'poor';
   return el('span', { class: `latency ${rating}`, title: 'Round trip to the device', text: ` · ${ms} ms` });
+}
+
+// What goes out against what the stream asked for: from 85 % good, from 60 % fair, below that poor. No colour in the first
+// seconds, while the rate is still settling, or without both values.
+function sending(s) {
+  if (!s.sent_kbps || s.sent_kbps === '-') return null;
+  const sent = Number(s.sent_kbps), asked = Number(s.kbps);
+  const text = `sending ${s.sent_kbps} kbps`;
+  if (!Number.isFinite(sent) || !(asked > 0) || s.role === 'starting' || !(Number(s.secs) >= 10)) return text;
+  const share = sent / asked;
+  const rating = share >= 0.85 ? 'good' : share >= 0.6 ? 'fair' : 'poor';
+  return el('span', { class: `rate ${rating}`, text,
+    title: `${Math.round(share * 100)} % of the ${asked} kbps asked for. A still picture needs less, so a low share there is no fault.` });
 }
 
 function duration(secs) {
@@ -241,10 +254,28 @@ function renderDevices(devices, streams = []) {
 }
 
 // Ending a stream lets the device connect again right away; unpairing as well keeps it out until it pairs with a PIN.
+// One dialog with three answers: 'unpair', 'end', or null for Cancel (also Esc).
+function askEndStream(who) {
+  const dialog = $('end-dialog');
+  const question = `End the stream to ${who}? The game and other streams go on.`;
+  if (typeof dialog.showModal !== 'function') {  // a browser without <dialog>
+    if (!confirm(question)) return Promise.resolve(null);
+    return Promise.resolve(confirm(`Also unpair ${who}, so it can't connect again without a new PIN?\n\nOK: end and unpair. Cancel: only end the stream.`) ? 'unpair' : 'end');
+  }
+  $('end-text').textContent = question;
+  dialog.returnValue = '';
+  return new Promise((resolve) => {
+    dialog.addEventListener('close', () => resolve(dialog.returnValue || null), { once: true });
+    dialog.showModal();
+    $('end-only').focus();
+  });
+}
+
 async function endStream(stream) {
   const who = stream.name || stream.address || 'this device';
-  if (!confirm(`End the stream to ${who}? The game and other streams go on.`)) return;
-  const alsoUnpair = confirm(`Also unpair ${who}, so it can't connect again without a new PIN?\n\nOK: end and unpair. Cancel: only end the stream.`);
+  const choice = await askEndStream(who);
+  if (!choice) return;
+  const alsoUnpair = choice === 'unpair';
   try {
     if (alsoUnpair) {
       await api('/api/devices/unpair', { uuid: stream.uuid });

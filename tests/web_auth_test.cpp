@@ -102,6 +102,68 @@ int main() {
     }
     assert(full.wait("locked", t0) == 30s);
 
+    // Remember me: hashed tokens, 30 days from the login however often used, at most eight.
+    const auto digest = [](std::string_view text) { return "h(" + std::string(text) + ")"; };
+    const long long day = 24 * 3600, w0 = 1'800'000'000;
+    assert(Remembered::lifetime == 30 * day);
+    Remembered remembered;
+    remembered.login_id = login_id(login, digest);
+    assert(remembered.login_id == "h(login:c2FsdA:" + login.hash + ")");
+    assert(!remembered.use("t1", w0, digest));
+    remembered.add(digest("t1"), w0);
+    assert(remembered.entries().front().hash == "h(t1)");  // the token itself is never kept
+    assert(remembered.use("t1", w0 + 1, digest));
+    assert(!remembered.use("t2", w0 + 1, digest));
+    assert(!remembered.use("", w0 + 1, digest));
+    assert(remembered.use("t1", w0 + 30 * day - 1, digest));
+    assert(!remembered.use("t1", w0 + 30 * day, digest));  // used the day before, gone all the same
+    assert(remembered.size() == 0);
+    for (int i = 0; i < 9; ++i) remembered.add(digest("r" + std::to_string(i)), w0 + i);
+    assert(remembered.size() == Remembered::limit);
+    assert(!remembered.use("r0", w0 + 10, digest));  // the one that expires first went
+    assert(remembered.use("r1", w0 + 10, digest) && remembered.use("r8", w0 + 10, digest));
+    Remembered same_second;  // a new login always gets in, also when all expire alike
+    for (int i = 0; i < 9; ++i) same_second.add(digest("q" + std::to_string(i)), w0);
+    assert(same_second.size() == Remembered::limit && same_second.use("q8", w0, digest));
+
+    // The file round-trips, drops what expired, and counts only for the login it was written for.
+    const std::string file = format_remembered(remembered);
+    assert(file.starts_with("login=" + remembered.login_id + "\ntoken=h(r1) "));
+    Remembered back = parse_remembered(file, remembered.login_id, w0 + 10);
+    assert(back.size() == Remembered::limit && back.login_id == remembered.login_id);
+    assert(back.use("r1", w0 + 10, digest) && back.use("r8", w0 + 10, digest) && !back.use("r0", w0 + 10, digest));
+    assert(format_remembered(back) == file);
+    back = parse_remembered(file, remembered.login_id, w0 + 30 * day + 4);  // r1 to r4 expired meanwhile
+    assert(back.size() == 4 && !back.use("r4", w0 + 30 * day + 4, digest) && back.use("r5", w0 + 30 * day + 4, digest));
+    Login changed = login;
+    changed.salt = "bmV3";
+    const std::string other_id = login_id(changed, digest);
+    assert(other_id != remembered.login_id);
+    back = parse_remembered(file, other_id, w0 + 10);
+    assert(back.size() == 0 && back.login_id == other_id && !back.use("r8", w0 + 10, digest));
+    assert(parse_remembered(file, "", w0 + 10).size() == 0);
+    assert(parse_remembered("", remembered.login_id, w0).size() == 0);
+    assert(parse_remembered("token=h(x) " + std::to_string(w0 + day) + "\n", remembered.login_id, w0).size() == 0);
+    // Broken lines are skipped, the rest is read; a token can't last longer than a lifetime from now.
+    const std::string messy = "login=" + remembered.login_id + "\r\ntoken=h(a) " + std::to_string(w0 + day) +
+                              "\r\ntoken=h(b)\ntoken= 5\ntoken=h(c) 12x\ntoken=h(d) 99999999999999999999\ntoken=h(e) " +
+                              std::to_string(w0 + 31 * day) + "\nnew=ignored\n";
+    back = parse_remembered(messy, remembered.login_id, w0);
+    assert(back.size() == 1 && back.use("a", w0, digest));
+    // Eleven in a file (written by hand, say): the eight that last longest stay.
+    std::string many = "login=" + remembered.login_id + "\n";
+    for (int i = 0; i < 11; ++i) many += "token=h(m" + std::to_string(i) + ") " + std::to_string(w0 + day + i) + "\n";
+    back = parse_remembered(many, remembered.login_id, w0);
+    assert(back.size() == Remembered::limit && !back.use("m2", w0, digest) && back.use("m3", w0, digest) &&
+           back.use("m10", w0, digest));
+    many = "login=" + remembered.login_id + "\n";  // the same, longest first
+    for (int i = 10; i >= 0; --i) many += "token=h(m" + std::to_string(i) + ") " + std::to_string(w0 + day + i) + "\n";
+    back = parse_remembered(many, remembered.login_id, w0);
+    assert(back.size() == Remembered::limit && !back.use("m2", w0, digest) && back.use("m3", w0, digest) &&
+           back.use("m10", w0, digest));
+    back.clear();
+    assert(back.size() == 0 && format_remembered(back) == "login=" + remembered.login_id + "\n");
+
     // Cookies.
     assert(cookie("pss=abc", "pss") == "abc");
     assert(cookie("other=1; pss=abc; x=2", "pss") == "abc");

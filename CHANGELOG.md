@@ -32,6 +32,13 @@
     Notices stay at the top of the window.
   - In the app's keyboards R2 is **Done**, and R3 shows the web page's password while it is typed.
   - Clients over ps5-tailscale all arrive as 127.0.0.1, so they share one lockout; the log and the README say so.
+  - **End stream** asks once, with three answers: **End and unpair**, **Only end stream** and **Cancel**. It used to ask
+    twice in a row.
+  - **Remember me on this device (30 days)** on the sign-in, off unless ticked. Such a session outlasts a host restart
+    and a closed tab; the host keeps only a hash of its token. Changing or forgetting the login, turning the page off and
+    **Sign out** end every remembered session.
+  - The video sent is coloured against the bit rate asked for, like the round trip: from 85 % good, from 60 % fair,
+    below that poor. A still picture needs less, so the colour waits for the first 10 seconds and says so in its tooltip.
 - **A friend without a controller can play with keyboard and mouse.** While a device has no controller, its keyboard and
   mouse become a controller of its own instead of going to the console's keyboard and mouse, which few games take. If you
   already play with keyboard and mouse on a PC, the controls should feel like home: W A S D move, the mouse turns the

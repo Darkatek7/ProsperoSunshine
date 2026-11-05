@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The web page's login as the host keeps it: <appdata>/web_login, written by the app through the control socket
-// (WEBLOGIN). Without the file, or with the login turned off (enabled=0 in it), the web page stays off.
+// (WEBLOGIN). Without the file, or with the login turned off (enabled=0 in it), the web page stays off. Browsers that
+// asked to be remembered are in <appdata>/web_remembered, as hashes only; setting, turning off or forgetting the login
+// removes that file.
 #pragma once
+#include "web/web_auth.hpp"
 #include <string>
 #include <string_view>
 
@@ -25,5 +28,13 @@ bool verify(std::string_view user, std::string_view password);
 unsigned generation();
 // A random token for a session, hex.
 std::string random_token();
+// SHA-256 of a token, hex: what the remembered file keeps instead of the token.
+std::string token_hash(std::string_view token);
+// Seconds of the wall clock, which the remembered tokens expire by.
+long long wall_now();
+// The remembered tokens of the current login, without the expired ones; none while the page is off.
+web::Remembered load_remembered();
+// Writes them (none removes the file), unless the login changed since `generation`; the empty string on success.
+std::string save_remembered(web::Remembered remembered, unsigned generation);
 
 }  // namespace prospero::web_login

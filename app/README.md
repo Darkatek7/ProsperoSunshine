@@ -96,7 +96,8 @@ sets a key that appears more than once, it keeps the first line's place and remo
 **Web page** sets the user name and password for the host's [web page](../README.md#web-page) (`WEBLOGIN SET`), which turns
 it on. **Turn off** (`WEBLOGIN OFF`) stops the page and keeps the login for **Turn on** (`WEBLOGIN ON`); **Forget login**
 (`WEBLOGIN FORGET`) removes it. It isn't a `sunshine.conf` key: the host keeps the login, the password only as a salted hash,
-in `/data/prosperosunshine/web_login`, and every change applies at once, without a restart. While the password is typed it
+in `/data/prosperosunshine/web_login`, and every change applies at once, without a restart. Setting a new login, **Turn
+off** and **Forget login** also sign out every browser, those the page remembers included. While the password is typed it
 shows as dots; R3 shows it. The page edits the same settings except the Experimental switches that depend on the firmware,
 which stay here with their checks.
 

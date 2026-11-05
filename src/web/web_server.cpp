@@ -55,11 +55,30 @@ constexpr const char *cookie_name = "pss";
 // Every log is read from its end; the page shows this much.
 constexpr size_t log_limit = 256 * 1024;
 
-// Sessions and lockout of one run of the server; its single thread is the only one that touches them.
+// "Remember me": the cookie lasts as long as the remembered token, 30 days.
+const std::string remember_max_age = std::to_string(Remembered::lifetime);
+
+// Sessions and lockout of one run of the server; its single thread is the only one that touches them. The remembered
+// tokens come from their file at the start of the run, and every change goes back to it.
 struct State {
     Sessions sessions;
+    Remembered remembered;
     Lockout lockout;
+    unsigned generation = 0;  // of the login this run serves
+
+    bool signed_in(const std::string &token) {
+        return sessions.use(token, Clock::now()) || remembered.use(token, web_login::wall_now(), web_login::token_hash);
+    }
+    void save_remembered() {
+        if (const std::string problem = web_login::save_remembered(remembered, generation); !problem.empty())
+            BOOST_LOG(warning) << "Web page: remembered sign-ins not stored: "sv << problem;
+    }
 };
+
+std::string token_of(const Request &request) {
+    const auto cookies = request->header.find("Cookie");
+    return cookies == request->header.end() ? std::string() : cookie(cookies->second, cookie_name);
+}
 
 void send(const Response &response, SimpleWeb::StatusCode code, std::string_view body, const char *type,
           SimpleWeb::CaseInsensitiveMultimap headers = {}) {
@@ -308,9 +327,7 @@ void routes(Server &server, State &state, ControlServer &control, const std::sha
             send_error(response, StatusCode::client_error_forbidden, "missing request header");
             return false;
         }
-        const auto cookies = request->header.find("Cookie");
-        const std::string token = cookies == request->header.end() ? std::string() : cookie(cookies->second, cookie_name);
-        if (!state.sessions.use(token, Clock::now())) {
+        if (!state.signed_in(token_of(request))) {
             send_error(response, StatusCode::client_error_unauthorized, "not logged in");
             return false;
         }
@@ -358,6 +375,11 @@ void routes(Server &server, State &state, ControlServer &control, const std::sha
         const auto body = body_of(request);
         const std::string user = body ? text_field(*body, "user") : std::string();
         const std::string password = body ? text_field(*body, "password") : std::string();
+        bool remember = false;  // "Remember me on this device"
+        if (body) {
+            const auto it = body->find("remember");
+            remember = it != body->end() && it->is_boolean() && it->get<bool>();
+        }
         if (!web_login::verify(user, password)) {
             state.lockout.failed(key, now);
             BOOST_LOG(warning) << "Web page: failed login from "sv << address << forwarded(address);
@@ -366,15 +388,29 @@ void routes(Server &server, State &state, ControlServer &control, const std::sha
         state.lockout.succeeded(key);
         const std::string token = web_login::random_token();
         if (token.empty()) return send_error(response, StatusCode::server_error_internal_server_error, "no random numbers");
-        state.sessions.add(token, now);
-        BOOST_LOG(info) << "Web page: login from "sv << address << forwarded(address);
-        send_json(response, json{{"user", user}}, StatusCode::success_ok,
-                  {{"Set-Cookie", std::string(cookie_name) + "=" + token + "; Path=/; Secure; HttpOnly; SameSite=Strict"}});
+        std::string set_cookie = std::string(cookie_name) + "=" + token + "; Path=/; Secure; HttpOnly; SameSite=Strict";
+        if (remember) {
+            // Kept as a hash in a file, so it outlasts a restart of the host; the cookie lasts as long.
+            state.remembered.add(web_login::token_hash(token), web_login::wall_now());
+            state.save_remembered();
+            set_cookie += "; Max-Age=" + remember_max_age;
+        } else {
+            state.sessions.add(token, now);
+        }
+        BOOST_LOG(info) << "Web page: login from "sv << address << forwarded(address) << (remember ? " (remembered for 30 days)"sv : ""sv);
+        send_json(response, json{{"user", user}}, StatusCode::success_ok, {{"Set-Cookie", set_cookie}});
     };
+    // Signing out also forgets every remembered browser (a lost phone, say), as long as it comes from one signed in.
     server.resource["^/api/logout$"]["POST"] = [&state](Response response, Request request) {
-        const auto cookies = request->header.find("Cookie");
-        if (cookies != request->header.end() && request->header.find("X-Prospero") != request->header.end())
-            state.sessions.remove(cookie(cookies->second, cookie_name));
+        const std::string token = token_of(request);
+        if (request->header.find("X-Prospero") != request->header.end() && state.signed_in(token)) {
+            state.sessions.remove(token);
+            if (state.remembered.size() > 0) {
+                state.remembered.clear();
+                state.save_remembered();
+                BOOST_LOG(info) << "Web page: signed out, remembered browsers forgotten"sv;
+            }
+        }
         send_json(response, json{{"ok", true}}, StatusCode::success_ok,
                   {{"Set-Cookie", std::string(cookie_name) + "=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0"}});
     };
@@ -488,6 +524,8 @@ void WebServer::run(std::stop_token stop) {
         }
         said_off = false;
         State state;
+        state.generation = generation;
+        state.remembered = web_login::load_remembered();
         const uint16_t port = net::map_port(1);
         bool failed = false;
         try {

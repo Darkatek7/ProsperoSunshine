@@ -16,6 +16,7 @@
       <p class="muted">Sign in with the login you set in the app on the console.</p>
       <label>User name <input id="login-user" name="username" autocomplete="username" required></label>
       <label>Password <input id="login-password" name="password" type="password" autocomplete="current-password" required></label>
+      <label class="check"><input id="login-remember" type="checkbox"> Remember me on this device (30 days)</label>
       <button type="submit" class="primary">Sign in</button>
       <p id="login-error" class="error" role="alert"></p>
     </form>
@@ -35,7 +36,7 @@
       </nav>
       <div class="actions">
         <button id="restart" class="ghost">Restart host</button>
-        <button id="logout" class="ghost">Sign out</button>
+        <button id="logout" class="ghost" title="Also signs out every device that is remembered">Sign out</button>
       </div>
     </header>
 
@@ -101,5 +102,18 @@
       </div>
     </section>
   </div>
+
+  <dialog id="end-dialog" class="dialog" aria-labelledby="end-title" aria-describedby="end-text">
+    <form method="dialog">
+      <h2 id="end-title">End stream</h2>
+      <p id="end-text"></p>
+      <p class="muted">Unpairing as well keeps the device out until it pairs again with a new PIN.</p>
+      <div class="dialog-buttons">
+        <button value="unpair" class="danger">End and unpair</button>
+        <button value="end" id="end-only" class="primary">Only end stream</button>
+        <button value="">Cancel</button>
+      </div>
+    </form>
+  </dialog>
 </body>
 </html>

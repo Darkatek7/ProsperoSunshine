@@ -121,7 +121,11 @@ It is off until you set a login, and nothing listens on its port before that.
 2. Open `https://<console-ip>:47990` in a browser (the **Base port** plus one, if you changed it). The page has its own
    self-signed certificate (made on the console, renewed by the host), so the browser warns once; accept it for this
    address. On an iPhone in Safari that takes a few taps: **Show Details**, **visit this website**, then **Visit Website**.
-3. Sign in. A session ends after 12 hours without use, or when the login changes.
+3. Sign in. A session ends after 12 hours without use, or when the login changes. With **Remember me on this device**
+   (off unless you tick it) the browser stays signed in for 30 days from that sign-in, also across host restarts and a
+   closed tab. The host keeps only a SHA-256 hash of such a session's token, in `/data/prosperosunshine/web_remembered`.
+   Changing or forgetting the login in the app, turning the page off, and **Sign out** on the page end every remembered
+   session, so signing out on one device also signs out a lost phone.
 
 - The page answers only the LAN and Tailscale addresses (100.64.0.0/10); every other address gets 403. **Don't forward
   TCP 47990 to the internet.** Over [ps5-tailscale](#without-port-forwarding-tailscale) it is reachable only if 47990 is

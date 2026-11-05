@@ -10,6 +10,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace prospero::web {
 
@@ -127,6 +128,109 @@ private:
     }
     std::map<std::string, Clock::time_point> sessions_;
 };
+
+// "Remember me": a browser that asked for it keeps its token for 30 days from the login (absolute, not renewed by use),
+// across host restarts. Only a hash of each token is kept, beside the id of the login it belongs to, so a file from an
+// older login counts for nothing. At most 8; a ninth drops the one that expires first. Times are seconds of the wall clock
+// (they have to survive a restart); hash(text) gives a hex digest, SHA-256 on the host.
+class Remembered {
+public:
+    static constexpr long long lifetime = 30LL * 24 * 3600;
+    static constexpr size_t limit = 8;
+    struct Entry {
+        std::string hash;
+        long long expires = 0;
+    };
+
+    std::string login_id;
+
+    void add(std::string hash, long long now) {
+        expire(now);
+        insert(std::move(hash), now + lifetime, true);
+    }
+    // One read back from the file, with its own expiry. When full, the one that expires first goes, the new one included.
+    void keep(std::string hash, long long expires) { insert(std::move(hash), expires, false); }
+    // Whether the token's hash is one of the live ones. Every stored hash is compared in full, so the time tells nothing.
+    template <typename Hash>
+    bool use(std::string_view token, long long now, Hash &&hash) {
+        expire(now);
+        if (token.empty() || entries_.empty()) return false;
+        const std::string digest = hash(token);
+        bool found = false;
+        for (const Entry &e : entries_) found = same(digest, e.hash) | found;
+        return found;
+    }
+    void clear() { entries_.clear(); }
+    size_t size() const { return entries_.size(); }
+    const std::vector<Entry> &entries() const { return entries_; }
+
+private:
+    void expire(long long now) {
+        std::erase_if(entries_, [now](const Entry &e) { return e.expires <= now; });
+    }
+    // A new login always gets in; one from the file only if it lasts longer than the first to expire.
+    void insert(std::string hash, long long expires, bool always) {
+        if (entries_.size() >= limit) {
+            const auto first = std::min_element(entries_.begin(), entries_.end(),
+                                                [](const Entry &a, const Entry &b) { return a.expires < b.expires; });
+            if (!always && first->expires >= expires) return;
+            entries_.erase(first);
+        }
+        entries_.push_back({std::move(hash), expires});
+    }
+    std::vector<Entry> entries_;
+};
+
+// What ties the remembered tokens to a login: a hash of its salt and password hash, both new with every Set login.
+template <typename Hash>
+std::string login_id(const Login &login, Hash &&hash) {
+    return hash("login:" + login.salt + ":" + login.hash);
+}
+
+// "login=<id>", then one "token=<hash> <expires>" line each.
+inline std::string format_remembered(const Remembered &remembered) {
+    std::string text = "login=" + remembered.login_id + "\n";
+    for (const auto &e : remembered.entries()) text += "token=" + e.hash + " " + std::to_string(e.expires) + "\n";
+    return text;
+}
+
+// The file as the login with this id takes it: empty when it belongs to another login, without the expired tokens and
+// lines it can't read, and at most `limit` of them.
+inline Remembered parse_remembered(std::string_view text, std::string_view login_id, long long now) {
+    Remembered out;
+    out.login_id = std::string(login_id);
+    bool ours = false;
+    std::vector<Remembered::Entry> entries;
+    while (!text.empty()) {
+        const size_t end = text.find('\n');
+        std::string_view line = text.substr(0, end);
+        text = end == std::string_view::npos ? std::string_view() : text.substr(end + 1);
+        if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
+        const size_t eq = line.find('=');
+        if (eq == std::string_view::npos) continue;
+        const std::string_view key = line.substr(0, eq), value = line.substr(eq + 1);
+        if (key == "login") {
+            ours = !login_id.empty() && same(value, login_id);
+        } else if (key == "token") {
+            const size_t space = value.find(' ');
+            if (space == 0 || space == std::string_view::npos || space + 1 == value.size() || space + 1 + 18 < value.size())
+                continue;
+            long long expires = 0;
+            bool digits = true;
+            for (const char c : value.substr(space + 1)) {
+                if (c < '0' || c > '9') digits = false;
+                else expires = expires * 10 + (c - '0');
+            }
+            // Nothing lasts longer than a lifetime from now, so a clock set back can't stretch a token.
+            if (digits && expires > now && expires <= now + Remembered::lifetime)
+                entries.push_back({std::string(value.substr(0, space)), expires});
+        }
+    }
+    if (!ours) return out;
+    // keep() drops the one that expires first when full, so the ones that last longest stay.
+    for (auto &e : entries) out.keep(std::move(e.hash), e.expires);
+    return out;
+}
 
 // Failed logins per address: the fifth in a row locks that address for 30 s, and every further one doubles the wait, up to
 // 15 minutes. A good login clears it. On top, all addresses together get 20 failures in a row before every address waits
