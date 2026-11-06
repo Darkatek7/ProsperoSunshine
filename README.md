@@ -5,10 +5,10 @@
 A native, Sunshine-compatible game-stream host for the PlayStation 5. Add your console to Moonlight and stream
 the PS5 screen, game audio and controller input over your LAN.
 
-> **Status: 0.3.2 ([changelog](CHANGELOG.md)).** Pairing, H.264, HEVC and HDR from 360p up to 4K at 30 or 60 fps, game audio, controller, keyboard and mouse input work end to end
+> **Status: 0.3.4 ([changelog](CHANGELOG.md)).** Pairing, H.264, HEVC and HDR from 360p up to 4K at 30 or 60 fps, game audio, controller, keyboard and mouse input work end to end
 > with Moonlight on PC, in the browser (Moonlight Web) and on iPhone. Sessions of 30 minutes and ten reconnects
 > were tested without errors on firmware 13.00. Firmware 10.20 was tested by a contributor at 1080p. Users report streams on
-> 13.40 and 13.60, not measured here. A second device can join a running stream as another player, in its own codec, dynamic range or resolution up to 1080p. Not every client or game has
+> 10.40, 11.40, 12.70, 13.40 and 13.60, not measured here. A second device can join a running stream as another player, in its own codec, dynamic range or resolution up to 1080p. Not every client or game has
 > been tried.
 
 ## How it works
@@ -97,7 +97,9 @@ short press of Select sends Create when you let go, which means Create cannot be
 back, set `back_button_timeout = -1` in `sunshine.conf`; a value of 0 or more is the hold time in milliseconds.
 
 **Several controllers on one device:** every controller on a Moonlight client is a player of its own. The host's first
-controller plays as the console's user, and for each further one the console asks "Who's using this controller?". Two people on one PC need one
+controller plays as the console's user, and for each further one the console asks "Who's using this controller?" once it
+is first used: a controller the client announces but never uses (Steam Input's virtual one next to the real one, the
+on-screen controls) doesn't appear on the console at all. Two people on one PC need one
 Moonlight with both controllers connected, not two clients. Measured here with the test client (two pads on one device),
 and a contributor played with two controllers on one Moonlight client on 10.20.
 
@@ -242,8 +244,13 @@ ProsperoSunshine's ports by default. Nothing is open to the internet, only to th
 3. In Moonlight, add the console by its **tailnet address** (the 100.x address or its name), pair, and stream.
 
 If you set up ps5-tailscale before 0.7.3, its saved config keeps the old UDP list: add `47998, 47999, 48000` under its
-**Settings**, or Moonlight pairs and lists the games but the stream fails with "control stream establishment failed". A
-contributor tested this on a PS5 Pro on 10.20 with Moonlight on iOS, and with a console in another home on 0.3.1; it isn't
+**Settings**, or Moonlight pairs and lists the games but the stream fails with "control stream establishment failed".
+
+Don't list the console itself as a host under ps5-tailscale's **Game streaming** (that's for Moonlight on the PS5 streaming
+from a PC). ps5-tailscale then listens on the same ports on the console, the host can't open UDP 47999, and every stream
+fails at the start, in Moonlight as "Starting RTSP handshake failed" (issue 24).
+
+A contributor tested this on a PS5 Pro on 10.20 with Moonlight on iOS, and with a console in another home on 0.3.1; it isn't
 tested here. Without a payload on the
 console, a PC or router at home acting as a Tailscale subnet router works too; the friend then adds the console's LAN
 address.
@@ -279,7 +286,7 @@ address.
   HEVC. A device asking for more than 1080p gets 1080p on the second channel. A stream that joined keeps the mode when the
   device holding the channel leaves. A contributor played with four players on 10.20. Each controller is new
   to the console, which asks "Who's using this controller?": pick a user, or Add User and then Quick Play for a guest. Every
-  controller after the first is asked this way, also a second one on the same client. The console sends one copy of the
+  controller after the first is asked this way, also a second one on the same client, when it is first used. The console sends one copy of the
   stream per player, so a friend over the internet doubles its upload. While another device streams, quitting the app in
   Moonlight ends only your own stream; the last one to quit ends the app. A new stream from the same device replaces its
   old one. Measured here on 13.00 with the test client and a guest.

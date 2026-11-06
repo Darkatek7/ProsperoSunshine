@@ -41,8 +41,34 @@
     below that poor. A still picture needs less, so the colour waits for the first 10 seconds and says so in its tooltip.
   - The app's home screen counts the paired devices from the running host, as **Manage** does, so a device paired on the
     page shows up there right away instead of after **Reload**.
-- **A friend without a controller can play with keyboard and mouse.** While a device has no controller, its keyboard and
-  mouse become a controller of its own instead of going to the console's keyboard and mouse, which few games take. If you
+
+### Fixed
+
+- **A broken `sunshine_state.json` no longer stops pairing.** After a console hang a tester's file was all zeros; from
+  then on the host advertised an empty `uniqueid` and never saved a new pairing again. The file is now written to a
+  temporary file, synced and renamed over the old one, so a cut leaves the old or the new file. One that can't be read is
+  kept as `sunshine_state.json.corrupt` and the host starts over without pairings (PR #27).
+- **An unpaired Moonlight no longer fills `sunshine.log`.** Moonlight asks for `/serverinfo` every few seconds, and each
+  failed certificate check logged a warning. Now it is logged once per client certificate, with its address, and then at
+  most every 10 minutes.
+
+## 0.3.4 (2026-11-06)
+
+### Fixed
+
+- **"Who's using this controller?" no longer gets stuck.** Some clients announce a controller that never sends anything,
+  such as Steam Input's virtual controller next to the real one on Windows, or the on-screen controls on iOS. The console
+  asked who uses it, and only that controller could answer, so the dialog stayed on screen and blocked everything. Now a
+  guest's controller appears on the console only once it is used (a button, a trigger or a stick pushed a quarter of the
+  way), so one that is never used never asks. The host's controller still appears right away (thanks to @Darksk0pe for
+  reporting and testing, issue #26).
+
+## 0.3.3 (2026-11-06)
+
+### Added
+
+- **A friend without a controller can play with keyboard and mouse** (thanks to @EnriqueWood, PR #20). While a device has
+  no controller, its keyboard and mouse become a controller of its own instead of going to the console's keyboard and mouse, which few games take. If you
   already play with keyboard and mouse on a PC, the controls should feel like home: W A S D move, the mouse turns the
   camera, the mouse buttons are the triggers, Esc pauses, Tab opens the map. It takes a player slot like a controller,
   from the first key or mouse button that is one of its buttons (moving the mouse alone doesn't, so someone who only
@@ -77,16 +103,23 @@
 - **Settings in `sunshine.conf`:** `keyboard_mouse_pad = 0` keeps the old behaviour, `keyboard_mouse_profile` picks the
   profile, `keyboard_mouse_sensitivity` (in percent, 100 by default) is where a new device's mouse starts. Not in the app
   yet.
+- **A firmware probe for firmware nobody has measured yet** (thanks to @EnriqueWood, PR #25). `firmware_probe.elf` in the
+  release archive collects in about 2.5 minutes what the host needs on a new firmware: the capture record, the encoder's
+  quality fields, which modes and codecs open. It never runs during a stream, stops the host for its run and starts it
+  again, uploads nothing, and masks addresses in its report (`/data/prosperosunshine/firmware_probe/report.txt`). Send it
+  to the ELF loader (port 9021) when asked to in an issue; `docs/firmware-probe.md` has the details.
 
 ### Fixed
 
-- **A broken `sunshine_state.json` no longer stops pairing.** After a console hang a tester's file was all zeros; from
-  then on the host advertised an empty `uniqueid` and never saved a new pairing again. The file is now written to a
-  temporary file, synced and renamed over the old one, so a cut leaves the old or the new file. One that can't be read is
-  kept as `sunshine_state.json.corrupt` and the host starts over without pairings (PR #27).
-- **An unpaired Moonlight no longer fills `sunshine.log`.** Moonlight asks for `/serverinfo` every few seconds, and each
-  failed certificate check logged a warning. Now it is logged once per client certificate, with its address, and then at
-  most every 10 minutes.
+- **Surround sound when a wider stream joins** (thanks to @BuffMcBigHuge, PR #16). If a stereo stream opened the audio
+  channel first and a 5.1/7.1 client joined later, the reader now reopens the 12-channel bed instead of leaving the new
+  client with stereo in the front pair.
+- **Malformed audio packets are dropped.** A packet whose size does not fit the channel count is no longer split into the
+  wrong number of frames.
+- **The host no longer crashes when another program holds a stream port.** If UDP 47999 (the control port) was taken,
+  Sunshine's code read a null pointer while setting up the stream and the whole host went down; Moonlight showed "RTSP
+  handshake failed" (issue #24, firmware 11.40). Now the stream fails cleanly, the host keeps running, and `sunshine.log`
+  says which port is busy and why (`ENet couldn't open UDP port 47999: Address already in use`).
 
 ## 0.3.2 (2026-11-05)
 

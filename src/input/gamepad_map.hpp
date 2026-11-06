@@ -42,6 +42,16 @@ constexpr uint32_t allowed_buttons(uint32_t flags, PadRole role, bool all_player
 // A trigger counts as pressed (the digital L2/R2 bit) above this analog value.
 inline constexpr uint8_t trigger_threshold = 8;
 
+// A guest's pad opens on the console only once its controller is used (GitHub issue 26): some clients announce a
+// controller that never sends anything (Steam Input's virtual one next to the real one, on-screen controls), and the
+// console's "Who's using this controller?" for it can only be answered by that controller, so it blocked the screen.
+// A button, a trigger past the threshold or a stick pushed a quarter of the way counts; stick drift doesn't.
+inline constexpr int stick_wake = 8192;
+constexpr bool wakes_pad(uint32_t flags, uint8_t lt, uint8_t rt, int16_t ls_x, int16_t ls_y, int16_t rs_x, int16_t rs_y) {
+    const auto far = [](int16_t v) { return v >= stick_wake || v <= -stick_wake; };
+    return flags || lt >= trigger_threshold || rt >= trigger_threshold || far(ls_x) || far(ls_y) || far(rs_x) || far(rs_y);
+}
+
 // Moonlight sticks are signed 16-bit with +Y up; DualSense sticks are 0..255 with 0 at the top.
 constexpr uint8_t stick_axis(int16_t value, bool invert) {
     int v = (static_cast<int>(value) + 32768) >> 8;  // 0..255

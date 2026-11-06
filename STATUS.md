@@ -624,6 +624,60 @@ alle H.264 1080p60 auf „PS5 Screen“ mit `--no-script`; B, C und A beim zweit
 Nicht geprüft: echtes Moonlight, ein echter DualSense an der Konsole, und ob der Dialog „Wer benutzt diesen Controller?“
 einem Gast den Nutzer des Hosts anbietet.
 
+### Release 0.3.4 auf der Konsole (2026-11-06, 13.00)
+
+App aus `build/app` kopiert und neu registriert, sie zeigt `v01.000.020`; nach „Restart host“ meldet das Kernel-Log
+`version=0.3.4 commit=29a15422`. Testclient, Home-Bildschirm: H.264 und HEVC 1080p je 30 s mit 1795 und 1793 Bildern, ohne
+Lücke, längste Pause 19 ms, fehlerfrei dekodiert, je 5805 Tonpakete ohne Fehler.
+
+### Gast-Pad erst bei der ersten Eingabe (2026-11-06, 13.00, Testclient, Home-Bildschirm, nicht veröffentlicht)
+
+Issue #26 (13.60): Jedes Gerät meldete zwei Controller, der zweite drückte nie etwas, und die Frage „Wer benutzt diesen
+Controller?“ für ihn blieb stehen. Host `commit=171a5874` mit der Änderung (vor dem Commit), per ELF-Loader gestartet:
+
+- `--pads 2`, nur Pad 0 aktiv: „pad 0 attached as the host's controller“, „pad 1 announced, opens when it is used“; Pad 1
+  öffnete nie, am Ende „pad 1 gone, never used“. Danach zeigte der Startbildschirm keinen Dialog.
+- `--pads 2 --tick-pad 1`: Pad 1 öffnete beim ersten Druck („attached, the console asks who uses it“), am Ende abgemeldet.
+- A mit Controller, B tritt ohne Controller bei und drückt W: „pad 1 announced“, 4 ms später „keyboard and mouse … play as
+  virtual pad 1“ und „attached, the console asks who uses it“. Alle Streams ohne Lücke, fehlerfrei dekodiert.
+
+Nicht geprüft: echtes Moonlight mit Steam Input oder iOS, und der Fall, in dem das Phantom-Pad als erstes ankommt und damit
+das Pad des Hosts ist (dann bliebe der echte Controller ein Gast seines eigenen Geräts).
+
+**Bestätigt vom Melder** (Issue #26, 13.60, Testbuild `v0.3.3-pads-1`, 2026-11-06): Im `sunshine.log` seines Streams „pad 0
+attached as the host's controller“, „pad 1 announced, opens when it is used“, am Ende „pad 1 gone, never used“; er meldet,
+dass es jetzt geht. Der erste Versuch davor endete mit „Couldn't bind RTSP server to port [48010], Address already in use“:
+der vorige Host lief noch.
+
+### Release 0.3.3 auf der Konsole (2026-11-06, 13.00)
+
+App aus `build/app` kopiert und neu registriert, sie zeigt `v01.000.019` und installierte beim Start das gebündelte ELF;
+nach „Restart host“ meldet das Kernel-Log `version=0.3.3 commit=461bdc8c`. Der neue Hilfetext zu „PS for all players“ passt
+in die Zeile unter den Settings. Testclient, Home-Bildschirm: H.264 und HEVC 1080p je 30 s mit 1793 und 1790 Bildern, ohne
+Lücke, längste Pause 19 ms, fehlerfrei dekodiert, je 5800 Tonpakete ohne Fehler; danach Pad 0 abgemeldet, „the host role
+is free“.
+
+**Tastatur-Pad auf 13.00** (derselbe Host, per ELF-Loader gestartet, vor dem App-Build): Testclient ohne Controller
+(`--pads 0`, neu) mit `--kbm-seq`: Maus rechts und links, ein Radschritt, dann W und S. Maus und Rad öffneten weder ein Pad
+noch die Maus der Konsole; W öffnete „PS5 virtual pad 0 attached as the host's controller“ und „The keyboard and mouse of a
+client without a controller play as virtual pad 0“, am Streamende abgemeldet. Mit Controller (ohne `--pads 0`) gingen
+dieselben Eingaben wie bisher an die virtuelle Tastatur und Maus der Konsole. Beide Streams ohne Lücke, fehlerfrei
+dekodiert. Nicht geprüft auf 13.00: ein Spiel, die Profile, ein Gast mit Tastatur.
+
+### Raumklang folgt einem breiteren Stream (PR 16, 2026-11-06, 13.00, Testclient, Home-Bildschirm)
+
+Host `commit=c15327c3` (der PR-Stand), Schalter „Surround“ an, Konsole mit Stereo-Ausgabe. A streamt Stereo (40 s), B tritt
+nach 10 s per `/resume` mit 5.1 bei (`--surround 51`, 20 s), beide H.264 1080p60 mit `--no-script`.
+
+- Hostlog: A öffnet Typ 0 („2 channels“). Mit B: „sharing the channel another stream reads“, „6 channels“, dann beim Leser
+  von A „12 channels from the console for 2 speakers“, also der Wechsel auf Typ 3. Keine Warnung, kein verworfenes Paket.
+- A: 2391 Bilder ohne Lücke, fehlerfrei dekodiert, 7796 Tonpakete ohne Dekodierfehler, RMS je Kanal 0,0073 / 0,0062, auch
+  über den Wechsel hinweg.
+- B: 1183 Bilder ohne Lücke, fehlerfrei dekodiert, 6 Kanäle, RMS 0,0059 / 0,0054 / 0 / 0 / 0 / 0 (die Konsole gibt nur
+  Stereo aus).
+
+Nicht geprüft: eine Konsole mit 5.1-Ausgabe und ein abgelehnter Typ 3 (dann bleibt es bei Stereo bis zur nächsten Sitzung).
+
 ### Webseite (2026-11-05, 13.00, Branch `webui`, nicht veröffentlicht)
 
 Host und App aus dem Arbeitsstand des Branches, über die App installiert. Den Login hat für den Test `WEBLOGIN SET` vom PC
@@ -722,6 +776,24 @@ nicht nachgemessen; die Angaben stammen aus seinem PR.
 - `cfg+0x10 = 2` (AudioSecond) ist ebenfalls stereo; `cfg+0x10 = 1` (AudioAout) öffnet mit `rc=0`, liefert aber keine Pakete.
 - Für 7.1 nimmt er Sunshines Reihenfolge an (hinten vor seitlich), der Host seit 0.3.1 die von `sceAudioOut` (seitlich vor
   hinten). Für 5.1 ergeben beide dasselbe. Gemessen ist keine.
+
+### Belegter Steuerport (2026-11-05, 13.00, GitHub-Issue 24)
+
+Auf 11.40 stürzte der Host beim Stream-Start ab: `SIGSEGV` im Thread `rtsp::handler`, Lesezugriff auf 0. Die Rücksprünge
+aus dem Kernel-Log des Nutzers, auf das ELF von 0.3.2 abgebildet: `cmd_announce` → `session::start` → `start_broadcast` →
+`control_server_t::bind` → `net::host_create`. Dort liest Sunshine `host->socket`, auch wenn `enet_host_create` mit
+`nullptr` gescheitert ist (UDP 47999 nicht zu binden). Patch 0019 fängt das ab und loggt Port und errno.
+
+Nachgestellt mit `out/port_hold_probe.elf` (bindet UDP 47999 für 60 s) und dem Testbuild `v0.3.2-fw1140-1` (der Patch hieß
+dort 0017): Der Testclient bekam auf `ANNOUNCE` HTTP 500, `sunshine.log` meldete `ENet couldn't open UDP port 47999: Address
+already in use (errno 48)` und `Couldn't bind Control server to port [47999]`, der Host lief weiter
+(`SUNSHINE_SERVER_FREE`). Nach Freigabe des Ports, Mario-64-Demo: H.264 und HEVC 1080p je 30 s mit 1796 Bildern, ohne
+Lücke, längste Pause 21 ms, fehlerfrei dekodiert. Laut Nutzer hielt ps5-tailscale den Port: Er hatte die Konsole selbst
+unter „Game streaming“ eingetragen; ohne den Eintrag streamt er mit Tailscale (Bericht, hier nicht gemessen).
+
+Auf `main` übernommen als Patch 0019 (2026-11-06, 13.00, Host mit allem bis PR 16): Mit der Probe auf 47999 scheiterte der
+Stream mit RTSP 500, `sunshine.log` wie oben, der Host blieb bei `SUNSHINE_SERVER_FREE`. Nach Freigabe des Ports,
+Home-Bildschirm: H.264 und HEVC 1080p je 20 s mit 1193 Bildern, ohne Lücke, fehlerfrei dekodiert, Ton ohne Fehler.
 
 ### Release 0.3.2 auf der Konsole (2026-11-05, 13.00)
 

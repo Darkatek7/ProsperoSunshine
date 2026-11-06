@@ -230,6 +230,8 @@ struct audio_hub {
     std::vector<avcap_mic *> mics;
     avcap_mic *reader = nullptr;
     int source_channels = 2;  // of the channel the reader opened: 2 (type 0) or 12 (type 3)
+    int wanted_channels = 2;  // the widest layout any microphone asks for
+    bool surround_enabled = false;  // the app's Surround switch
     // Type 3's level per channel, logged every 30 s: which channels carry sound on a console with surround output.
     std::array<double, prospero::kAvcapSurroundChannels> squares{};
     std::size_t frames = 0;
@@ -243,11 +245,15 @@ public:
         auto shared = prospero::SharedCapture::acquire(rc);
         if (!shared) BOOST_LOG(warning) << "PS5 audio: capture session unavailable: "sv << rc << ", retrying"sv;
         auto mic = std::unique_ptr<avcap_mic>(new avcap_mic(std::move(shared), channels, sample_rate, frame_size));
-        mic->surround_ = surround && channels > 2;
+        {
+            std::lock_guard lock(hub_.mutex);
+            hub_.surround_enabled = surround;
+        }
         // A title started with the stream can hold the capture for a moment. Returning no microphone here left the
         // whole stream silent: Sunshine only asks for a new one after a reinit, which the silent fallback never sends.
         if (mic->another_reads()) BOOST_LOG(info) << "PS5 audio: sharing the channel another stream reads"sv;
-        else if (!mic->shared_ || !mic->open_channel()) mic->retry_at_ = std::chrono::steady_clock::now() + 500ms;
+        else if (!mic->shared_ || !mic->open_channel(mic->wanted_channels()))
+            mic->retry_at_ = std::chrono::steady_clock::now() + 500ms;
         return mic;
     }
 
@@ -255,6 +261,7 @@ public:
         if (open_) close_channel();
         std::lock_guard lock(hub_.mutex);
         std::erase(hub_.mics, this);
+        hub_.wanted_channels = wanted_channels_locked();
     }
 
     capture_e sample(std::vector<float> &frame_buffer) override {
@@ -273,12 +280,21 @@ public:
                 if (std::chrono::steady_clock::now() - start > 500ms) return silence(frame_buffer);
                 continue;
             }
-            if (open_ && generation_ != shared_->generation()) set_open(false);  // session was reopened
+            if (open_ && generation_ != shared_->generation()) {
+                set_open(false);  // session was reopened
+                surround_failed_ = false;  // a new session may allow type 3 again
+            }
             if (!open_) return silence(frame_buffer);
+            // A stream that joined with a wider layout makes the reader open the 12-channel bed.
+            if (source_channels_ == 2 && !surround_failed_ && wanted_channels() > 2 && surround_enabled()) {
+                close_channel();
+                if (!open_channel(wanted_channels())) return silence(frame_buffer);
+            }
             const int rc = shared_->with_session(
                 [&](ps_capture *s) { return ps_capture_audio_read(s, packet_.data(), packet_.size(), header_); });
             if (rc < 0) {
                 BOOST_LOG(warning) << "PS5 audio: ReadAudio failed: "sv << rc << ", reopening"sv;
+                if (source_channels_ == prospero::kAvcapSurroundChannels) surround_failed_ = true;
                 close_channel();
                 return silence(frame_buffer);
             }
@@ -289,6 +305,12 @@ public:
                     return silence(frame_buffer);
                 }
                 std::this_thread::sleep_for(1ms);
+                continue;
+            }
+            const size_t frame_bytes = static_cast<size_t>(source_channels_) * sizeof(float);
+            if (static_cast<size_t>(rc) % frame_bytes != 0) {
+                BOOST_LOG(warning) << "PS5 audio: packet of "sv << rc << " bytes is not "sv << source_channels_
+                                   << " channels, dropped"sv;
                 continue;
             }
             hand_out(reinterpret_cast<const float *>(packet_.data()), static_cast<size_t>(rc) / sizeof(float));
@@ -302,11 +324,29 @@ private:
           period_(std::chrono::nanoseconds(1'000'000'000LL * frame_size / sample_rate)), packet_(0xC000) {
         std::lock_guard lock(hub_.mutex);
         hub_.mics.push_back(this);
+        hub_.wanted_channels = std::max(hub_.wanted_channels, channels_);
     }
 
     bool another_reads() {
         std::lock_guard lock(hub_.mutex);
         return hub_.reader && hub_.reader != this;
+    }
+
+    int wanted_channels() {
+        std::lock_guard lock(hub_.mutex);
+        return hub_.wanted_channels;
+    }
+
+    // Caller holds hub_.mutex.
+    static int wanted_channels_locked() {
+        int wanted = 2;
+        for (avcap_mic *mic : hub_.mics) wanted = std::max(wanted, mic->channels_);
+        return wanted;
+    }
+
+    bool surround_enabled() {
+        std::lock_guard lock(hub_.mutex);
+        return hub_.surround_enabled;
     }
 
     void set_open(bool open) {
@@ -368,15 +408,16 @@ private:
         hub_.levels_at = now + 30s;
     }
 
-    bool open_channel() {
+    bool open_channel(int wanted) {
         // The generation is read under the lock that opens the channel. Read before it, a reopen in between (a game
         // starting) left the channel on the new session marked with the old generation: the next sample() then dropped
         // it without closing it, and every later open failed on the channel already there.
         unsigned generation = 0;
         int source = 2, surround_rc = 0;
+        const bool try_surround = surround_enabled() && wanted > 2 && !surround_failed_;
         const int rc = shared_->exclusive([&](ps_capture *s) {
             generation = shared_->generation();
-            if (surround_) {
+            if (try_surround) {
                 surround_rc = ps_capture_audio_open(s, 3, 0, 0);
                 if (!surround_rc) {
                     source = prospero::kAvcapSurroundChannels;
@@ -389,10 +430,13 @@ private:
             BOOST_LOG(warning) << "PS5 audio: OpenAudio failed: "sv << rc;
             return false;
         }
-        if (surround_ && surround_rc)
+        if (try_surround && surround_rc) {
+            surround_failed_ = true;
             BOOST_LOG(warning) << "PS5 audio: 12 channels refused ("sv << surround_rc << "), stereo"sv;
-        else if (surround_)
+        } else if (try_surround) {
             BOOST_LOG(info) << "PS5 audio: 12 channels from the console for "sv << channels_ << " speakers"sv;
+        }
+        source_channels_ = source;
         {
             std::lock_guard lock(hub_.mutex);
             hub_.source_channels = source;
@@ -415,7 +459,7 @@ private:
             // Only the session video opened: if video failed too, the stream is ending, and opening one here would hold
             // up its teardown.
             if (!shared_) shared_ = prospero::SharedCapture::attach();
-            if (shared_ && open_channel()) BOOST_LOG(info) << "PS5 audio: channel reopened"sv;
+            if (shared_ && open_channel(wanted_channels())) BOOST_LOG(info) << "PS5 audio: channel reopened"sv;
             retry_at_ = std::chrono::steady_clock::now() + 500ms;
         }
         {
@@ -432,7 +476,8 @@ private:
     static inline audio_hub hub_;
     std::shared_ptr<prospero::SharedCapture> shared_;
     int channels_;
-    bool surround_ = false;  // reads 12 channels when it opens the channel
+    int source_channels_ = 2;  // of the channel this microphone opened: 2 (type 0) or 12 (type 3)
+    bool surround_failed_ = false;  // type 3 was refused or failed; don't retry until a new session
     std::uint32_t frame_size_;
     std::chrono::nanoseconds period_;
     std::vector<uint8_t> packet_;
@@ -478,6 +523,8 @@ std::unique_ptr<audio_control_t> audio_control() { return std::make_unique<silen
 struct input_raw_t {
     std::mutex mutex;
     std::array<ps_pad *, MAX_GAMEPADS> pads{};
+    // A guest's slot whose pad isn't open yet: it opens on the controller's first use (wakes_pad, GitHub issue 26).
+    std::array<bool, MAX_GAMEPADS> waiting{};
     std::array<bool, MAX_GAMEPADS> active{};  // last state had something pressed or deflected
     std::array<bool, MAX_GAMEPADS> back{};    // Select is down
     std::array<bool, MAX_GAMEPADS> ps_held{}; // a guest's PS or Create press that was held back, logged once per press
@@ -644,6 +691,22 @@ void set_gamepad_owner(const feedback_queue_t &queue, std::string_view owner) {
     gamepad_owners.push_back({queue, queue.get(), std::string(owner)});
 }
 
+// Caller holds input.mutex.
+static bool open_pad(input_raw_t &input, int nr, bool host) {
+    auto *&pad = input.pads[nr];
+    const int rc = ps_pad_open(host ? input.user : PS_PAD_NO_USER, &pad);
+    if (rc) {
+        BOOST_LOG(error) << "PS5 virtual pad "sv << nr << " failed: "sv << rc;
+        pad = nullptr;
+        return false;
+    }
+    BOOST_LOG(info) << "PS5 virtual pad "sv << nr << " attached"sv
+                    << (host ? " as the host's controller"sv
+                             : input.roles.host_away() ? ", the console asks who uses it; the host is away and keeps the role"sv
+                                                       : ", the console asks who uses it"sv);
+    return true;
+}
+
 int alloc_gamepad(input_t &input, const gamepad_id_t &id, const gamepad_arrival_t &, feedback_queue_t feedback) {
     if (id.globalIndex < 0 || id.globalIndex >= MAX_GAMEPADS) return -1;
     const std::string owner = gamepad_owner(feedback);
@@ -651,23 +714,21 @@ int alloc_gamepad(input_t &input, const gamepad_id_t &id, const gamepad_arrival_
     input->feedback[id.globalIndex] = std::move(feedback);
     input->client_index[id.globalIndex] = id.clientRelativeIndex;
     auto *&pad = input->pads[id.globalIndex];
-    if (!pad) {
+    if (!pad && !input->waiting[id.globalIndex]) {
         // The host's pad plays as the console's user. Every other one, from another device or a second controller on the
-        // host's, is a guest: the system asks who uses it, and they pick a user or a guest (pad_roles.hpp).
+        // host's, is a guest: the system asks who uses it, and they pick a user or a guest (pad_roles.hpp). The role is
+        // the device's from the start; a guest's pad only opens on its first use, as the question can only be answered
+        // from that controller and a client may announce one that never sends anything (gamepad_map.hpp, wakes_pad).
         const bool host = input->roles.attach(id.globalIndex, owner);
-        const int rc = ps_pad_open(host ? input->user : PS_PAD_NO_USER, &pad);
-        if (rc) {
-            BOOST_LOG(error) << "PS5 virtual pad "sv << id.globalIndex << " failed: "sv << rc;
+        // No device ids in the log: it goes into the report people post.
+        if (!host) {
+            input->waiting[id.globalIndex] = true;
+            BOOST_LOG(info) << "PS5 virtual pad "sv << id.globalIndex << " announced, opens when it is used"sv
+                            << (owner.empty() ? " (device unknown)"sv : ""sv);
+        } else if (!open_pad(*input, id.globalIndex, true)) {
             input->roles.detach(id.globalIndex);
-            pad = nullptr;
             return -1;
         }
-        // No device ids in the log: it goes into the report people post.
-        BOOST_LOG(info) << "PS5 virtual pad "sv << id.globalIndex << " attached"sv
-                        << (host ? " as the host's controller"sv
-                                 : input->roles.host_away() ? ", the console asks who uses it; the host is away and keeps the role"sv
-                                                            : ", the console asks who uses it"sv)
-                        << (owner.empty() ? " (device unknown)"sv : ""sv);
     }
     request_motion(*input, id.globalIndex);
     return 0;
@@ -685,6 +746,12 @@ int rebind_gamepad(input_t &input, const gamepad_id_t &id, feedback_queue_t feed
 void free_gamepad(input_t &input, int nr) {
     if (nr < 0 || nr >= MAX_GAMEPADS) return;
     std::lock_guard lock(input->mutex);
+    if (input->waiting[nr]) {
+        input->waiting[nr] = false;
+        input->roles.detach(nr);
+        BOOST_LOG(info) << "PS5 virtual pad "sv << nr << " gone, never used"sv;
+        return;
+    }
     if (!input->pads[nr]) return;
     set_motors(*input, nr, 0, 0);
     set_triggers(*input, nr, prospero::triggers_off);
@@ -704,6 +771,16 @@ void free_gamepad(input_t &input, int nr) {
 void gamepad_update(input_t &input, int nr, const gamepad_state_t &state) {
     if (nr < 0 || nr >= MAX_GAMEPADS) return;
     std::lock_guard lock(input->mutex);
+    if (input->waiting[nr]) {
+        if (!prospero::wakes_pad(state.buttonFlags, state.lt, state.rt, state.lsX, state.lsY, state.rsX, state.rsY)) return;
+        // This first use only brings up the console's question for the new pad; the next press answers it.
+        input->waiting[nr] = false;
+        if (!open_pad(*input, nr, false)) {
+            input->roles.detach(nr);
+            return;
+        }
+        request_motion(*input, nr);
+    }
     if (!input->pads[nr]) return;
     const auto send = [&](uint32_t flags) {
         const auto mapped = prospero::map_gamepad(flags, state.lt, state.rt, state.lsX, state.lsY, state.rsX, state.rsY);
