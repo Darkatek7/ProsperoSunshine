@@ -25,6 +25,9 @@ void ps_diag_log(const char *format, ...)
     va_end(args);
 }
 
+// The debug build's "->" line before each risky call; nothing to check in these tests.
+void ps_diag_trace(const char *format, ...) { (void)format; }
+
 static int (*fake_callback)(int, int, const uint8_t *);
 static int fake_register(int id, void *callback, void *user)
 {

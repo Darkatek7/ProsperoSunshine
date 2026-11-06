@@ -184,7 +184,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File app/build.ps1
 ```
 
 The result is `build/app/PPSA47989/` and `build/app/PPSA47989.zip`. `-HostElf <path>` bundles another
-host build.
+host build. `-Debug` builds the debug app (README, "Debug build"): it bundles `out/debug/prospero_sunshine.elf`
+(`scripts/build.ps1 -Debug`), shows "debug" next to its version and in its report, and lands in
+`build/app-debug/PPSA47989-debug.zip`. It is the same title, so it replaces the normal app's folder and back.
 
 `app/build.ps1` builds the image `prosperosunshine-app:2` (`app/Dockerfile`: Debian with Clang 18, CMake and FFmpeg) and
 runs `app/build.sh` in it, with a Docker volume `prosperosunshine-app-cache` for everything that is

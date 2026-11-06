@@ -12,8 +12,10 @@
 #include <chrono>
 #include <cstring>
 #include <optional>
+#include <string>
 extern "C" {
 #include <ps5/klog.h>
+#include "platform/ps5/diag.h"
 }
 
 namespace prospero::mdns {
@@ -68,6 +70,7 @@ public:
         sockaddr_in bind_to{};
         bind_to.sin_family = AF_INET;
         bind_to.sin_port = htons(mdns_port);
+        ps_diag_trace("bind the mDNS port UDP %u\n", static_cast<unsigned>(mdns_port));
         if (bind(fd_, reinterpret_cast<sockaddr *>(&bind_to), sizeof bind_to) != 0) return fail("bind 5353");
         ip_mreq group{};
         inet_pton(AF_INET, "224.0.0.251", &group.imr_multiaddr);
@@ -94,12 +97,16 @@ public:
         return recv(fd_, buffer, size, 0);
     }
 
+    const std::string &error() const { return error_; }
+
 private:
     bool fail(const char *what) {
         klog_printf("ProsperoSunshine: mdns %s failed errno=%d, discovery disabled\n", what, errno);
+        error_ = std::string(what) + " errno=" + std::to_string(errno);
         return false;
     }
     int fd_ = -1;
+    std::string error_;
 };
 
 }
@@ -140,6 +147,13 @@ void run_responder(std::stop_token stop, const std::string &name, uint16_t port)
     }
     socket.send(build_announcement(service, true));
     klog_printf("ProsperoSunshine: mdns stopped, goodbye sent\n");
+}
+
+std::string check_socket() {
+    const auto lan = lan_address();
+    if (!lan) return "no LAN address";
+    Socket socket;
+    return socket.open(*lan) ? std::string() : socket.error();
 }
 
 }

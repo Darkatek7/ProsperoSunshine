@@ -1,0 +1,45 @@
+ProsperoSunshine: count the frames a client reports lost
+
+When frames are lost, Moonlight asks to invalidate the reference frames from the first to the last one it is missing
+(the host announces refPicInvalidation). The session counts those frames, so the debug build's stats line can show them
+next to the recoveries (patch 0015).
+
+--- a/src/rtsp.h
++++ b/src/rtsp.h
+@@ -159,6 +159,7 @@
+     std::uint64_t video_bytes = 0;  ///< Video bytes sent so far, FEC included.
+     std::uint32_t recoveries = 0;  ///< Times the client asked for an IDR or to invalidate reference frames.
+     std::uint32_t rtt_ms = 0;  ///< Round-trip time of the control connection, 0 until known.
++    std::uint32_t missing_frames = 0;  ///< Frames the client reported lost (the ranges it asked to invalidate).
+   };
+ 
+   /**
+--- a/src/stream.cpp
++++ b/src/stream.cpp
+@@ -580,6 +580,7 @@
+     std::atomic<std::uint64_t> info_video_bytes {0};  ///< Video bytes sent to the client, FEC included.
+     std::atomic<std::uint32_t> info_recoveries {0};  ///< The client's requests for an IDR or to invalidate reference frames.
+     std::atomic<std::uint32_t> info_rtt_ms {0};  ///< Round-trip time of the control connection; the control thread sets it.
++    std::atomic<std::uint32_t> info_missing_frames {0};  ///< Frames the client reported lost.
+   };
+ 
+   /**
+@@ -1230,6 +1231,10 @@
+         << "lastFrame [" << lastFrame << ']';
+ 
+       session->info_recoveries.fetch_add(1, std::memory_order_relaxed);
++      // One range counts 1000 frames at most, so a broken client cannot run the count up.
++      if (lastFrame >= firstFrame) {
++        session->info_missing_frames.fetch_add(static_cast<std::uint32_t>(std::min<std::int64_t>(lastFrame - firstFrame + 1, 1000)), std::memory_order_relaxed);
++      }
+       session->video.invalidate_ref_frames_events->raise(std::make_pair(firstFrame, lastFrame));
+     });
+ 
+@@ -2246,6 +2251,7 @@
+       result.video_bytes = session.info_video_bytes.load(std::memory_order_relaxed);
+       result.recoveries = session.info_recoveries.load(std::memory_order_relaxed);
+       result.rtt_ms = session.info_rtt_ms.load(std::memory_order_relaxed);
++      result.missing_frames = session.info_missing_frames.load(std::memory_order_relaxed);
+       return result;
+     }
+ 

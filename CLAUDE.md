@@ -20,6 +20,7 @@ verified state with evidence: `STATUS.md` (both German).
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1   # host + probes -> out/
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -Debug   # the debug flavor -> out/debug/
 ```
 
 ```sh
@@ -30,7 +31,13 @@ The app and its tests (the app bundles `out/prospero_sunshine.elf`, so build the
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File app/build.ps1   # -> build/app/PPSA47989 and .zip
+powershell -NoProfile -ExecutionPolicy Bypass -File app/build.ps1 -Debug   # -> build/app-debug/PPSA47989-debug.zip
 ```
+
+The debug flavor (`-DPROSPERO_DEBUG=ON`, README "Debug build") is the same code with the `->` trace (`ps_diag_trace`), the
+self-check (`src/sunshine/self_check.cpp`), `debug` as the default log level, masked addresses, held-back floods, the remote
+log and `-g`. Keep the two flavors as alike as that: a bug that shows in one should show in the other. Test builds for an
+issue are debug builds.
 
 ```sh
 docker run --rm --mount type=bind,source="$PWD",target=/repo prosperosunshine-app:2 bash app/tests/run.sh
@@ -73,9 +80,14 @@ Toolchain: PS5 Payload SDK v0.45 in the Docker image `prosperosunshine-sdk:v0.45
    `app/sce_sys/param.json` (must rise, format `01.000.004`), the status line in `README.md` and `CHANGELOG.md`.
 2. Build host and app, run both test suites, `scripts/package.sh <version>`. Check `SHA256SUMS` and grep the ELF
    for private strings (`10.0.0.0/8` in there is Sunshine's own LAN range).
-3. Install the build on the console, re-register the app (below), restart the host, stream H.264 and HEVC.
-4. Push, wait for CI, then `gh release create v<version> build/app/PPSA47989.zip dist/prosperosunshine-<version>.tar.gz`
-   with `--target <full SHA>` (a short SHA fails with HTTP 422).
+3. Install the build on the console, re-register the app (below), restart the host, stream H.264 and HEVC. Before the first
+   release with a change to the debug flavor, stream H.264 and HEVC at 1080p60 for 30 s on both flavors and compare the
+   missing frames.
+4. Push, then tag `v<version>` on that commit and push the tag: CI builds both flavors and the app from it and attaches
+   `PPSA47989.zip`, `PPSA47989-debug.zip`, `prosperosunshine-<version>.tar.gz`, `prosperosunshine-<version>-debug.tar.gz`
+   and `SHA256SUMS` to a draft release. Check it on the console, write the notes, then publish it. By hand, as before:
+   `gh release create v<version> build/app/PPSA47989.zip dist/prosperosunshine-<version>.tar.gz` with
+   `--target <full SHA>` (a short SHA fails with HTTP 422).
 5. Catalog: a PR to `darkxex/ps5-homebrew-catalog` updating `apps/PPSA47989.json` (`version`, `artifact_url`, `sha256`,
    `icon_url`) from a fork branch. The store API at `/api/v1/apps/PPSA47989.json` shows when it is live.
 

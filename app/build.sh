@@ -14,9 +14,13 @@
 # Inputs (all optional):
 #   /cache/ps5-opengl-sdk   the ps5-opengl SDK (manifest.sha256 inside); app/build.ps1 copies it from
 #                           PS5SD's build volume, PS5_OPENGL_SDK overrides the path
-#   HOST_ELF                the host payload to bundle (default out/prospero_sunshine.elf)
+#   APP_FLAVOR              normal (default) or debug: the debug app says so (src/psapp/flavor.hpp gets
+#                           PROSPERO_DEBUG) and bundles the debug host (README, "Debug build")
+#   HOST_ELF                the host payload to bundle (default out/prospero_sunshine.elf, for debug
+#                           out/debug/prospero_sunshine.elf)
 #   APP_SCE_SYS             the title data folder (default app/sce_sys)
-# Output: build/app/PPSA47989/ (the title folder) and build/app/PPSA47989.zip.
+# Output: build/app/PPSA47989/ (the title folder) and build/app/PPSA47989.zip; for debug build/app-debug/PPSA47989/ and
+# build/app-debug/PPSA47989-debug.zip, the same title, so it replaces the normal app's folder and back.
 set -euo pipefail
 
 repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
@@ -27,9 +31,14 @@ kit_rev=bf44d80384d5b8f8f4f213cf98d748887211328d
 kit="$cache/ps5-homebrew-ui"
 stage="$cache/stage"
 glsdk=${PS5_OPENGL_SDK:-$cache/ps5-opengl-sdk}
-host_elf=${HOST_ELF:-$repo/out/prospero_sunshine.elf}
+flavor=${APP_FLAVOR:-normal}
+case "$flavor" in
+    normal) default_elf="$repo/out/prospero_sunshine.elf"; out="$repo/build/app"; suffix="" ;;
+    debug) default_elf="$repo/out/debug/prospero_sunshine.elf"; out="$repo/build/app-debug"; suffix="-debug" ;;
+    *) echo "app/build.sh: APP_FLAVOR is normal or debug, not $flavor" >&2; exit 2 ;;
+esac
+host_elf=${HOST_ELF:-$default_elf}
 sce_sys=${APP_SCE_SYS:-$app_src/sce_sys}
-out="$repo/build/app"
 
 [ -f "$glsdk/manifest.sha256" ] || {
     echo "app/build.sh: no ps5-opengl SDK at $glsdk (see app/README.md, Building)" >&2
@@ -58,6 +67,10 @@ rsync -a --delete \
     "$kit/" "$stage/"
 rsync -a --delete "$app_src/src/" "$stage/src/app/"
 mv "$stage/src/app/main.cpp" "$stage/src/main.cpp"
+if [ "$flavor" = debug ]; then
+    sed -i '1i #define PROSPERO_DEBUG 1' "$stage/src/app/psapp/flavor.hpp"
+    grep -q "^#define PROSPERO_DEBUG 1" "$stage/src/app/psapp/flavor.hpp"
+fi
 rm -rf "$stage/sce_sys"
 mkdir -p "$stage/sce_sys"
 cp "$sce_sys/param.json" "$sce_sys/icon0.png" "$stage/sce_sys/"
@@ -94,9 +107,9 @@ cp -r "$repo/licenses/ps5-payload-sdk-runtime" "$repo/licenses/THIRD_PARTY.md" "
 cp "$kit/LICENSE" "$title/licenses/ps5-homebrew-ui-LICENSE.txt"
 cp "$kit/THIRD_PARTY_NOTICES.md" "$title/licenses/ps5-homebrew-ui-THIRD_PARTY_NOTICES.md"
 printf '%s\n' "ps5-homebrew-ui (GPL-3.0-or-later): $kit_url at $kit_rev" > "$title/licenses/SOURCES.txt"
-rm -rf "$out/$title_id" "$out/$title_id.zip"
+rm -rf "$out/$title_id" "$out/$title_id$suffix.zip"
 mkdir -p "$out"
 cp -a "$title" "$out/"
-(cd "$out" && python3 -m zipfile -c "$title_id.zip" "$title_id")
-python3 "$stage/tools/zip-open-modes.py" "$out/$title_id.zip"
-echo "app/build.sh: $out/$title_id ($(stat -c %s "$out/$title_id/eboot.bin") bytes eboot.bin)"
+(cd "$out" && python3 -m zipfile -c "$title_id$suffix.zip" "$title_id")
+python3 "$stage/tools/zip-open-modes.py" "$out/$title_id$suffix.zip"
+echo "app/build.sh: $out/$title_id$suffix.zip, $flavor ($(stat -c %s "$out/$title_id/eboot.bin") bytes eboot.bin)"

@@ -112,7 +112,21 @@ int main() {
     assert(sent_rate_kbps(0, 5.0) == 0);
     assert(sent_rate_kbps(1'000'000, 0.2) == -1);
 
+    // The debug log's line: the same facts without who it is, and what changed since the last line.
+    StreamFacts logged = first;
+    logged.sent_kbps = 19876;
+    logged.rtt_ms = 4;
+    logged.recoveries = 3;
+    logged.missing_frames = 12;
+    assert(stats_line(1, logged, {capture}, 2, 8) ==
+           "Stream stats: stream=1 role=capture channel=0 codec=HEVC hdr=0 mode=1920x1080@60 kbps=20000 sent_kbps=19876 rtt_ms=4 "
+           "recoveries=3(+1) missing_frames=12(+4) pads=1 secs=754");
+    assert(stats_line(2, StreamFacts{}, {}, -1, 0) ==
+           "Stream stats: stream=2 role=starting channel=- codec=H.264 hdr=0 mode=- kbps=0 sent_kbps=- rtt_ms=- recoveries=0(+0) "
+           "missing_frames=0(+0) pads=0 secs=0");
+    assert(stats_line(1, logged, {capture}, 0, 0).find("192.168") == std::string::npos);
+
     std::cout << "PASS: stream list (what each device asked for, what each capture channel delivers, unknown values, one line, "
-                 "what reaches the network)\n";
+                 "what reaches the network, the debug log's stats line)\n";
     return 0;
 }

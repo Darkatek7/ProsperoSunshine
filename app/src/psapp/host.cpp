@@ -4,6 +4,7 @@
 #include "app/psapp/experimental_list.h"
 
 #include "app/psapp/autoload.hpp"
+#include "app/psapp/flavor.hpp"
 #include "app/psapp/io.hpp"
 #include "app/psapp/web.hpp"
 #include "platform/ps5/system.hpp"
@@ -882,14 +883,15 @@ std::string Host::build_report()
         std::lock_guard<std::mutex> lock(mutex_);
         app_version = app_version_;
     }
-    std::string host_file, log_file;
+    std::string host_file, older_host_file, log_file;
     const bool have_host_file = io::read_text(kHostDiagPath, &host_file);
+    const bool have_older_host_file = io::read_text(kHostDiagOlderPath, &older_host_file);
     const bool have_log_file = io::read_text(kHostLogPath, &log_file, 4u << 20);
     const diag::HostLog host_log = diag::parse_host_log(host_file);
 
     std::string out = "ProsperoSunshine diagnostics\n\n";
     const auto line = [&out](const std::string &name, const std::string &value) { out += name + ": " + value + "\n"; };
-    line("App", app_version.empty() ? "unknown" : app_version);
+    line("App", (app_version.empty() ? std::string("unknown") : app_version) + (kDebugBuild ? ", debug build" : ""));
     char code[16];
     std::snprintf(code, sizeof code, "%#x", snap.firmware);
     line("Firmware", snap.firmware == 0 ? std::string("unknown")
@@ -953,6 +955,12 @@ std::string Host::build_report()
     out += diag::scrub(diag::experimental_report(host_log, switches), names);
     out += "\nHost breadcrumbs (host_diag.log):\n";
     out += have_host_file ? diag::scrub(diag::tail(host_file, 120), names) : "  no file: " + io::open_error(kHostDiagPath) + "\n";
+    if (have_older_host_file)
+    {
+        // How the last run ended, or how a long run started.
+        out += "\nOlder breadcrumbs (host_diag.log.1: the last run, or the lines before the newest), last lines:\n";
+        out += diag::scrub(diag::tail(older_host_file, 60), names);
+    }
     out += "\nsunshine.log, last lines:\n";
     out += have_log_file ? diag::scrub(diag::tail(log_file, 80), names) : "  no file: " + io::open_error(kHostLogPath) + "\n";
     return out;

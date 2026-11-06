@@ -17,8 +17,21 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O2")
 add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-fexperimental-library>)
 set(PROSPERO_WARNINGS -Wall -Wextra -Werror)
 
+# The debug flavor (README, "Debug build"; scripts/build.sh with PROSPERO_DEBUG=1 puts it in out/debug): the same code and
+# features, plus a "->" line before each call that may hang, a short self-check at start, debug as the default log level,
+# addresses masked and floods held back in the logs, an optional remote log, and "-debug" after the version. It is built
+# with DWARF line info and a link map; the ELF that ships has the line info stripped (same code, same addresses) and
+# prospero_sunshine.debug.elf keeps it for addr2line.
+option(PROSPERO_DEBUG "Build the debug flavor of the host" OFF)
+set(PROSPERO_FLAVOR_SUFFIX "")
+if(PROSPERO_DEBUG)
+    add_compile_definitions(PROSPERO_DEBUG=1)
+    add_compile_options(-g)
+    set(PROSPERO_FLAVOR_SUFFIX "-debug")
+endif()
+
 set(PROSPERO_OUT "${CMAKE_SOURCE_DIR}/out" CACHE PATH "Where ELFs and libraries are placed")
-set(PROSPERO_DEPS "${PROSPERO_OUT}/deps" CACHE PATH "Prefix of the prebuilt third-party libraries")
+set(PROSPERO_DEPS "${CMAKE_SOURCE_DIR}/out/deps" CACHE PATH "Prefix of the prebuilt third-party libraries")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROSPERO_OUT}")
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${PROSPERO_OUT}")
 set(CMAKE_EXECUTABLE_SUFFIX ".elf")
@@ -60,6 +73,7 @@ target_compile_options(prospero_core PRIVATE ${PROSPERO_WARNINGS})
 # mDNS responder (P9.2): portable packet code plus the socket loop.
 add_library(prospero_mdns STATIC src/net/mdns.cpp src/platform/ps5/mdns_responder.cpp)
 target_include_directories(prospero_mdns PUBLIC src)
+target_link_libraries(prospero_mdns PUBLIC prospero_ra)  # the debug build's "->" line before the bind
 target_compile_options(prospero_mdns PRIVATE ${PROSPERO_WARNINGS})
 
 # Probes: each is a standalone payload that logs its result to klog.
@@ -191,7 +205,7 @@ extern const std::size_t prospero_web_asset_count = sizeof prospero_web_assets /
         ${SUNSHINE_KEPT}
         "${MOONLIGHT_SRC}/src/RtspParser.c"
         src/sunshine/main_ps5.cpp src/sunshine/video_ps5.cpp src/sunshine/process_ps5.cpp
-        src/sunshine/platform_ps5.cpp src/sunshine/stubs_ps5.cpp src/control/control_server.cpp
+        src/sunshine/platform_ps5.cpp src/sunshine/stubs_ps5.cpp src/sunshine/self_check.cpp src/control/control_server.cpp
         src/control/autoload_host.cpp app/src/psapp/autoload.cpp src/apps/titles.cpp src/platform/ps5/title_launch.c)
     # Sunshine includes its own headers as "src/..." and "..."; FFmpeg's internal headers include a
     # "config.h" that must not resolve to Sunshine's, hence -idirafter for the Sunshine tree.
@@ -210,7 +224,7 @@ extern const std::size_t prospero_web_asset_count = sizeof prospero_web_assets /
         set(PROSPERO_COMMIT "unknown")
     endif()
     target_compile_definitions(prospero_sunshine PRIVATE
-        PROJECT_NAME="ProsperoSunshine" PROJECT_VERSION="0.4.0" PROJECT_VERSION_MAJOR="0"
+        PROJECT_NAME="ProsperoSunshine" PROJECT_VERSION="0.4.0${PROSPERO_FLAVOR_SUFFIX}" PROJECT_VERSION_MAJOR="0"
         PROJECT_VERSION_MINOR="4" PROJECT_VERSION_PATCH="0" PROJECT_VERSION_COMMIT="${PROSPERO_COMMIT}"
         PROJECT_FQDN="dev.prosperosunshine" SUNSHINE_ASSETS_DIR="/data/prosperosunshine/assets"
         SUNSHINE_PUBLISHER_NAME="ProsperoSunshine" SUNSHINE_PUBLISHER_WEBSITE=""
@@ -219,4 +233,11 @@ extern const std::size_t prospero_web_asset_count = sizeof prospero_web_assets /
         "-Wl,--start-group" ${BOOST_LIBS} "${PROSPERO_DEPS}/lib/libdisplaydevice_common.a"
         "${PROSPERO_DEPS}/lib/libavcodec.a" "${PROSPERO_DEPS}/lib/libswscale.a" "${PROSPERO_DEPS}/lib/libavutil.a"
         dep::ssl dep::crypto dep::opus dep::enet dep::nanors "-Wl,--end-group" pthread SceSystemService SceUserService)
+    if(PROSPERO_DEBUG)
+        target_link_options(prospero_sunshine PRIVATE "-Wl,-Map=${PROSPERO_OUT}/prospero_sunshine.map")
+        add_custom_command(TARGET prospero_sunshine POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E copy "${PROSPERO_OUT}/prospero_sunshine.elf" "${PROSPERO_OUT}/prospero_sunshine.debug.elf"
+            COMMAND "${CMAKE_STRIP}" --strip-debug "${PROSPERO_OUT}/prospero_sunshine.elf"
+            COMMENT "prospero_sunshine.debug.elf keeps the line info; the ELF that ships has it stripped")
+    endif()
 endif()
