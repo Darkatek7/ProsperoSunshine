@@ -40,5 +40,12 @@ int main() {
     static_assert(allowed_buttons(with_home, PadRole::guest, false) == (moonlight::a | moonlight::start));
     static_assert(allowed_buttons(with_home, PadRole::guest, true) == with_home);
     static_assert(allowed_buttons(0, PadRole::guest, false) == 0);
-    std::cout << "PASS: gamepad mapping (face, system, sticks, triggers, trigger effects, PS and Create for the host only)\n";
+    // A guest's pad opens on its first use: a button, a trigger or a stick pushed far enough, not drift (issue 26).
+    static_assert(!wakes_pad(0, 0, 0, 0, 0, 0, 0));
+    static_assert(!wakes_pad(0, trigger_threshold - 1, 0, 3000, -3000, stick_wake - 1, -(stick_wake - 1)));
+    static_assert(wakes_pad(moonlight::a, 0, 0, 0, 0, 0, 0));
+    static_assert(wakes_pad(0, 0, trigger_threshold, 0, 0, 0, 0));
+    static_assert(wakes_pad(0, 0, 0, 0, -stick_wake, 0, 0) && wakes_pad(0, 0, 0, 0, 0, 0, -32768));
+    std::cout << "PASS: gamepad mapping (face, system, sticks, triggers, trigger effects, PS and Create for the host only, "
+                 "a guest's pad opens on its first use)\n";
 }

@@ -624,6 +624,20 @@ alle H.264 1080p60 auf „PS5 Screen“ mit `--no-script`; B, C und A beim zweit
 Nicht geprüft: echtes Moonlight, ein echter DualSense an der Konsole, und ob der Dialog „Wer benutzt diesen Controller?“
 einem Gast den Nutzer des Hosts anbietet.
 
+### Gast-Pad erst bei der ersten Eingabe (2026-11-06, 13.00, Testclient, Home-Bildschirm, nicht veröffentlicht)
+
+Issue #26 (13.60): Jedes Gerät meldete zwei Controller, der zweite drückte nie etwas, und die Frage „Wer benutzt diesen
+Controller?“ für ihn blieb stehen. Host `commit=171a5874` mit der Änderung (vor dem Commit), per ELF-Loader gestartet:
+
+- `--pads 2`, nur Pad 0 aktiv: „pad 0 attached as the host's controller“, „pad 1 announced, opens when it is used“; Pad 1
+  öffnete nie, am Ende „pad 1 gone, never used“. Danach zeigte der Startbildschirm keinen Dialog.
+- `--pads 2 --tick-pad 1`: Pad 1 öffnete beim ersten Druck („attached, the console asks who uses it“), am Ende abgemeldet.
+- A mit Controller, B tritt ohne Controller bei und drückt W: „pad 1 announced“, 4 ms später „keyboard and mouse … play as
+  virtual pad 1“ und „attached, the console asks who uses it“. Alle Streams ohne Lücke, fehlerfrei dekodiert.
+
+Nicht geprüft: echtes Moonlight mit Steam Input oder iOS, und der Fall, in dem das Phantom-Pad als erstes ankommt und damit
+das Pad des Hosts ist (dann bliebe der echte Controller ein Gast seines eigenen Geräts).
+
 ### Release 0.3.3 auf der Konsole (2026-11-06, 13.00)
 
 App aus `build/app` kopiert und neu registriert, sie zeigt `v01.000.019` und installierte beim Start das gebündelte ELF;

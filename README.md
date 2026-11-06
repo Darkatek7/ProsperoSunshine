@@ -96,7 +96,9 @@ short press of Select sends Create when you let go, which means Create cannot be
 back, set `back_button_timeout = -1` in `sunshine.conf`; a value of 0 or more is the hold time in milliseconds.
 
 **Several controllers on one device:** every controller on a Moonlight client is a player of its own. The host's first
-controller plays as the console's user, and for each further one the console asks "Who's using this controller?". Two people on one PC need one
+controller plays as the console's user, and for each further one the console asks "Who's using this controller?" once it
+is first used: a controller the client announces but never uses (Steam Input's virtual one next to the real one, the
+on-screen controls) doesn't appear on the console at all. Two people on one PC need one
 Moonlight with both controllers connected, not two clients. Measured here with the test client (two pads on one device),
 and a contributor played with two controllers on one Moonlight client on 10.20.
 
@@ -251,7 +253,7 @@ address.
   HEVC. A device asking for more than 1080p gets 1080p on the second channel. A stream that joined keeps the mode when the
   device holding the channel leaves. A contributor played with four players on 10.20. Each controller is new
   to the console, which asks "Who's using this controller?": pick a user, or Add User and then Quick Play for a guest. Every
-  controller after the first is asked this way, also a second one on the same client. The console sends one copy of the
+  controller after the first is asked this way, also a second one on the same client, when it is first used. The console sends one copy of the
   stream per player, so a friend over the internet doubles its upload. While another device streams, quitting the app in
   Moonlight ends only your own stream; the last one to quit ends the app. A new stream from the same device replaces its
   old one. Measured here on 13.00 with the test client and a guest.

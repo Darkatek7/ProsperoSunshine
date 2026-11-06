@@ -523,6 +523,8 @@ std::unique_ptr<audio_control_t> audio_control() { return std::make_unique<silen
 struct input_raw_t {
     std::mutex mutex;
     std::array<ps_pad *, MAX_GAMEPADS> pads{};
+    // A guest's slot whose pad isn't open yet: it opens on the controller's first use (wakes_pad, GitHub issue 26).
+    std::array<bool, MAX_GAMEPADS> waiting{};
     std::array<bool, MAX_GAMEPADS> active{};  // last state had something pressed or deflected
     std::array<bool, MAX_GAMEPADS> back{};    // Select is down
     std::array<bool, MAX_GAMEPADS> ps_held{}; // a guest's PS or Create press that was held back, logged once per press
@@ -689,6 +691,22 @@ void set_gamepad_owner(const feedback_queue_t &queue, std::string_view owner) {
     gamepad_owners.push_back({queue, queue.get(), std::string(owner)});
 }
 
+// Caller holds input.mutex.
+static bool open_pad(input_raw_t &input, int nr, bool host) {
+    auto *&pad = input.pads[nr];
+    const int rc = ps_pad_open(host ? input.user : PS_PAD_NO_USER, &pad);
+    if (rc) {
+        BOOST_LOG(error) << "PS5 virtual pad "sv << nr << " failed: "sv << rc;
+        pad = nullptr;
+        return false;
+    }
+    BOOST_LOG(info) << "PS5 virtual pad "sv << nr << " attached"sv
+                    << (host ? " as the host's controller"sv
+                             : input.roles.host_away() ? ", the console asks who uses it; the host is away and keeps the role"sv
+                                                       : ", the console asks who uses it"sv);
+    return true;
+}
+
 int alloc_gamepad(input_t &input, const gamepad_id_t &id, const gamepad_arrival_t &, feedback_queue_t feedback) {
     if (id.globalIndex < 0 || id.globalIndex >= MAX_GAMEPADS) return -1;
     const std::string owner = gamepad_owner(feedback);
@@ -696,23 +714,21 @@ int alloc_gamepad(input_t &input, const gamepad_id_t &id, const gamepad_arrival_
     input->feedback[id.globalIndex] = std::move(feedback);
     input->client_index[id.globalIndex] = id.clientRelativeIndex;
     auto *&pad = input->pads[id.globalIndex];
-    if (!pad) {
+    if (!pad && !input->waiting[id.globalIndex]) {
         // The host's pad plays as the console's user. Every other one, from another device or a second controller on the
-        // host's, is a guest: the system asks who uses it, and they pick a user or a guest (pad_roles.hpp).
+        // host's, is a guest: the system asks who uses it, and they pick a user or a guest (pad_roles.hpp). The role is
+        // the device's from the start; a guest's pad only opens on its first use, as the question can only be answered
+        // from that controller and a client may announce one that never sends anything (gamepad_map.hpp, wakes_pad).
         const bool host = input->roles.attach(id.globalIndex, owner);
-        const int rc = ps_pad_open(host ? input->user : PS_PAD_NO_USER, &pad);
-        if (rc) {
-            BOOST_LOG(error) << "PS5 virtual pad "sv << id.globalIndex << " failed: "sv << rc;
+        // No device ids in the log: it goes into the report people post.
+        if (!host) {
+            input->waiting[id.globalIndex] = true;
+            BOOST_LOG(info) << "PS5 virtual pad "sv << id.globalIndex << " announced, opens when it is used"sv
+                            << (owner.empty() ? " (device unknown)"sv : ""sv);
+        } else if (!open_pad(*input, id.globalIndex, true)) {
             input->roles.detach(id.globalIndex);
-            pad = nullptr;
             return -1;
         }
-        // No device ids in the log: it goes into the report people post.
-        BOOST_LOG(info) << "PS5 virtual pad "sv << id.globalIndex << " attached"sv
-                        << (host ? " as the host's controller"sv
-                                 : input->roles.host_away() ? ", the console asks who uses it; the host is away and keeps the role"sv
-                                                            : ", the console asks who uses it"sv)
-                        << (owner.empty() ? " (device unknown)"sv : ""sv);
     }
     request_motion(*input, id.globalIndex);
     return 0;
@@ -730,6 +746,12 @@ int rebind_gamepad(input_t &input, const gamepad_id_t &id, feedback_queue_t feed
 void free_gamepad(input_t &input, int nr) {
     if (nr < 0 || nr >= MAX_GAMEPADS) return;
     std::lock_guard lock(input->mutex);
+    if (input->waiting[nr]) {
+        input->waiting[nr] = false;
+        input->roles.detach(nr);
+        BOOST_LOG(info) << "PS5 virtual pad "sv << nr << " gone, never used"sv;
+        return;
+    }
     if (!input->pads[nr]) return;
     set_motors(*input, nr, 0, 0);
     set_triggers(*input, nr, prospero::triggers_off);
@@ -749,6 +771,16 @@ void free_gamepad(input_t &input, int nr) {
 void gamepad_update(input_t &input, int nr, const gamepad_state_t &state) {
     if (nr < 0 || nr >= MAX_GAMEPADS) return;
     std::lock_guard lock(input->mutex);
+    if (input->waiting[nr]) {
+        if (!prospero::wakes_pad(state.buttonFlags, state.lt, state.rt, state.lsX, state.lsY, state.rsX, state.rsY)) return;
+        // This first use only brings up the console's question for the new pad; the next press answers it.
+        input->waiting[nr] = false;
+        if (!open_pad(*input, nr, false)) {
+            input->roles.detach(nr);
+            return;
+        }
+        request_motion(*input, nr);
+    }
     if (!input->pads[nr]) return;
     const auto send = [&](uint32_t flags) {
         const auto mapped = prospero::map_gamepad(flags, state.lt, state.rt, state.lsX, state.lsY, state.rsX, state.rsY);
