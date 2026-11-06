@@ -5,7 +5,7 @@
 A native, Sunshine-compatible game-stream host for the PlayStation 5. Add your console to Moonlight and stream
 the PS5 screen, game audio and controller input over your LAN.
 
-> **Status: 0.3.3 ([changelog](CHANGELOG.md)).** Pairing, H.264, HEVC and HDR from 360p up to 4K at 30 or 60 fps, game audio, controller, keyboard and mouse input work end to end
+> **Status: 0.3.4 ([changelog](CHANGELOG.md)).** Pairing, H.264, HEVC and HDR from 360p up to 4K at 30 or 60 fps, game audio, controller, keyboard and mouse input work end to end
 > with Moonlight on PC, in the browser (Moonlight Web) and on iPhone. Sessions of 30 minutes and ten reconnects
 > were tested without errors on firmware 13.00. Firmware 10.20 was tested by a contributor at 1080p. Users report streams on
 > 10.40, 11.40, 12.70, 13.40 and 13.60, not measured here. A second device can join a running stream as another player, in its own codec, dynamic range or resolution up to 1080p. Not every client or game has
