@@ -686,6 +686,24 @@ nicht nachgemessen; die Angaben stammen aus seinem PR.
 - Für 7.1 nimmt er Sunshines Reihenfolge an (hinten vor seitlich), der Host seit 0.3.1 die von `sceAudioOut` (seitlich vor
   hinten). Für 5.1 ergeben beide dasselbe. Gemessen ist keine.
 
+### Belegter Steuerport (2026-11-05, 13.00, GitHub-Issue 24)
+
+Auf 11.40 stürzte der Host beim Stream-Start ab: `SIGSEGV` im Thread `rtsp::handler`, Lesezugriff auf 0. Die Rücksprünge
+aus dem Kernel-Log des Nutzers, auf das ELF von 0.3.2 abgebildet: `cmd_announce` → `session::start` → `start_broadcast` →
+`control_server_t::bind` → `net::host_create`. Dort liest Sunshine `host->socket`, auch wenn `enet_host_create` mit
+`nullptr` gescheitert ist (UDP 47999 nicht zu binden). Patch 0019 fängt das ab und loggt Port und errno.
+
+Nachgestellt mit `out/port_hold_probe.elf` (bindet UDP 47999 für 60 s) und dem Testbuild `v0.3.2-fw1140-1` (der Patch hieß
+dort 0017): Der Testclient bekam auf `ANNOUNCE` HTTP 500, `sunshine.log` meldete `ENet couldn't open UDP port 47999: Address
+already in use (errno 48)` und `Couldn't bind Control server to port [47999]`, der Host lief weiter
+(`SUNSHINE_SERVER_FREE`). Nach Freigabe des Ports, Mario-64-Demo: H.264 und HEVC 1080p je 30 s mit 1796 Bildern, ohne
+Lücke, längste Pause 21 ms, fehlerfrei dekodiert. Laut Nutzer hielt ps5-tailscale den Port: Er hatte die Konsole selbst
+unter „Game streaming“ eingetragen; ohne den Eintrag streamt er mit Tailscale (Bericht, hier nicht gemessen).
+
+Auf `main` übernommen als Patch 0019 (2026-11-06, 13.00, Host mit allem bis PR 16): Mit der Probe auf 47999 scheiterte der
+Stream mit RTSP 500, `sunshine.log` wie oben, der Host blieb bei `SUNSHINE_SERVER_FREE`. Nach Freigabe des Ports,
+Home-Bildschirm: H.264 und HEVC 1080p je 20 s mit 1193 Bildern, ohne Lücke, fehlerfrei dekodiert, Ton ohne Fehler.
+
 ### Release 0.3.2 auf der Konsole (2026-11-05, 13.00)
 
 App aus `build/app` kopiert und neu registriert, sie zeigt `v01.000.018`; nach „Restart host“ meldet das Kernel-Log

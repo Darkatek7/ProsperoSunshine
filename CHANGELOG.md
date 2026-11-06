@@ -43,10 +43,15 @@
 
 ### Fixed
 
-- **Surround sound when a wider stream joins** (thanks to @BuffMcBigHuge, PR #16). If a stereo stream opened the audio channel first and a 5.1/7.1 client
-  joined later, the reader now reopens the 12-channel bed instead of leaving the new client with stereo in the front pair.
+- **Surround sound when a wider stream joins** (thanks to @BuffMcBigHuge, PR #16). If a stereo stream opened the audio
+  channel first and a 5.1/7.1 client joined later, the reader now reopens the 12-channel bed instead of leaving the new
+  client with stereo in the front pair.
 - **Malformed audio packets are dropped.** A packet whose size does not fit the channel count is no longer split into the
   wrong number of frames.
+- **The host no longer crashes when another program holds a stream port.** If UDP 47999 (the control port) was taken,
+  Sunshine's code read a null pointer while setting up the stream and the whole host went down; Moonlight showed "RTSP
+  handshake failed" (issue #24, firmware 11.40). Now the stream fails cleanly, the host keeps running, and `sunshine.log`
+  says which port is busy and why (`ENet couldn't open UDP port 47999: Address already in use`).
 
 ## 0.3.2 (2026-11-05)
 
