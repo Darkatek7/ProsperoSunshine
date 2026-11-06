@@ -1,4 +1,5 @@
-param([switch]$RebuildImage)
+# -Debug builds the debug flavor into out/debug (README, "Debug build").
+param([switch]$RebuildImage, [switch]$Debug)
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $image = 'prosperosunshine-sdk:v0.45'
@@ -9,5 +10,6 @@ if ($RebuildImage -or $LASTEXITCODE -ne 0) {
 }
 # Here, not in the container: a worktree's .git points outside what the container sees.
 $commit = git -C $projectRoot rev-parse --short=8 HEAD
-docker run --rm -e "PROSPERO_COMMIT=$commit" --mount "type=bind,source=$projectRoot,target=/repo" $image bash scripts/build.sh
+$flavor = if ($Debug) { '1' } else { '0' }
+docker run --rm -e "PROSPERO_COMMIT=$commit" -e "PROSPERO_DEBUG=$flavor" --mount "type=bind,source=$projectRoot,target=/repo" $image bash scripts/build.sh
 if ($LASTEXITCODE -ne 0) { throw 'PS5 build failed' }

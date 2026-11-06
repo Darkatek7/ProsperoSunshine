@@ -118,6 +118,8 @@ std::string build_report(ControlServer &control) {
 
     const std::optional<std::string> host_file = read_tail(diag_path, 4u << 20);
     const std::optional<std::string> log_file = read_tail(log_path, 4u << 20);
+    const std::filesystem::path older_diag_path = data / "host_diag.log.1";
+    const std::optional<std::string> older_host_file = read_tail(older_diag_path, 4u << 20);
     const psapp::diag::HostLog host_log = psapp::diag::parse_host_log(host_file.value_or(std::string()));
     const std::uint32_t firmware = kernel_get_fw_version();
 
@@ -183,6 +185,11 @@ std::string build_report(ControlServer &control) {
     out += psapp::diag::scrub(psapp::diag::experimental_report(host_log, switches), names);
     out += "\nHost breadcrumbs (host_diag.log):\n";
     out += host_file ? psapp::diag::scrub(psapp::diag::tail(*host_file, 120), names) : no_file(diag_path);
+    if (older_host_file) {
+        // How the last run ended, or how a long run started (the app's report has the same section).
+        out += "\nOlder breadcrumbs (host_diag.log.1: the last run, or the lines before the newest), last lines:\n";
+        out += psapp::diag::scrub(psapp::diag::tail(*older_host_file, 60), names);
+    }
     out += "\nsunshine.log, last lines:\n";
     out += log_file ? psapp::diag::scrub(psapp::diag::tail(*log_file, 80), names) : no_file(log_path);
     return out;

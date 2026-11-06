@@ -5,7 +5,13 @@
 #include "apps/titles.hpp"
 #include "control/control_server.hpp"
 #include "control/listener_watch.hpp"
+#include "control/stream_list.hpp"
 #include "input/title_profile.hpp"
+#include "log/log_filter.hpp"
+#include "log/remote_log.hpp"
+#include "probe_scrub.hpp"
+#include "sunshine/self_check.hpp"
+#include "sunshine/video_ps5.hpp"
 #include "platform/ps5/mdns_responder.hpp"
 #include "web/web_server.hpp"
 #include "platform/ps5/capture.h"
@@ -24,9 +30,12 @@
 #include "src/video.h"
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <boost/core/null_deleter.hpp>
 #include <boost/log/core.hpp>
 #include <boost/log/expressions.hpp>
@@ -43,10 +52,41 @@ extern "C" {
 using namespace std::literals;
 
 namespace {
+#ifdef PROSPERO_DEBUG
+constexpr bool kDebugBuild = true;
+#else
+constexpr bool kDebugBuild = false;
+#endif
+
+// What reaches sunshine.log and the kernel log (log/log_filter.hpp): secrets are hidden in every build; the debug build
+// also masks addresses and holds back floods of similar lines. One filter per sink, as each counts what it wrote.
+prospero::logs::Options log_options() {
+    prospero::logs::Options options;
+    options.mask_addresses = kDebugBuild;
+    options.limit = kDebugBuild;
+    return options;
+}
+prospero::logs::Filter file_filter(log_options()), klog_filter(log_options());
+// The debug build's remote log, only when sunshine.conf names an address (log/remote_log.hpp).
+prospero::logs::RemoteLog remote_log;
+
+// host_diag.log in the debug build: addresses masked as in sunshine.log, and each line to the remote log.
+size_t mask_diag_line(char *line, size_t length, size_t capacity) {
+    const std::string masked = probe::scrub(std::string(line, length));
+    const size_t kept = std::min(masked.size(), capacity - 1);
+    std::memcpy(line, masked.data(), kept);
+    return kept;
+}
+void send_diag_line(const char *line, size_t length) { remote_log.send(2, "prospero_diag", std::string_view(line, length)); }
+
 // Sunshine logs to stdout and a file; on the console the kernel log is what developers watch.
 struct klog_backend : boost::log::sinks::basic_formatted_sink_backend<char, boost::log::sinks::synchronized_feeding> {
-    void consume(const boost::log::record_view &, const std::string &text) {
-        klog_printf("ProsperoSunshine: host %s\n", text.c_str());
+    void consume(const boost::log::record_view &record, const std::string &) {
+        const auto severity = record.attribute_values()["Severity"].extract<int>();
+        const auto message = record.attribute_values()["Message"].extract<std::string>();
+        for (const auto &line : klog_filter.take(severity ? severity.get() : 2, message ? message.get() : std::string(),
+                                                 std::chrono::steady_clock::now()))
+            klog_printf("ProsperoSunshine: host [%d] %s\n", line.severity, line.message.c_str());
     }
 };
 
@@ -81,6 +121,52 @@ bool wait_or_ports_lost(const std::shared_ptr<safe::event_t<bool>> &shutdown_eve
     return false;
 }
 
+// While the log level is debug, every 5 s: one line per running stream with what reaches the network (stats_line in
+// control/stream_list.hpp, without who it is), the rate since the last line. At most one line per stream every 5 s.
+void log_stream_stats(std::stop_token stop) {
+    struct Last {
+        uint64_t bytes = 0;
+        std::chrono::steady_clock::time_point at;
+        int recoveries = 0, missing = 0;
+    };
+    std::map<std::string, Last> last;
+    auto next = std::chrono::steady_clock::now() + 5s;
+    while (!stop.stop_requested()) {
+        std::this_thread::sleep_for(250ms);
+        const auto now = std::chrono::steady_clock::now();
+        if (now < next) continue;
+        next = now + 5s;
+        const auto sessions = config::sunshine.min_log_level <= 1 ? rtsp_stream::session_infos()
+                                                                  : std::vector<rtsp_stream::session_info_t>{};
+        std::vector<prospero::CaptureFacts> captures;
+        if (!sessions.empty())
+            for (const auto &running : video::running_captures())
+                captures.push_back({running.channel, running.cert, running.joined, running.width, running.height, running.fps,
+                                    static_cast<int>(running.average / 1000), running.video_format, running.hdr});
+        std::map<std::string, Last> seen;
+        int number = 0;
+        for (const auto &session : sessions) {
+            prospero::StreamFacts facts{session.client_cert, {}, session.width, session.height, session.fps, session.bitrate,
+                                        session.video_format, session.dynamic_range > 0,
+                                        std::chrono::duration_cast<std::chrono::seconds>(now - session.started).count(),
+                                        session.gamepads};
+            const auto before = last.find(session.client_cert);
+            const bool known = before != last.end() && before->second.bytes <= session.video_bytes;
+            facts.sent_kbps = known ? prospero::sent_rate_kbps(session.video_bytes - before->second.bytes,
+                                                               std::chrono::duration<double>(now - before->second.at).count())
+                                    : prospero::sent_rate_kbps(session.video_bytes,
+                                                               std::chrono::duration<double>(now - session.started).count());
+            facts.rtt_ms = session.rtt_ms > 0 ? static_cast<int>(session.rtt_ms) : -1;
+            facts.recoveries = static_cast<int>(session.recoveries);
+            facts.missing_frames = static_cast<int>(session.missing_frames);
+            BOOST_LOG(debug) << prospero::stats_line(++number, facts, captures, known ? before->second.recoveries : 0,
+                                                     known ? before->second.missing : 0);
+            seen[session.client_cert] = {session.video_bytes, now, facts.recoveries, facts.missing_frames};
+        }
+        last = std::move(seen);
+    }
+}
+
 // The keyboard pad's own list (input/title_profile.hpp): the installed titles it doesn't mention yet go in as commented
 // lines with the profile the title map gives them, so the player picks one by removing a #. The player's lines stay.
 void note_installed_titles(const std::filesystem::path &file) {
@@ -112,6 +198,10 @@ int main(int argc, char *argv[]) {
     ps_diag_open((platf::appdata() / "host_diag.log").c_str(), header);
     ps_diag_log("ProsperoSunshine: host appdata=%s mkdir_ec=%d config=%s\n", platf::appdata().c_str(), ec.value(),
                 config::sunshine.config_file.c_str());
+    if (kDebugBuild) {
+        // Debug unless sunshine.conf sets min_log_level (verbose is too much for a long session).
+        config::sunshine.min_log_level = 1;
+    }
     // config::parse copies a template apps.json from Sunshine's assets when none exists; there are
     // no assets on the console, and the app list is fixed in process_ps5.cpp anyway.
     if (const auto apps = platf::appdata() / "apps.json"; !std::filesystem::exists(apps, ec))
@@ -128,21 +218,57 @@ int main(int argc, char *argv[]) {
         ps_diag_log("ProsperoSunshine: host config::parse returned %d\n", rc);
         return rc < 0 ? 1 : 0;
     }
-    // From here on the kernel log follows min_log_level from sunshine.conf like the file log.
-    klog->set_filter(boost::log::expressions::attr<int>("Severity") >= config::sunshine.min_log_level);
+    // The app's Experimental switches and the host's own keys. Sunshine doesn't know these keys and leaves them alone.
+    const auto settings = config::parse_config(file_handler::read_file(config::sunshine.config_file.c_str()));
+    const auto setting = [&](const char *key) {
+        const auto it = settings.find(key);
+        return it == settings.end() ? std::string() : it->second;
+    };
+    // Time stamps in host_diag.log unless diag_timestamps = 0.
+    ps_diag_set_timestamps(setting("diag_timestamps") != "0");
+    const std::string remote = setting("remote_log");
+    const auto remote_address = prospero::logs::parse_remote(remote);
+    if (kDebugBuild) {
+        ps_diag_set_filter(mask_diag_line);
+        if (remote_address && remote_log.open(*remote_address)) ps_diag_set_tap(send_diag_line);
+    }
+    logging::set_record_hook([](int severity, std::string message) {
+        std::vector<std::pair<int, std::string>> lines;
+        for (auto &line : file_filter.take(severity, std::move(message), std::chrono::steady_clock::now())) {
+            remote_log.send(line.severity, "prospero_sunshine", line.message);
+            lines.emplace_back(line.severity, std::move(line.message));
+        }
+        return lines;
+    });
+    // From here on the kernel log follows min_log_level from sunshine.conf like the file log, but in the debug build not
+    // below info: each line goes to the kernel log synchronously, 5.2 ms each, and debug lines there slowed the audio to
+    // 0.4x (docs/firmware-porting.md). The debug lines are in sunshine.log and the remote log.
+    const int klog_level = kDebugBuild ? std::max(config::sunshine.min_log_level, 2) : config::sunshine.min_log_level;
+    klog->set_filter(boost::log::expressions::attr<int>("Severity") >= klog_level);
     auto log_guard = logging::init(config::sunshine.min_log_level, config::sunshine.log_file);
     if (!log_guard) ps_diag_log("ProsperoSunshine: host logging failed to initialize\n");
-    BOOST_LOG(info) << "ProsperoSunshine host starting, data in "sv << platf::appdata().string();
+    BOOST_LOG(info) << "ProsperoSunshine host "sv << PROJECT_VERSION << " (commit "sv << PROJECT_VERSION_COMMIT
+                    << ") starting, data in "sv << platf::appdata().string();
+    if (kDebugBuild) {
+        BOOST_LOG(info) << "Debug build: debug log level unless sunshine.conf sets min_log_level, a \"->\" line in host_diag.log "
+                           "before each call that may hang, a self-check at start, addresses masked in the logs. Not meant "
+                           "for daily use: install the normal build again once the problem is reported."sv;
+    }
+    if (!remote.empty()) {
+        if (!kDebugBuild)
+            BOOST_LOG(warning) << "remote_log in sunshine.conf works in the debug build only; nothing is sent"sv;
+        else if (!remote_address)
+            BOOST_LOG(warning) << "remote_log in sunshine.conf is not an IPv4 address with an optional port; nothing is sent"sv;
+        else if (!remote_log.active())
+            BOOST_LOG(warning) << "remote_log: no socket for "sv << remote << "; nothing is sent"sv;
+        else
+            BOOST_LOG(info) << "remote_log: each log line also goes to "sv << remote << " (UDP syslog)"sv;
+    }
     if (config::ps5.close_game_on_quit) {
         BOOST_LOG(info) << "Terminate App in Moonlight closes the session's game (close_game_on_quit)"sv;
         ps_diag_log("ProsperoSunshine: host close_game_on_quit=1\n");
     }
-    // The app's Experimental switches. Sunshine doesn't know these keys and leaves them alone.
-    const auto settings = config::parse_config(file_handler::read_file(config::sunshine.config_file.c_str()));
-    const auto switched_on = [&](const char *key) {
-        const auto it = settings.find(key);
-        return it != settings.end() && it->second == "1";
-    };
+    const auto switched_on = [&](const char *key) { return setting(key) == "1"; };
     int switches[PS_EXP_SWITCH_COUNT];
     for (int i = 0; i < PS_EXP_SWITCH_COUNT; ++i) switches[i] = switched_on(ps_exp_switch_at(i)->key);
     ps_capture_set_experimental(switches, (platf::appdata() / "experimental_attempt").c_str());
@@ -167,11 +293,15 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    // Before the services start, so never during a stream.
+    if (kDebugBuild) prospero::self_check();
+
     const Ports ports{net::map_port(nvhttp::PORT_HTTP), net::map_port(nvhttp::PORT_HTTPS),
                       net::map_port(rtsp_stream::RTSP_SETUP_PORT)};
     prospero::ControlServer control(shutdown_event);
     prospero::web::WebServer web(control, shutdown_event);
     for (bool again = true; again;) {
+        ps_diag_trace("start the services: HTTP(S), RTSP, control socket, report, mDNS\n");
         std::jthread http_thread{nvhttp::start};
         std::jthread rtsp_thread{rtsp_stream::start};
         std::jthread control_thread([&](std::stop_token stop) { control.run(stop); });
@@ -181,6 +311,7 @@ int main(int argc, char *argv[]) {
         std::jthread mdns_thread([name = config::nvhttp.sunshine_name](std::stop_token stop) {
             prospero::mdns::run_responder(stop, name, net::map_port(nvhttp::PORT_HTTP));
         });
+        std::jthread stats_thread(log_stream_stats);
         ps_diag_log("ProsperoSunshine: host ready control_port=%u\n", prospero::ControlServer::port);
 
         again = wait_or_ports_lost(shutdown_event, ports, control);
@@ -193,13 +324,19 @@ int main(int argc, char *argv[]) {
             BOOST_LOG(warning) << "Starting the services anew"sv;
             shutdown_event->raise(true);
         } else {
+            // What the filters held back is written before the host stops.
+            file_filter.flush_next();
+            klog_filter.flush_next();
             BOOST_LOG(info) << "ProsperoSunshine host shutting down"sv;
         }
+        ps_diag_trace("stop the services and end the app (%s)\n", again ? "they start anew" : "the host stops");
         control_thread.request_stop();
         report_thread.request_stop();
         web_thread.request_stop();
         mdns_thread.request_stop();
+        stats_thread.request_stop();
         proc::proc.terminate();
+        ps_diag_trace("wait for the service threads to end\n");
         mdns_thread.join();
         http_thread.join();
         rtsp_thread.join();

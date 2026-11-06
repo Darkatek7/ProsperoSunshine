@@ -624,6 +624,36 @@ alle H.264 1080p60 auf „PS5 Screen“ mit `--no-script`; B, C und A beim zweit
 Nicht geprüft: echtes Moonlight, ein echter DualSense an der Konsole, und ob der Dialog „Wer benutzt diesen Controller?“
 einem Gast den Nutzer des Hosts anbietet.
 
+### Debug-Build (Issue 28, 2026-11-06, 10.20, PS5 Pro, Testclient, Home-Bildschirm, nicht veröffentlicht)
+
+Host `commit=47dc059f` in beiden Varianten, nacheinander per ELF-Loader gestartet; der installierte Host blieb unverändert.
+Für die Messung war `min_log_level` aus `sunshine.conf` entfernt, damit jede Variante mit ihrer Voreinstellung läuft.
+
+- **Debug, `host_diag.log`:** beginnt mit `version=0.4.0-debug commit=47dc059f … started=2026-11-06T16:47:…`, jede Zeile mit
+  den Millisekunden seit dem Start; die Datei des vorigen Laufs liegt als `host_diag.log.1` daneben. Selbsttest in 185 bis
+  191 ms: `console=PS5-Pro`, `ra=resolved by_nid=4 by_table=0`, `ports=free`, `mdns=ok`, `capture=opens` (OpenVideo ohne
+  Start), `problems=0`. `->`-Zeilen vor jedem Capture-Schritt (Nachschlagen, Register, RUNNING, Initialize, OpenVideo, Start,
+  OpenAudio, Stop/Close, Terminate, STOP, Unregister), vor den Binds (47984, 47989, 47990, 47995, 47996, 48010, 5353 und je
+  Stream 47998 bis 48000) und vor QUIT.
+- **Debug, `sunshine.log`:** Stufe Debug. Bei `/pair` stehen `clientcert` und `salt` als `<hidden>`, das Zertifikat des
+  Clients als `<certificate>`, bei `/launch` `rikey` und `rikeyid` als `<hidden>`; im ganzen Log keine IPv4-Adresse (die des
+  Clients als `<ip>`) und keine 32-stellige Hex-Folge. `Stream stats:` alle 5 s, einmal `Held back 2 similar lines …`. Das
+  Kernel-Log blieb bei Info.
+- **Rauschen:** RTSPs Zeile „No pending session for incoming RTSP connection“ kam auf Debug alle 5 s, ausgelöst von der
+  Portüberwachung des Hosts. Patch 0022 stuft sie auf Verbose herab; danach kam sie nicht mehr.
+- **Normal:** `version=0.4.0`, Zeitstempel, keine `->`- und keine `selfcheck`-Zeilen, `sunshine.log` auf Info.
+- **Testclient** (Windows-Build, `--no-script`), H.264 und HEVC 1080p60 je 30 s:
+
+| Variante | H.264: Bilder, fps, fehlend, längste Pause | HEVC: Bilder, fps, fehlend, längste Pause |
+| --- | --- | --- |
+| Debug | 1791, 60,01, 0, 86 ms | 1793, 59,96, 0, 43 ms |
+| Normal | 1792, 59,95, 0, 43 ms | 1795, 59,96, 0, 142 ms |
+
+  Alle Tonpakete ohne Dekodierfehler.
+
+Nicht geprüft: Spiele (der Home-Bildschirm fordert den Encoder kaum, rund 0,5 Mbit/s), 13.00, das Fernlog (`remote_log`) an
+der Konsole, und die Debug-App (`PPSA47989-debug.zip`, in CI gebaut) auf der Konsole.
+
 ### Release 0.4.0 auf der Konsole (2026-11-06, 13.00)
 
 `main` mit PR 27 (Webseite) und 0.3.4 zusammengeführt, App aus `build/app` kopiert und neu registriert, sie zeigt

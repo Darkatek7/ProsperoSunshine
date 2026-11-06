@@ -32,6 +32,8 @@ constexpr const char *kHostElf = "/data/prosperosunshine/prospero_sunshine.elf";
 constexpr const char *kStatePath = "/data/prosperosunshine/sunshine_state.json";
 constexpr const char *kBundledElf = "/app0/payloads/prospero_sunshine.elf";
 constexpr const char *kHostDiagPath = "/data/prosperosunshine/host_diag.log";
+// The host's last run, or the lines before the newest once the file reached 1 MiB.
+constexpr const char *kHostDiagOlderPath = "/data/prosperosunshine/host_diag.log.1";
 constexpr const char *kHostLogPath = "/data/prosperosunshine/sunshine.log";
 constexpr const char *kReportPath = "/data/prosperosunshine/diagnostics.txt";
 constexpr std::uint16_t kControlPort = 47995;

@@ -1,0 +1,226 @@
+ProsperoSunshine: a hook for each log record, and a call before each port is bound
+
+The record hook lets the host decide what the log file gets in place of a record (src/log/log_filter.hpp): at debug
+level print_req logs every query argument, including the stream's AES key (rikey from /launch) and the pairing
+handshake, and nvhttp logs the client's certificate; the hook hides those values in every build, and the debug build
+also masks addresses and holds back floods of similar lines. The hook may return no record, the record or several (a
+summary first), so the sink no longer adds the newline: the formatter ends each line itself, and a record held back
+leaves no empty line.
+
+platf::trace_call runs right before the HTTP(S), RTSP and stream ports are bound. The debug build writes it to
+host_diag.log, on disk before the call, so a host that hangs there shows which port it was binding.
+
+--- a/src/logging.h
++++ b/src/logging.h
+@@ -8,8 +8,11 @@
+ #include <cstddef>
+ #include <filesystem>
+ #include <format>
++#include <functional>
+ #include <string>
+ #include <system_error>
++#include <utility>
++#include <vector>
+ 
+ // lib includes
+ #include <boost/log/common.hpp>
+@@ -38,6 +41,20 @@
+  */
+ namespace logging {
+   /**
++   * @brief ProsperoSunshine: what the log file gets in place of one record.
++   *
++   * Gets the record's severity and message and returns the records to write instead: none (held back), the record
++   * (rewritten, e.g. without secrets), or summaries of held-back records first. src/log/log_filter.hpp has the rules.
++   */
++  using record_hook_t = std::function<std::vector<std::pair<int, std::string>>(int severity, std::string message)>;
++
++  /**
++   * @brief ProsperoSunshine: set the record hook; call it before init(). Without one every record is written as it is.
++   * @param hook The hook.
++   */
++  void set_record_hook(record_hook_t hook);
++
++  /**
+    * @brief The number of previous log files retained during rotation.
+    */
+   inline constexpr std::size_t retained_log_file_count {5};
+--- a/src/logging.cpp
++++ b/src/logging.cpp
+@@ -52,6 +52,14 @@
+ BOOST_LOG_ATTRIBUTE_KEYWORD(severity, "Severity", int)
+ 
+ namespace logging {
++  namespace {
++    record_hook_t record_hook;  ///< Set before init(); the sink's thread calls it.
++  }  // namespace
++
++  void set_record_hook(record_hook_t hook) {
++    record_hook = std::move(hook);
++  }
++
+   deinit_t::~deinit_t() {
+     deinit();
+   }
+@@ -70,32 +78,12 @@
+     constexpr const char *severity_attribute = "Severity";
+ 
+     auto log_level = view.attribute_values()[severity_attribute].extract<int>().get();
+-
+-    std::string_view log_type;
+-    switch (log_level) {
+-      case 0:
+-        log_type = "Verbose: "sv;
+-        break;
+-      case 1:
+-        log_type = "Debug: "sv;
+-        break;
+-      case 2:
+-        log_type = "Info: "sv;
+-        break;
+-      case 3:
+-        log_type = "Warning: "sv;
+-        break;
+-      case 4:
+-        log_type = "Error: "sv;
+-        break;
+-      case 5:
+-        log_type = "Fatal: "sv;
+-        break;
+-#ifdef SUNSHINE_TESTS
+-      case 10:
+-        log_type = "Tests: "sv;
+-        break;
+-#endif
++    const auto message_ref = view.attribute_values()[message].extract<std::string>();
++    std::vector<std::pair<int, std::string>> records;
++    if (record_hook) {
++      records = record_hook(log_level, message_ref ? message_ref.get() : std::string());
++    } else {
++      records.emplace_back(log_level, message_ref ? message_ref.get() : std::string());
+     }
+ 
+     auto now = std::chrono::system_clock::now();
+@@ -106,8 +94,38 @@
+     auto t = std::chrono::system_clock::to_time_t(now);
+     auto lt = *std::localtime(&t);
+ 
+-    os << "["sv << std::put_time(&lt, "%Y-%m-%d %H:%M:%S.") << boost::format("%03u") % ms.count() << "]: "sv
+-       << log_type << view.attribute_values()[message].extract<std::string>();
++    // Each record ends its own line: the sink adds no newline, so a record held back leaves no empty line.
++    for (const auto &[record_level, text] : records) {
++      std::string_view log_type;
++      switch (record_level) {
++        case 0:
++          log_type = "Verbose: "sv;
++          break;
++        case 1:
++          log_type = "Debug: "sv;
++          break;
++        case 2:
++          log_type = "Info: "sv;
++          break;
++        case 3:
++          log_type = "Warning: "sv;
++          break;
++        case 4:
++          log_type = "Error: "sv;
++          break;
++        case 5:
++          log_type = "Fatal: "sv;
++          break;
++#ifdef SUNSHINE_TESTS
++        case 10:
++          log_type = "Tests: "sv;
++          break;
++#endif
++      }
++
++      os << "["sv << std::put_time(&lt, "%Y-%m-%d %H:%M:%S.") << boost::format("%03u") % ms.count() << "]: "sv
++         << log_type << text << '\n';
++    }
+   }
+ #ifdef __ANDROID__
+   namespace sinks = boost::log::sinks;
+@@ -178,6 +196,7 @@
+     sink->locked_backend()->add_stream(boost::make_shared<std::ofstream>(log_file));
+     sink->set_filter(severity >= min_log_level);
+     sink->set_formatter(&formatter);
++    sink->locked_backend()->set_auto_newline_mode(bl::sinks::auto_newline_mode::disabled_auto_newline);
+ 
+     // Prevent the async sink's background thread from dying on backend exceptions.
+     // Without this, a single I/O error (disk full, file locked, broken stdout, etc.)
+--- a/src/platform/common.h
++++ b/src/platform/common.h
+@@ -1314,6 +1314,15 @@
+    * @param owner The paired client's certificate.
+    */
+   void set_gamepad_owner(const feedback_queue_t &feedback_queue, std::string_view owner);
++
++  /**
++   * @brief ProsperoSunshine: called right before a call that may hang, such as binding a stream port.
++   *
++   * The debug build writes it to its breadcrumb file, on disk before the call; the normal build does nothing.
++   *
++   * @param what The call, e.g. "bind the video port UDP 47998".
++   */
++  void trace_call(const std::string &what);
+   /**
+    * @brief Release gamepad resources.
+    *
+--- a/src/nvhttp.cpp
++++ b/src/nvhttp.cpp
+@@ -1909,6 +1909,7 @@
+       try {
+         std::string name = "nvhttp::" + std::to_string(web_server->config.port);
+         platf::set_thread_name(name);
++        platf::trace_call("bind the HTTP(S) port TCP " + std::to_string(web_server->config.port));
+         web_server->start();
+       } catch (boost::system::system_error &err) {
+         // It's possible the exception gets thrown after calling http_server->stop() from a different thread
+--- a/src/rtsp.cpp
++++ b/src/rtsp.cpp
+@@ -515,7 +515,8 @@
+         socket->read();
+       } else {
+         // This can happen due to normal things like port scanning, so let's not make these visible by default
+-        BOOST_LOG(debug) << "No pending session for incoming RTSP connection"sv;
++        // ProsperoSunshine: the host's port watch (main_ps5.cpp) connects every 5 s; at debug level this line would fill the log.
++        BOOST_LOG(verbose) << "No pending session for incoming RTSP connection"sv;
+ 
+         // If there is no session pending, close the connection immediately
+         boost::system::error_code close_error;
+@@ -1354,6 +1355,7 @@
+     server.map("PLAY"sv, &cmd_play);
+ 
+     boost::system::error_code ec;
++    platf::trace_call("bind the RTSP port TCP " + std::to_string(net::map_port(rtsp_stream::RTSP_SETUP_PORT)));
+     if (server.bind(net::af_from_enum_string(config::sunshine.address_family), net::map_port(rtsp_stream::RTSP_SETUP_PORT), ec)) {
+       BOOST_LOG(fatal) << "Couldn't bind RTSP server to port ["sv << net::map_port(rtsp_stream::RTSP_SETUP_PORT) << "], " << ec.message();
+       shutdown_event->raise(true);
+--- a/src/stream.cpp
++++ b/src/stream.cpp
+@@ -1996,6 +1996,7 @@
+     auto video_port = net::map_port(VIDEO_STREAM_PORT);
+     auto audio_port = net::map_port(AUDIO_STREAM_PORT);
+ 
++    platf::trace_call("bind the control port UDP " + std::to_string(control_port));
+     if (ctx.control_server.bind(address_family, control_port)) {
+       BOOST_LOG(error) << "Couldn't bind Control server to port ["sv << control_port << "], likely another process already bound to the port"sv;
+ 
+@@ -2024,6 +2025,7 @@
+       return -1;
+     }
+ 
++    platf::trace_call("bind the video port UDP " + std::to_string(video_port));
+     ctx.video_sock.bind(udp::endpoint(bind_addr, video_port), ec);
+     if (ec) {
+       BOOST_LOG(fatal) << "Couldn't bind Video server to port ["sv << video_port << "]: "sv << ec.message();
+@@ -2038,6 +2040,7 @@
+       return -1;
+     }
+ 
++    platf::trace_call("bind the audio port UDP " + std::to_string(audio_port));
+     ctx.audio_sock.bind(udp::endpoint(bind_addr, audio_port), ec);
+     if (ec) {
+       BOOST_LOG(fatal) << "Couldn't bind Audio server to port ["sv << audio_port << "]: "sv << ec.message();

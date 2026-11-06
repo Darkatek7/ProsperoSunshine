@@ -2,6 +2,7 @@
 #include "app/psapp/conf.hpp"
 
 #include "app/psapp/experimental_list.h"
+#include "app/psapp/flavor.hpp"
 
 #include <cstdlib>
 
@@ -41,7 +42,8 @@ const std::vector<OptionSpec> &option_specs()
         std::vector<OptionSpec> list = {
         {"sunshine_name", "Host name", "The name Moonlight shows.", OptionKind::text,
          "network name", {}, 0, 0, 1, 0},
-        {"min_log_level", "Log level", "Detail in sunshine.log and the kernel log.", OptionKind::choice, "Info",
+        {"min_log_level", "Log level", "Detail in sunshine.log and the kernel log.", OptionKind::choice,
+         kDebugBuild ? "Debug" : "Info",
          {{"verbose", "Verbose"},
           {"debug", "Debug"},
           {"info", "Info"},

@@ -28,6 +28,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 #include <ps5/kernel.h>
+#include "platform/ps5/diag.h"
 
 using namespace std::literals;
 
@@ -491,6 +492,7 @@ void routes(Server &server, State &state, ControlServer &control, const std::sha
     });
     post("^/api/restart$", [shutdown](const Response &response, const json &) {
         BOOST_LOG(info) << "Web page: restart asked for"sv;
+        ps_diag_trace("restart from the web page: the relaunch helper to the ELF loader, then the host stops\n");
         if (const std::string problem = start_relaunch(); !problem.empty()) {
             BOOST_LOG(error) << "Web page: restart failed: "sv << problem;
             return send_error(response, SimpleWeb::StatusCode::server_error_internal_server_error,
@@ -553,6 +555,7 @@ void WebServer::run(std::stop_token stop) {
             });
             try {
                 BOOST_LOG(info) << "Web page on port "sv << port;
+                ps_diag_trace("bind the web page port TCP %u\n", static_cast<unsigned>(port));
                 server.start();
             } catch (const std::exception &e) {
                 BOOST_LOG(error) << "Web page failed on port "sv << port << ": "sv << e.what();

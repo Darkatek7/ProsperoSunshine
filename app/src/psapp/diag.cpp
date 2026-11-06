@@ -238,6 +238,13 @@ HostLog parse_host_log(const std::string &text)
             end = text.size();
         std::string line = text.substr(at, end - at);
         at = end + 1;
+        // The time stamp in front, "[  12345] ": milliseconds since the host started (diag_timestamps).
+        if (line.size() > 2 && line[0] == '[')
+        {
+            const std::size_t close = line.find("] ");
+            if (close != std::string::npos && line.find_first_not_of(" 0123456789", 1) == close)
+                line.erase(0, close + 2);
+        }
         if (line.empty())
             continue;
         if (starts_with(line, kPrefix))
@@ -308,6 +315,12 @@ HostLog parse_host_log(const std::string &text)
             if (log.capture == Capture::opening)
                 log.last_step = line.substr(8);
         }
+        else if (starts_with(line, "capture open failed step=open only "))
+        {
+            // The debug build's self-check opens and stops before Start on purpose: no stream's outcome.
+            log.capture = Capture::unknown;
+            log.last_step.clear();
+        }
         else if (starts_with(line, "capture open failed"))
         {
             log.capture = Capture::failed;
@@ -323,6 +336,11 @@ HostLog parse_host_log(const std::string &text)
         else if (starts_with(line, "capture ") && log.capture == Capture::opening)
         {
             log.last_step = line.substr(8);
+        }
+        else if (starts_with(line, "-> capture ") && log.capture == Capture::opening)
+        {
+            // The debug build's line before a call that may hang; the call's own line follows unless it never returned.
+            log.last_step = line.substr(11) + " (called, no answer)";
         }
     }
     log.stopped = last_line == "host stopped";

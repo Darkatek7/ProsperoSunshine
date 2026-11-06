@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **A debug build in every release** (issue #28): `PPSA47989-debug.zip` and `prosperosunshine-<version>-debug.tar.gz`, built
+  by CI from the same commit as the normal build. Install it, reproduce a problem once, post the Diagnostics report, and go
+  back to the normal zip; it isn't meant for daily use. It logs at `debug` by default (the kernel log stays at `info`), writes
+  a `->` line to `host_diag.log` before each call that can hang, checks the firmware, the ResourceArbitrator, the ports, mDNS
+  and one capture open at start, writes a stats line per stream every 5 seconds, masks addresses and holds back floods of
+  similar lines, and can send its lines to a syslog server you name (`remote_log`, off by default). Its version reads
+  `<version>-debug` everywhere, and CI keeps its line info for crash addresses (README, "Debug build").
+- **CI builds both flavors and the app**, and on a `v*` tag attaches `PPSA47989.zip`, `PPSA47989-debug.zip` and both release
+  archives with their SHA256 to a draft release.
+
+### Changed
+
+- **`host_diag.log` keeps more:** each line starts with the milliseconds since the host started (`diag_timestamps = 0`
+  turns that off), the file grows to 1 MiB and then moves to `host_diag.log.1` instead of starting over, and the last run's
+  file is kept as `host_diag.log.1` when the host starts again. The diagnostics report shows the end of both.
+- The firmware probe's report also masks IPv6 addresses.
+
+### Fixed
+
+- **At debug level, `sunshine.log` no longer holds secrets:** Sunshine logged each request's arguments, among them the
+  stream's encryption key and the pairing handshake, and the client's certificate. Their values are now `<hidden>` and
+  `<certificate>`.
+
 ## 0.4.0 (2026-11-06)
 
 ### Added
