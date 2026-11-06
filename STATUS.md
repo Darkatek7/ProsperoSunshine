@@ -624,6 +624,15 @@ alle H.264 1080p60 auf „PS5 Screen“ mit `--no-script`; B, C und A beim zweit
 Nicht geprüft: echtes Moonlight, ein echter DualSense an der Konsole, und ob der Dialog „Wer benutzt diesen Controller?“
 einem Gast den Nutzer des Hosts anbietet.
 
+### Release 0.4.0 auf der Konsole (2026-11-06, 13.00)
+
+`main` mit PR 27 (Webseite) und 0.3.4 zusammengeführt, App aus `build/app` kopiert und neu registriert, sie zeigt
+`v01.000.021`; nach „Restart host“ meldet das Kernel-Log `version=0.4.0 commit=a2b4231a` und „Web page on port 47990“.
+Die Seite liefert `index.html` mit dem eigenen Zertifikat (`CN=ProsperoSunshine web page`, Adressen der Konsole), ohne Login
+antworten `/api/overview`, `/api/settings` und `/api/logs` mit 401, ein falsches Login ebenso. Testclient, Home-Bildschirm:
+H.264 und HEVC 1080p je 30 s mit 1793 und 1792 Bildern, ohne Lücke, längste Pause 20 ms, fehlerfrei dekodiert, je 5805
+Tonpakete ohne Fehler. Die Bedienung der Seite mit Login prüfte ein Mitwirkender auf 10.20 und am iPhone (PR 27).
+
 ### Release 0.3.4 auf der Konsole (2026-11-06, 13.00)
 
 App aus `build/app` kopiert und neu registriert, sie zeigt `v01.000.020`; nach „Restart host“ meldet das Kernel-Log
