@@ -624,6 +624,21 @@ alle H.264 1080p60 auf „PS5 Screen“ mit `--no-script`; B, C und A beim zweit
 Nicht geprüft: echtes Moonlight, ein echter DualSense an der Konsole, und ob der Dialog „Wer benutzt diesen Controller?“
 einem Gast den Nutzer des Hosts anbietet.
 
+### Release 0.3.3 auf der Konsole (2026-11-06, 13.00)
+
+App aus `build/app` kopiert und neu registriert, sie zeigt `v01.000.019` und installierte beim Start das gebündelte ELF;
+nach „Restart host“ meldet das Kernel-Log `version=0.3.3 commit=461bdc8c`. Der neue Hilfetext zu „PS for all players“ passt
+in die Zeile unter den Settings. Testclient, Home-Bildschirm: H.264 und HEVC 1080p je 30 s mit 1793 und 1790 Bildern, ohne
+Lücke, längste Pause 19 ms, fehlerfrei dekodiert, je 5800 Tonpakete ohne Fehler; danach Pad 0 abgemeldet, „the host role
+is free“.
+
+**Tastatur-Pad auf 13.00** (derselbe Host, per ELF-Loader gestartet, vor dem App-Build): Testclient ohne Controller
+(`--pads 0`, neu) mit `--kbm-seq`: Maus rechts und links, ein Radschritt, dann W und S. Maus und Rad öffneten weder ein Pad
+noch die Maus der Konsole; W öffnete „PS5 virtual pad 0 attached as the host's controller“ und „The keyboard and mouse of a
+client without a controller play as virtual pad 0“, am Streamende abgemeldet. Mit Controller (ohne `--pads 0`) gingen
+dieselben Eingaben wie bisher an die virtuelle Tastatur und Maus der Konsole. Beide Streams ohne Lücke, fehlerfrei
+dekodiert. Nicht geprüft auf 13.00: ein Spiel, die Profile, ein Gast mit Tastatur.
+
 ### Raumklang folgt einem breiteren Stream (PR 16, 2026-11-06, 13.00, Testclient, Home-Bildschirm)
 
 Host `commit=c15327c3` (der PR-Stand), Schalter „Surround“ an, Konsole mit Stereo-Ausgabe. A streamt Stereo (40 s), B tritt
