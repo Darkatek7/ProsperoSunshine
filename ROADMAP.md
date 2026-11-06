@@ -1,8 +1,8 @@
 # ProsperoSunshine Roadmap und Umsetzungsplan
 
-Stand: 5. November 2026, nach Release 0.3.2. Dieses Dokument ist der verbindliche Arbeitsplan. `PLAN.md` enthält Ziel, Regeln für das PS5-Backend und Hintergründe, `STATUS.md` den jeweils nachgewiesenen Stand. Bei Widersprüchen gilt für Fakten `STATUS.md`, für Reihenfolge und Abnahme dieses Dokument.
+Stand: 6. November 2026, nach Release 0.3.3. Dieses Dokument ist der verbindliche Arbeitsplan. `PLAN.md` enthält Ziel, Regeln für das PS5-Backend und Hintergründe, `STATUS.md` den jeweils nachgewiesenen Stand. Bei Widersprüchen gilt für Fakten `STATUS.md`, für Reihenfolge und Abnahme dieses Dokument.
 
-## Stand (5. November 2026, nach Release 0.3.2)
+## Stand (6. November 2026, nach Release 0.3.3)
 
 Seit 0.1.5 sind folgende Releases dazugekommen:
 
@@ -33,8 +33,13 @@ Seit 0.1.5 sind folgende Releases dazugekommen:
 - **0.3.2:**
   - Die Host-Rolle (Konsolennutzer, PS, Create) gehört einem gepairten Gerät; Gäste verlieren auch Create (Issue #15).
   - Firmware 13.40 bekommt den Datensatz von 13.60 (Issue #14, von einem Tester bestätigt).
+- **0.3.3:**
+  - Tastatur und Maus als eigener Controller für ein Gerät ohne Controller, sieben Profile, Profil je Spiel (PR #20).
+  - Firmware-Sonde `firmware_probe.elf` im Release-Archiv, Start auch per `PROBE` (PR #25).
+  - Raumklang folgt einem breiteren Stream, der später beitritt (PR #16); der Host stürzt bei belegtem Steuerport nicht mehr
+    ab (Issue #24).
 
-Firmware: 13.00 und 10.20 sind geprüft. 10.40, 12.70, 13.40 und 13.60 streamen laut Nutzerberichten (Issues #1, #2, #14, #17), dort aber nicht
+Firmware: 13.00 und 10.20 sind geprüft. 10.40, 11.40, 12.70, 13.40 und 13.60 streamen laut Nutzerberichten (Issues #1, #2, #14, #17, #24), dort aber nicht
 gemessen.
 
 Co-op: Weitere Geräte hängen sich an den laufenden Stream. Ein Tester spielte auf 10.20 mit vier Spielern, auch über das

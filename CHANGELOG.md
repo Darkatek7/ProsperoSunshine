@@ -1,11 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.3.3 (2026-11-06)
 
 ### Added
 
-- **A friend without a controller can play with keyboard and mouse.** While a device has no controller, its keyboard and
-  mouse become a controller of its own instead of going to the console's keyboard and mouse, which few games take. If you
+- **A friend without a controller can play with keyboard and mouse** (thanks to @EnriqueWood, PR #20). While a device has
+  no controller, its keyboard and mouse become a controller of its own instead of going to the console's keyboard and mouse, which few games take. If you
   already play with keyboard and mouse on a PC, the controls should feel like home: W A S D move, the mouse turns the
   camera, the mouse buttons are the triggers, Esc pauses, Tab opens the map. It takes a player slot like a controller,
   from the first key or mouse button that is one of its buttons (moving the mouse alone doesn't, so someone who only
@@ -40,6 +40,11 @@
 - **Settings in `sunshine.conf`:** `keyboard_mouse_pad = 0` keeps the old behaviour, `keyboard_mouse_profile` picks the
   profile, `keyboard_mouse_sensitivity` (in percent, 100 by default) is where a new device's mouse starts. Not in the app
   yet.
+- **A firmware probe for firmware nobody has measured yet** (thanks to @EnriqueWood, PR #25). `firmware_probe.elf` in the
+  release archive collects in about 2.5 minutes what the host needs on a new firmware: the capture record, the encoder's
+  quality fields, which modes and codecs open. It never runs during a stream, stops the host for its run and starts it
+  again, uploads nothing, and masks addresses in its report (`/data/prosperosunshine/firmware_probe/report.txt`). Send it
+  to the ELF loader (port 9021) when asked to in an issue; `docs/firmware-probe.md` has the details.
 
 ### Fixed
 
