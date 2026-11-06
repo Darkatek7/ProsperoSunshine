@@ -8,7 +8,8 @@
   such as Steam Input's virtual controller next to the real one on Windows, or the on-screen controls on iOS. The console
   asked who uses it, and only that controller could answer, so the dialog stayed on screen and blocked everything. Now a
   guest's controller appears on the console only once it is used (a button, a trigger or a stick pushed a quarter of the
-  way), so one that is never used never asks. The host's controller still appears right away (issue #26).
+  way), so one that is never used never asks. The host's controller still appears right away (thanks to @Darksk0pe for
+  reporting and testing, issue #26).
 
 ## 0.3.3 (2026-11-06)
 

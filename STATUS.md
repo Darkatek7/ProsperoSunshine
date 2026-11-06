@@ -638,6 +638,11 @@ Controller?“ für ihn blieb stehen. Host `commit=171a5874` mit der Änderung (
 Nicht geprüft: echtes Moonlight mit Steam Input oder iOS, und der Fall, in dem das Phantom-Pad als erstes ankommt und damit
 das Pad des Hosts ist (dann bliebe der echte Controller ein Gast seines eigenen Geräts).
 
+**Bestätigt vom Melder** (Issue #26, 13.60, Testbuild `v0.3.3-pads-1`, 2026-11-06): Im `sunshine.log` seines Streams „pad 0
+attached as the host's controller“, „pad 1 announced, opens when it is used“, am Ende „pad 1 gone, never used“; er meldet,
+dass es jetzt geht. Der erste Versuch davor endete mit „Couldn't bind RTSP server to port [48010], Address already in use“:
+der vorige Host lief noch.
+
 ### Release 0.3.3 auf der Konsole (2026-11-06, 13.00)
 
 App aus `build/app` kopiert und neu registriert, sie zeigt `v01.000.019` und installierte beim Start das gebündelte ELF;
