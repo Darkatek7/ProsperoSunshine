@@ -209,8 +209,13 @@ ProsperoSunshine's ports by default. Nothing is open to the internet, only to th
 3. In Moonlight, add the console by its **tailnet address** (the 100.x address or its name), pair, and stream.
 
 If you set up ps5-tailscale before 0.7.3, its saved config keeps the old UDP list: add `47998, 47999, 48000` under its
-**Settings**, or Moonlight pairs and lists the games but the stream fails with "control stream establishment failed". A
-contributor tested this on a PS5 Pro on 10.20 with Moonlight on iOS, and with a console in another home on 0.3.1; it isn't
+**Settings**, or Moonlight pairs and lists the games but the stream fails with "control stream establishment failed".
+
+Don't list the console itself as a host under ps5-tailscale's **Game streaming** (that's for Moonlight on the PS5 streaming
+from a PC). ps5-tailscale then listens on the same ports on the console, the host can't open UDP 47999, and every stream
+fails at the start, in Moonlight as "Starting RTSP handshake failed" (issue 24).
+
+A contributor tested this on a PS5 Pro on 10.20 with Moonlight on iOS, and with a console in another home on 0.3.1; it isn't
 tested here. Without a payload on the
 console, a PC or router at home acting as a Tailscale subnet router works too; the friend then adds the console's LAN
 address.
