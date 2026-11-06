@@ -624,6 +624,20 @@ alle H.264 1080p60 auf „PS5 Screen“ mit `--no-script`; B, C und A beim zweit
 Nicht geprüft: echtes Moonlight, ein echter DualSense an der Konsole, und ob der Dialog „Wer benutzt diesen Controller?“
 einem Gast den Nutzer des Hosts anbietet.
 
+### Raumklang folgt einem breiteren Stream (PR 16, 2026-11-06, 13.00, Testclient, Home-Bildschirm)
+
+Host `commit=c15327c3` (der PR-Stand), Schalter „Surround“ an, Konsole mit Stereo-Ausgabe. A streamt Stereo (40 s), B tritt
+nach 10 s per `/resume` mit 5.1 bei (`--surround 51`, 20 s), beide H.264 1080p60 mit `--no-script`.
+
+- Hostlog: A öffnet Typ 0 („2 channels“). Mit B: „sharing the channel another stream reads“, „6 channels“, dann beim Leser
+  von A „12 channels from the console for 2 speakers“, also der Wechsel auf Typ 3. Keine Warnung, kein verworfenes Paket.
+- A: 2391 Bilder ohne Lücke, fehlerfrei dekodiert, 7796 Tonpakete ohne Dekodierfehler, RMS je Kanal 0,0073 / 0,0062, auch
+  über den Wechsel hinweg.
+- B: 1183 Bilder ohne Lücke, fehlerfrei dekodiert, 6 Kanäle, RMS 0,0059 / 0,0054 / 0 / 0 / 0 / 0 (die Konsole gibt nur
+  Stereo aus).
+
+Nicht geprüft: eine Konsole mit 5.1-Ausgabe und ein abgelehnter Typ 3 (dann bleibt es bei Stereo bis zur nächsten Sitzung).
+
 ### Testbuild für 13.40 (2026-11-05, 13.00)
 
 Pre-Release `v0.3.1-fw1340-1` für Issue #14: 13.40 und alles bis 13.60 bekommt den Datensatz von 13.60. Gemessen nur auf
