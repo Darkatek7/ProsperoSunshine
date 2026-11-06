@@ -1,8 +1,8 @@
 # ProsperoSunshine Roadmap und Umsetzungsplan
 
-Stand: 6. November 2026, nach Release 0.3.4. Dieses Dokument ist der verbindliche Arbeitsplan. `PLAN.md` enthält Ziel, Regeln für das PS5-Backend und Hintergründe, `STATUS.md` den jeweils nachgewiesenen Stand. Bei Widersprüchen gilt für Fakten `STATUS.md`, für Reihenfolge und Abnahme dieses Dokument.
+Stand: 6. November 2026, nach Release 0.4.0. Dieses Dokument ist der verbindliche Arbeitsplan. `PLAN.md` enthält Ziel, Regeln für das PS5-Backend und Hintergründe, `STATUS.md` den jeweils nachgewiesenen Stand. Bei Widersprüchen gilt für Fakten `STATUS.md`, für Reihenfolge und Abnahme dieses Dokument.
 
-## Stand (6. November 2026, nach Release 0.3.4)
+## Stand (6. November 2026, nach Release 0.4.0)
 
 Seit 0.1.5 sind folgende Releases dazugekommen:
 
@@ -42,9 +42,9 @@ Seit 0.1.5 sind folgende Releases dazugekommen:
   - Der Controller eines Gasts erscheint auf der Konsole erst bei seiner ersten Eingabe; ein angemeldeter, nie benutzter
     Controller (Steam Input, Bildschirmsteuerung) blockiert nicht mehr mit „Wer benutzt diesen Controller?“ (Issue #26,
     vom Melder auf 13.60 bestätigt).
-- **Unveröffentlicht:** eine Webseite zur Steuerung des Hosts (Issue #21), gebaut, auf 13.00 gemessen und am Handy
-  angesehen (STATUS.md)
-  („Nächste konkrete Schritte“, Punkt 12).
+- **0.4.0:**
+  - Eine Webseite zur Steuerung des Hosts (Issue #21, PR #27): Status, PIN, Streams, Geräte, Einstellungen, Logs,
+    Diagnose, Neustart; von einem Mitwirkenden auf 10.20 und am iPhone getestet.
 
 Firmware: 13.00 und 10.20 sind geprüft. 10.40, 11.40, 12.70, 13.40 und 13.60 streamen laut Nutzerberichten (Issues #1, #2, #14, #17, #24), dort aber nicht
 gemessen.

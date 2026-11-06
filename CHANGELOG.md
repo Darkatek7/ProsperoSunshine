@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 (2026-11-06)
 
 ### Added
 
@@ -15,7 +15,8 @@
   internet. After 5 failed sign-ins from one address it waits 30 seconds, doubling up to 15 minutes, and after 20 from all
   addresses together every address waits the same way until the next good sign-in; failed sign-ins are
   logged with the address, never the password, and the password is stored only as a salted PBKDF2-SHA256 hash. The control
-  socket has `WEBLOGIN [SET <user> <password>|ON|OFF|FORGET]` for it (GitHub issue #21). Measured on 13.00, and the page
+  socket has `WEBLOGIN [SET <user> <password>|ON|OFF|FORGET]` for it (GitHub issue #21, thanks to @EnriqueWood for two
+  rounds of testing on 10.20 and the iPhone). Measured on 13.00, and the page
   was checked in a phone's browser.
 - **After a tester's round on 10.20 (PR #27):**
   - "Restart host" on the page no longer has the host send itself to the loader while it is still going away; once on
