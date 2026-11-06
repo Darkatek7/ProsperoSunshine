@@ -402,7 +402,8 @@ int main(int argc, char **argv) {
   char *tick_seq = NULL;
   int hevc = 0, hevc10 = 0, touch_motion = 0;
   char *kbm_seq = NULL;
-  int pads = 1;  // --pads N: controllers 0..N-1 arrive, one a second, as with several gamepads on one client
+  int pads = 1;  // --pads N: controllers 0..N-1 arrive, one a second, as with several gamepads on one client; 0: none,
+                 // a client without a controller (its keys and mouse then make the host's keyboard pad)
   int surround = 0;  // --surround 51|71: ask for 5.1 or 7.1 sound instead of stereo
   int tick_pad = 0;  // --tick-pad N: the UI ticks come from controller N (with --pads above N)
 
@@ -453,8 +454,8 @@ int main(int argc, char **argv) {
       default: return 2;
     }
   }
-  if (pads < 1 || pads > 16) {
-    fprintf(stderr, "--pads must be 1..16\n");
+  if (pads < 0 || pads > 16) {
+    fprintf(stderr, "--pads must be 0..16\n");
     return 2;
   }
   if (!addr || !rtsp || !rikey) {
@@ -619,6 +620,7 @@ int main(int argc, char **argv) {
       }
       // scripted input
       const uint16_t caps = LI_CCAP_ANALOG_TRIGGERS | LI_CCAP_RUMBLE | (touch_motion ? LI_CCAP_TOUCHPAD | LI_CCAP_ACCEL | LI_CCAP_GYRO : 0);
+      if (pads == 0) sent_arrival = 1, step = 8;  // no controller: no arrival and no scripted presses
       if (no_script && !sent_arrival && el >= 2.0) {
         // --no-script: only attach the virtual pad, press nothing, then wait for the UI ticks.
         int r = LiSendControllerArrivalEvent(0, 0x1, LI_CTYPE_PS, 0x3FFFF | 0, caps);
