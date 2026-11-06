@@ -41,6 +41,13 @@
   profile, `keyboard_mouse_sensitivity` (in percent, 100 by default) is where a new device's mouse starts. Not in the app
   yet.
 
+### Fixed
+
+- **Surround sound when a wider stream joins.** If a stereo stream opened the audio channel first and a 5.1/7.1 client
+  joined later, the reader now reopens the 12-channel bed instead of leaving the new client with stereo in the front pair.
+- **Malformed audio packets are dropped.** A packet whose size does not fit the channel count is no longer split into the
+  wrong number of frames.
+
 ## 0.3.2 (2026-11-05)
 
 ### Changed

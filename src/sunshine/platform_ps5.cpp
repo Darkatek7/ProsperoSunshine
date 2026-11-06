@@ -230,6 +230,8 @@ struct audio_hub {
     std::vector<avcap_mic *> mics;
     avcap_mic *reader = nullptr;
     int source_channels = 2;  // of the channel the reader opened: 2 (type 0) or 12 (type 3)
+    int wanted_channels = 2;  // the widest layout any microphone asks for
+    bool surround_enabled = false;  // the app's Surround switch
     // Type 3's level per channel, logged every 30 s: which channels carry sound on a console with surround output.
     std::array<double, prospero::kAvcapSurroundChannels> squares{};
     std::size_t frames = 0;
@@ -243,11 +245,15 @@ public:
         auto shared = prospero::SharedCapture::acquire(rc);
         if (!shared) BOOST_LOG(warning) << "PS5 audio: capture session unavailable: "sv << rc << ", retrying"sv;
         auto mic = std::unique_ptr<avcap_mic>(new avcap_mic(std::move(shared), channels, sample_rate, frame_size));
-        mic->surround_ = surround && channels > 2;
+        {
+            std::lock_guard lock(hub_.mutex);
+            hub_.surround_enabled = surround;
+        }
         // A title started with the stream can hold the capture for a moment. Returning no microphone here left the
         // whole stream silent: Sunshine only asks for a new one after a reinit, which the silent fallback never sends.
         if (mic->another_reads()) BOOST_LOG(info) << "PS5 audio: sharing the channel another stream reads"sv;
-        else if (!mic->shared_ || !mic->open_channel()) mic->retry_at_ = std::chrono::steady_clock::now() + 500ms;
+        else if (!mic->shared_ || !mic->open_channel(mic->wanted_channels()))
+            mic->retry_at_ = std::chrono::steady_clock::now() + 500ms;
         return mic;
     }
 
@@ -255,6 +261,7 @@ public:
         if (open_) close_channel();
         std::lock_guard lock(hub_.mutex);
         std::erase(hub_.mics, this);
+        hub_.wanted_channels = wanted_channels_locked();
     }
 
     capture_e sample(std::vector<float> &frame_buffer) override {
@@ -273,12 +280,21 @@ public:
                 if (std::chrono::steady_clock::now() - start > 500ms) return silence(frame_buffer);
                 continue;
             }
-            if (open_ && generation_ != shared_->generation()) set_open(false);  // session was reopened
+            if (open_ && generation_ != shared_->generation()) {
+                set_open(false);  // session was reopened
+                surround_failed_ = false;  // a new session may allow type 3 again
+            }
             if (!open_) return silence(frame_buffer);
+            // A stream that joined with a wider layout makes the reader open the 12-channel bed.
+            if (source_channels_ == 2 && !surround_failed_ && wanted_channels() > 2 && surround_enabled()) {
+                close_channel();
+                if (!open_channel(wanted_channels())) return silence(frame_buffer);
+            }
             const int rc = shared_->with_session(
                 [&](ps_capture *s) { return ps_capture_audio_read(s, packet_.data(), packet_.size(), header_); });
             if (rc < 0) {
                 BOOST_LOG(warning) << "PS5 audio: ReadAudio failed: "sv << rc << ", reopening"sv;
+                if (source_channels_ == prospero::kAvcapSurroundChannels) surround_failed_ = true;
                 close_channel();
                 return silence(frame_buffer);
             }
@@ -289,6 +305,12 @@ public:
                     return silence(frame_buffer);
                 }
                 std::this_thread::sleep_for(1ms);
+                continue;
+            }
+            const size_t frame_bytes = static_cast<size_t>(source_channels_) * sizeof(float);
+            if (static_cast<size_t>(rc) % frame_bytes != 0) {
+                BOOST_LOG(warning) << "PS5 audio: packet of "sv << rc << " bytes is not "sv << source_channels_
+                                   << " channels, dropped"sv;
                 continue;
             }
             hand_out(reinterpret_cast<const float *>(packet_.data()), static_cast<size_t>(rc) / sizeof(float));
@@ -302,11 +324,29 @@ private:
           period_(std::chrono::nanoseconds(1'000'000'000LL * frame_size / sample_rate)), packet_(0xC000) {
         std::lock_guard lock(hub_.mutex);
         hub_.mics.push_back(this);
+        hub_.wanted_channels = std::max(hub_.wanted_channels, channels_);
     }
 
     bool another_reads() {
         std::lock_guard lock(hub_.mutex);
         return hub_.reader && hub_.reader != this;
+    }
+
+    int wanted_channels() {
+        std::lock_guard lock(hub_.mutex);
+        return hub_.wanted_channels;
+    }
+
+    // Caller holds hub_.mutex.
+    static int wanted_channels_locked() {
+        int wanted = 2;
+        for (avcap_mic *mic : hub_.mics) wanted = std::max(wanted, mic->channels_);
+        return wanted;
+    }
+
+    bool surround_enabled() {
+        std::lock_guard lock(hub_.mutex);
+        return hub_.surround_enabled;
     }
 
     void set_open(bool open) {
@@ -368,15 +408,16 @@ private:
         hub_.levels_at = now + 30s;
     }
 
-    bool open_channel() {
+    bool open_channel(int wanted) {
         // The generation is read under the lock that opens the channel. Read before it, a reopen in between (a game
         // starting) left the channel on the new session marked with the old generation: the next sample() then dropped
         // it without closing it, and every later open failed on the channel already there.
         unsigned generation = 0;
         int source = 2, surround_rc = 0;
+        const bool try_surround = surround_enabled() && wanted > 2 && !surround_failed_;
         const int rc = shared_->exclusive([&](ps_capture *s) {
             generation = shared_->generation();
-            if (surround_) {
+            if (try_surround) {
                 surround_rc = ps_capture_audio_open(s, 3, 0, 0);
                 if (!surround_rc) {
                     source = prospero::kAvcapSurroundChannels;
@@ -389,10 +430,13 @@ private:
             BOOST_LOG(warning) << "PS5 audio: OpenAudio failed: "sv << rc;
             return false;
         }
-        if (surround_ && surround_rc)
+        if (try_surround && surround_rc) {
+            surround_failed_ = true;
             BOOST_LOG(warning) << "PS5 audio: 12 channels refused ("sv << surround_rc << "), stereo"sv;
-        else if (surround_)
+        } else if (try_surround) {
             BOOST_LOG(info) << "PS5 audio: 12 channels from the console for "sv << channels_ << " speakers"sv;
+        }
+        source_channels_ = source;
         {
             std::lock_guard lock(hub_.mutex);
             hub_.source_channels = source;
@@ -415,7 +459,7 @@ private:
             // Only the session video opened: if video failed too, the stream is ending, and opening one here would hold
             // up its teardown.
             if (!shared_) shared_ = prospero::SharedCapture::attach();
-            if (shared_ && open_channel()) BOOST_LOG(info) << "PS5 audio: channel reopened"sv;
+            if (shared_ && open_channel(wanted_channels())) BOOST_LOG(info) << "PS5 audio: channel reopened"sv;
             retry_at_ = std::chrono::steady_clock::now() + 500ms;
         }
         {
@@ -432,7 +476,8 @@ private:
     static inline audio_hub hub_;
     std::shared_ptr<prospero::SharedCapture> shared_;
     int channels_;
-    bool surround_ = false;  // reads 12 channels when it opens the channel
+    int source_channels_ = 2;  // of the channel this microphone opened: 2 (type 0) or 12 (type 3)
+    bool surround_failed_ = false;  // type 3 was refused or failed; don't retry until a new session
     std::uint32_t frame_size_;
     std::chrono::nanoseconds period_;
     std::vector<uint8_t> packet_;
