@@ -8,6 +8,8 @@ verified state with evidence: `STATUS.md` (both German).
 - `src/sunshine/` – PS5 replacements for Sunshine parts (video, audio, input, process, main).
 - `src/platform/ps5/` – Avcap2 capture (`capture.c`), `SharedCapture`, backend glue.
 - `src/capture/`, `src/video/` – portable logic with unit tests in `tests/`.
+- `src/web/` – the web page (HTTPS on base port + 1, off without a login): `web_auth.hpp`, `web_lines.hpp` portable with
+  tests in `tests/`; `web_login.cpp`, `web_server.cpp` host-only; `page/` HTML/JS/CSS embedded into the ELF by `CMakeLists.txt`.
 - `patches/<dep>/` – patches applied on top of pinned sources; `deps.lock` pins every source by SHA256.
 - `app/` – the PS5 settings app `PPSA47989` (ps5-homebrew-ui, ShadowMountPlus title folder).
 - `tools/moonlight/` – automated Moonlight test client (pairing, smoke, reconnect, loss, A/V sync).
@@ -81,7 +83,7 @@ Toolchain: PS5 Payload SDK v0.45 in the Docker image `prosperosunshine-sdk:v0.45
 
 - The host is an ELF payload (ELF loader on port 9021); state lives in `/data/prosperosunshine/`.
   Control socket on TCP 47995, 127.0.0.1 only (the empty file `control_lan` there opens it to the LAN):
-  `STATUS`, `PAIRINGS`, `PIN [<id>] <pin> [name]`, `DEVICES`, `STREAMS`, `ENDSTREAM <uuid>`, `RENAME <uuid> <name>`, `UNPAIR <uuid>`, `REPORT`, `AUTOLOAD [ON|OFF]`, `RELISTEN`, `PROBE`, `QUIT` (one client at a time). `STREAMS` lists the running streams, one `OK uuid=... address=... codec=... hdr=... mode=... kbps=... secs=... pads=... role=... channel=... name=...` line each, then `END` (format in `src/control/stream_list.hpp`); `ENDSTREAM` ends one device's stream while the game and the others go on. `REPORT` makes the
+  `STATUS`, `PAIRINGS`, `PIN [<id>] <pin> [name]`, `DEVICES`, `STREAMS`, `ENDSTREAM <uuid>`, `RENAME <uuid> <name>`, `UNPAIR <uuid>`, `REPORT`, `AUTOLOAD [ON|OFF]`, `RELISTEN`, `PROBE`, `CANCELPIN <id>`, `WEBLOGIN [SET <user> <password>|ON|OFF|FORGET]`, `QUIT` (one client at a time). `STREAMS` lists the running streams, one `OK uuid=... address=... codec=... hdr=... mode=... kbps=... secs=... pads=... role=... channel=... name=...` line each, then `END` (format in `src/control/stream_list.hpp`); `ENDSTREAM` ends one device's stream while the game and the others go on. `REPORT` makes the
   host answer on TCP 47996 for some seconds with `diagnostics.txt` (a title may not listen on the network).
   `RELISTEN` starts the host's services anew as after rest mode took its ports; `out/relisten_probe.elf` sends it.
   `PROBE` sends `/data/prosperosunshine/firmware_probe.elf` to the ELF loader unless a stream runs (`docs/firmware-probe.md`).

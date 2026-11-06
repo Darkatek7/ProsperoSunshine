@@ -458,6 +458,22 @@ std::string clean_device_name(const std::string &text)
     return name.substr(first, name.find_last_not_of(' ') - first + 1);
 }
 
+std::string deny_request(const std::string &id)
+{
+    return "CANCELPIN " + id + "\n";
+}
+
+DenyOutcome parse_deny(const std::string &answer)
+{
+    if (answer == "OK cancelled" || answer == "OK")
+        return DenyOutcome::denied;
+    if (answer == "ERR no such request")
+        return DenyOutcome::gone;
+    if (answer == "ERR unknown command")
+        return DenyOutcome::unsupported;
+    return DenyOutcome::failed;
+}
+
 bool parse_device_line(const std::string &line, Device *device)
 {
     if (line.rfind("OK ", 0) != 0)
@@ -487,6 +503,18 @@ std::string device_info(const Device &device)
     if (device.streaming)
         return device.mode.empty() ? "Streaming now" : "Streaming now, " + device.mode;
     return device.mode.empty() ? "No stream recorded yet" : "Last asked for " + device.mode;
+}
+
+std::vector<std::string> paired_names(bool devices_known, const std::vector<Device> &devices,
+                                      const std::vector<std::string> &from_file)
+{
+    if (!devices_known)
+        return from_file;
+    std::vector<std::string> names;
+    names.reserve(devices.size());
+    for (const Device &device : devices)
+        names.push_back(device_label(device));
+    return names;
 }
 
 namespace

@@ -1,0 +1,209 @@
+ProsperoSunshine: write the state file atomically, and get past a broken one
+
+A tester's console hung, and afterwards sunshine_state.json was 12464 bytes of zeros. Upstream writes the file in
+place without a sync, so a hang or a power cut during or shortly after a write can leave such garbage. From then on
+load_state() gave up without a uniqueid (/serverinfo advertised an empty <uniqueid/>), and save_state() refused to
+write over a file it could not read, so no new pairing was ever kept.
+
+Writes now go to <file>.tmp, are synced and renamed over the file, and the directory is synced after. A file that
+can't be parsed is moved to <file>.corrupt (only the newest is kept) and the host goes on as without a file: a new
+uniqueid and no pairings, written at once. save_state() and save_user_creds() write what is in memory instead of
+refusing.
+
+--- a/src/file_handler.h
++++ b/src/file_handler.h
+@@ -51,4 +51,19 @@
+    * @examples_end
+    */
+   int write_file(const char *path, const std::string_view &contents);
++
++  /**
++   * @brief Write a file so that a crash or a power cut leaves either the old or the new contents, never a mix.
++   * @details The contents go to `<path>.tmp`, are synced to disk and then renamed over the file.
++   * @param path The path of the file.
++   * @param contents The contents to write.
++   * @return ``0`` on success, ``-1`` on failure.
++   */
++  int write_file_atomically(const char *path, const std::string_view &contents);
++
++  /**
++   * @brief Move a file that can't be read to `<path>.corrupt`, replacing an older one, so it is kept for a look.
++   * @param path The path of the file.
++   */
++  void set_aside_corrupt(const std::string &path);
+ }  // namespace file_handler
+--- a/src/file_handler.cpp
++++ b/src/file_handler.cpp
+@@ -4,9 +4,16 @@
+  */
+ 
+ // standard includes
++#include <cerrno>
+ #include <filesystem>
+ #include <fstream>
+ 
++#ifndef _WIN32
++  // platform includes
++  #include <fcntl.h>
++  #include <unistd.h>
++#endif
++
+ // local includes
+ #include "file_handler.h"
+ #include "logging.h"
+@@ -53,4 +60,59 @@
+ 
+     return 0;
+   }
++
++  int write_file_atomically(const char *path, const std::string_view &contents) {
++    const std::string temp = std::string {path} + ".tmp";
++    std::error_code ec;
++#ifdef _WIN32
++    if (write_file(temp.c_str(), contents) != 0) {
++      return -1;
++    }
++#else
++    const int fd = ::open(temp.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0666);
++    if (fd < 0) {
++      return -1;
++    }
++    std::size_t written = 0;
++    while (written < contents.size()) {
++      const auto n = ::write(fd, contents.data() + written, contents.size() - written);
++      if (n < 0 && errno == EINTR) {
++        continue;
++      }
++      if (n <= 0) {
++        break;
++      }
++      written += static_cast<std::size_t>(n);
++    }
++    const bool synced = written == contents.size() && ::fsync(fd) == 0;
++    if (::close(fd) != 0 || !synced) {
++      std::filesystem::remove(temp, ec);
++      return -1;
++    }
++#endif
++    std::filesystem::rename(temp, path, ec);
++    if (ec) {
++      std::filesystem::remove(temp, ec);
++      return -1;
++    }
++#ifndef _WIN32
++    // The rename is an entry in the directory; sync that too so it survives a power cut.
++    const auto dir = get_parent_directory(path);
++    if (const int dir_fd = ::open(dir.empty() ? "." : dir.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC); dir_fd >= 0) {
++      ::fsync(dir_fd);
++      ::close(dir_fd);
++    }
++#endif
++    return 0;
++  }
++
++  void set_aside_corrupt(const std::string &path) {
++    std::error_code ec;
++    std::filesystem::rename(path, path + ".corrupt", ec);
++    if (ec) {
++      BOOST_LOG(error) << "Couldn't move " << path << " aside: " << ec.message();
++      return;
++    }
++    BOOST_LOG(warning) << "Moved the unreadable " << path << " to " << path << ".corrupt";
++  }
+ }  // namespace file_handler
+--- a/src/httpcommon.cpp
++++ b/src/httpcommon.cpp
+@@ -6,6 +6,7 @@
+ 
+ // standard includes
+ #include <filesystem>
++#include <sstream>
+ #include <utility>
+ 
+ // lib includes
+@@ -92,8 +93,10 @@
+       try {
+         pt::read_json(file, outputTree);
+       } catch (std::exception &e) {
+-        BOOST_LOG(error) << "Couldn't read user credentials: "sv << e.what();
+-        return -1;
++        // The file may also hold the paired clients; nvhttp writes them again on their next change.
++        BOOST_LOG(error) << "Couldn't read user credentials, writing them anew: "sv << e.what();
++        file_handler::set_aside_corrupt(file);
++        outputTree.clear();
+       }
+     }
+ 
+@@ -101,12 +104,17 @@
+     outputTree.put("username", username);
+     outputTree.put("salt", salt);
+     outputTree.put("password", util::hex(crypto::hash(password + salt)).to_string());
++    std::ostringstream json;
+     try {
+-      pt::write_json(file, outputTree);
++      pt::write_json(json, outputTree);
+     } catch (std::exception &e) {
+       BOOST_LOG(error) << "error writing to the credentials file, perhaps try this again as an administrator? Details: "sv << e.what();
+       return -1;
+     }
++    if (file_handler::write_file_atomically(file.c_str(), json.str()) != 0) {
++      BOOST_LOG(error) << "error writing to the credentials file, perhaps try this again as an administrator?"sv;
++      return -1;
++    }
+ 
+     BOOST_LOG(info) << "New credentials have been created"sv;
+     return 0;
+--- a/src/nvhttp.cpp
++++ b/src/nvhttp.cpp
+@@ -12,6 +12,7 @@
+ #include <filesystem>
+ #include <format>
+ #include <mutex>
++#include <sstream>
+ #include <string>
+ #include <utility>
+ 
+@@ -272,8 +273,10 @@
+       try {
+         pt::read_json(config::nvhttp.file_state, root);
+       } catch (std::exception &e) {
+-        BOOST_LOG(error) << "Couldn't read "sv << config::nvhttp.file_state << ": "sv << e.what();
+-        return;
++        // Refusing to save here would lose every pairing from now on; write what is in memory instead.
++        BOOST_LOG(error) << "Couldn't read "sv << config::nvhttp.file_state << ", writing it anew: "sv << e.what();
++        file_handler::set_aside_corrupt(config::nvhttp.file_state);
++        root.clear();
+       }
+     }
+ 
+@@ -294,12 +297,16 @@
+     }
+     root.add_child("root.named_devices"s, named_cert_nodes);
+ 
++    std::ostringstream json;
+     try {
+-      pt::write_json(config::nvhttp.file_state, root);
++      pt::write_json(json, root);
+     } catch (std::exception &e) {
+       BOOST_LOG(error) << "Couldn't write "sv << config::nvhttp.file_state << ": "sv << e.what();
+       return;
+     }
++    if (file_handler::write_file_atomically(config::nvhttp.file_state.c_str(), json.str()) != 0) {
++      BOOST_LOG(error) << "Couldn't write "sv << config::nvhttp.file_state;
++    }
+   }
+ 
+   /**
+@@ -387,6 +394,12 @@
+     } catch (std::exception &e) {
+       BOOST_LOG(error) << "Couldn't read "sv << config::nvhttp.file_state << ": "sv << e.what();
+ 
++      // Start over as without a file: a host without a uniqueid advertises an empty one, and the pairings are lost
++      // anyway. The new identity is written right away so that it stays the same from now on.
++      file_handler::set_aside_corrupt(config::nvhttp.file_state);
++      http::unique_id = uuid_util::uuid_t::generate().string();
++      std::lock_guard lock {client_auth_mutex()};
++      save_state();
+       return;
+     }
+ 

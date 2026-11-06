@@ -22,7 +22,8 @@ patches) for the console and replaces the parts that talk to PC hardware:
 - **Input:** a native virtual DualSense per Moonlight gamepad, with touchpad and motion sensors, and a virtual keyboard and
   mouse for Moonlight's keyboard and mouse. A device without a controller plays with its keyboard and mouse as a
   controller of its own.
-- **App list:** "PS5 Screen" and the console's installed games, with their covers. There is no web UI.
+- **App list:** "PS5 Screen" and the console's installed games, with their covers. Sunshine's web UI is replaced by the PS5
+  app and a small [web page](#web-page) of the host's own, which is off until you set a login.
 
 Details: `docs/adr/001-sunshine-port.md`. Roadmap: `ROADMAP.md`; verified state: `STATUS.md`;
 reverse-engineering notes: `docs/` (German).
@@ -109,6 +110,37 @@ or broadcast your screen. The role belongs to the host's device, not to the firs
 gets it, and the host's device takes it back when it reconnects. Once every controller is gone, the next device to connect
 is the host. To give PS and Create to everyone, turn on **PS for all players** in the app's Settings and restart the host.
 
+## Web page
+
+The host can serve a small web page, so a phone or PC in your network can do what the app does without leaving the game:
+see the host's status, version and firmware, enter the PIN of a pending pairing, end a device's stream, rename or remove
+paired devices, change the settings, read or download the end of `sunshine.log` and `host_diag.log`, get the same
+diagnostic report as the app's (ready to paste into an issue), and restart the host.
+It is off until you set a login, and nothing listens on its port before that.
+
+1. In the app, open **Settings**, choose **Web page** and set a user name and a password (8 to 128 characters). The page
+   starts right away. Turn it off there again; the login stays stored for the next time.
+2. Open `https://<console-ip>:47990` in a browser (the **Base port** plus one, if you changed it). The page has its own
+   self-signed certificate (made on the console, renewed by the host), so the browser warns once; accept it for this
+   address. On an iPhone in Safari that takes a few taps: **Show Details**, **visit this website**, then **Visit Website**.
+3. Sign in. A session ends after 12 hours without use, or when the login changes. With **Remember me on this device**
+   (off unless you tick it) the browser stays signed in for 30 days from that sign-in, also across host restarts and a
+   closed tab. The host keeps only a SHA-256 hash of such a session's token, in `/data/prosperosunshine/web_remembered`.
+   Changing or forgetting the login in the app, turning the page off, and **Sign out** on the page end every remembered
+   session, so signing out on one device also signs out a lost phone.
+
+- The page answers only the LAN and Tailscale addresses (100.64.0.0/10); every other address gets 403. **Don't forward
+  TCP 47990 to the internet.** Over [ps5-tailscale](#without-port-forwarding-tailscale) it is reachable only if 47990 is
+  among the ports it passes. ps5-tailscale forwards its clients from the console itself, so the page sees all of them as
+  127.0.0.1: they share one counter for failed sign-ins, and the log names 127.0.0.1 for each of them.
+- After 5 failed sign-ins from one address, the page waits 30 seconds before the next try, doubling up to 15 minutes; after
+  20 from all addresses together, every address waits the same way until the next good sign-in. Failed sign-ins are
+  logged with the address, never the password. The password is kept only as a salted PBKDF2-SHA256 hash in
+  `/data/prosperosunshine/web_login`.
+- Settings changed on the page apply when the host starts again. After **Save** the page offers to restart it, and until
+  then a banner says the saved settings aren't applied yet. The Experimental switches stay in the app, where they are
+  checked against the firmware.
+
 ## Keyboard and mouse as a controller
 
 A device without a controller plays with its keyboard and mouse: they become a controller of their own, a player like any
@@ -187,8 +219,9 @@ ports.
 1. **Pair the device at home first**, on the same network as the console, or pair over the internet once the ports are open;
    either way the PIN goes into the app on the console.
 2. **Forward these ports** on your router to the console (the defaults; they move with **Base port** in the app's Settings):
-   TCP 47984, 47989 and 48010, UDP 47998, 47999 and 48000. The host has no web interface, so there's nothing else to open.
-   Don't forward the control socket (TCP 47995); it only listens on the console itself anyway.
+   TCP 47984, 47989 and 48010, UDP 47998, 47999 and 48000. Nothing else needs to be open. Don't forward the
+   [web page](#web-page) (TCP 47990), which answers only the LAN and Tailscale, or the control socket (TCP 47995), which only
+   listens on the console itself anyway.
 3. In Moonlight, **add the host by your public address** (or a dynamic DNS name for it).
 4. **Lower the bitrate** in Moonlight to what the upload of your connection carries. Every player gets a copy of the stream,
    so two friends over the internet need twice the upload.
@@ -357,7 +390,8 @@ switch off and choose **Save and restart host**.
 ## Development control socket
 
 The host listens on TCP **47995** with a line-based control socket: `STATUS`, `PAIRINGS`, `PIN [<id>] <pin> [name]`,
-`DEVICES`, `STREAMS`, `ENDSTREAM <uuid>`, `RENAME <uuid> <name>`, `UNPAIR <uuid>`, `REPORT`, `AUTOLOAD [ON|OFF]` and `QUIT`. It is **unauthenticated**. By default it listens on `127.0.0.1` only (ROADMAP P9.1), so the app on the
+`DEVICES`, `STREAMS`, `ENDSTREAM <uuid>`, `RENAME <uuid> <name>`, `UNPAIR <uuid>`, `REPORT`, `AUTOLOAD [ON|OFF]`, `RELISTEN`, `PROBE`,
+`CANCELPIN <id>`, `WEBLOGIN [SET <user> <password>|ON|OFF|FORGET]` and `QUIT`. It is **unauthenticated**. By default it listens on `127.0.0.1` only (ROADMAP P9.1), so the app on the
 console can use it but the LAN cannot. Creating the empty file `/data/prosperosunshine/control_lan` re-enables LAN
 access for development. Do this only on trusted networks.
 

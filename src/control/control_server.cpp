@@ -4,6 +4,7 @@
 #include "control/stream_list.hpp"
 #include "host_control.hpp"
 #include "sunshine/video_ps5.hpp"
+#include "web/web_login.hpp"
 #include "src/logging.h"
 #include "src/platform/common.h"
 #include "src/nvhttp.h"
@@ -29,13 +30,21 @@ using namespace std::literals;
 namespace prospero {
 
 namespace {
+// A name in an answer line: Moonlight sends a device's name unchecked when it asks to pair, and a line break in it would
+// add lines to the answer.
+std::string one_line(std::string text) {
+    for (char &c : text)
+        if (static_cast<unsigned char>(c) < 0x20 || c == 0x7f) c = ' ';
+    return text;
+}
+
 // The paired devices by client certificate: uuid and name.
 std::map<std::string, std::pair<std::string, std::string>> devices_by_cert() {
     std::map<std::string, std::pair<std::string, std::string>> devices;
     for (const auto &client : nvhttp::get_all_clients()) {
         const std::string uuid = client.value("uuid", "");
         const std::string cert = nvhttp::get_cert_by_uuid(uuid);
-        if (!cert.empty()) devices[cert] = {uuid, client.value("name", "")};
+        if (!cert.empty()) devices[cert] = {uuid, one_line(client.value("name", ""))};
     }
     return devices;
 }
@@ -57,21 +66,27 @@ ControlServer::~ControlServer() {
     nvhttp::set_launch_listener(nullptr);
 }
 
-std::string ControlServer::handle(const std::string &line) {
+std::string ControlServer::handle(const std::string &line, Caller caller) {
+    std::lock_guard lock(mutex_);
+    return handle_locked(line, caller);
+}
+
+std::string ControlServer::handle_locked(const std::string &line, Caller caller) {
+    auto &baseline = sent_[caller == Caller::web ? 1 : 0];
     std::istringstream in(line);
     std::string command;
     in >> command;
     if (command == "STATUS") {
         const auto pending = nvhttp::get_pending_pairings().size();
         std::string answer = "OK running="s + (proc::proc.running() > 0 ? "1" : "0") +
-                             " app=" + proc::proc.get_last_run_app_name() + " pending=" + std::to_string(pending);
+                             " app=" + one_line(proc::proc.get_last_run_app_name()) + " pending=" + std::to_string(pending);
         // The client of the live stream; the name comes last because it may contain spaces.
         const auto client = rtsp_stream::session_count() > 0 ? nvhttp::get_last_launch_client() : nvhttp::launch_client_t{};
-        return answer + " address=" + client.address + " client=" + client.name;
+        return answer + " address=" + client.address + " client=" + one_line(client.name);
     }
     if (command == "PAIRINGS") {
         std::string out;
-        for (const auto &p : nvhttp::get_pending_pairings()) out += "OK " + p.id + ' ' + p.name + " " + p.address + '\n';
+        for (const auto &p : nvhttp::get_pending_pairings()) out += "OK " + p.id + ' ' + one_line(p.name) + " " + p.address + '\n';
         return out + "END";
     }
     if (command == "PIN") {
@@ -100,6 +115,15 @@ std::string ControlServer::handle(const std::string &line) {
         BOOST_LOG(info) << "Control: PIN submitted for a pending pairing"sv;
         return nvhttp::pin(id, pin, name) ? "OK paired" : "ERR pairing failed";
     }
+    if (command == "CANCELPIN") {
+        std::string id;
+        in >> id;
+        if (id.empty()) return "ERR usage: CANCELPIN <id>";
+        // Moonlight gets a refusal at once instead of waiting for a PIN that never comes.
+        if (!nvhttp::cancel_pairing(id)) return "ERR no such request";
+        BOOST_LOG(info) << "Control: a pending pairing was denied"sv;
+        return "OK cancelled";
+    }
     if (command == "DEVICES") {
         // Every device with a running session streams, also one that joined another's stream.
         std::vector<std::string> live;
@@ -110,7 +134,7 @@ std::string ControlServer::handle(const std::string &line) {
             const std::string mode = modes_.mode(uuid);
             const std::string cert = live.empty() ? std::string() : nvhttp::get_cert_by_uuid(uuid);
             const bool streaming = !cert.empty() && std::find(live.begin(), live.end(), cert) != live.end();
-            out += "OK " + uuid + (streaming ? " 1 " : " 0 ") + (mode.empty() ? "-" : mode) + ' ' + client.value("name", "") +
+            out += "OK " + uuid + (streaming ? " 1 " : " 0 ") + (mode.empty() ? "-" : mode) + ' ' + one_line(client.value("name", "")) +
                    '\n';
         }
         return out + "END";
@@ -131,8 +155,8 @@ std::string ControlServer::handle(const std::string &line) {
                               session.video_format, session.dynamic_range > 0, seconds_since(session.started, now),
                               session.gamepads};
             // The rate since the last STREAMS, or on the first since the session started.
-            const auto last = sent_.find(session.client_cert);
-            if (last != sent_.end() && last->second.bytes <= session.video_bytes)
+            const auto last = baseline.find(session.client_cert);
+            if (last != baseline.end() && last->second.bytes <= session.video_bytes)
                 facts.sent_kbps = sent_rate_kbps(session.video_bytes - last->second.bytes,
                                                  std::chrono::duration<double>(now - last->second.at).count());
             else
@@ -146,7 +170,7 @@ std::string ControlServer::handle(const std::string &line) {
                                known ? device->second.second : std::string()) +
                    '\n';
         }
-        sent_ = std::move(sent);  // sessions that ended drop out
+        baseline = std::move(sent);  // sessions that ended drop out
         return out + "END";
     }
     if (command == "ENDSTREAM") {
@@ -201,6 +225,34 @@ std::string ControlServer::handle(const std::string &line) {
     if (command == "RELISTEN") {
         relisten_ = true;
         return "OK";
+    }
+    if (command == "WEBLOGIN") {
+        std::string action, user;
+        in >> action;
+        if (action.empty())
+            return "OK user=" + web_login::stored_user() + " enabled=" + (web_login::enabled() ? "1" : "0");
+        if (action == "ON" || action == "OFF") {
+            const bool on = action == "ON";
+            if (!on && web_login::stored_user().empty()) return "OK off";  // off already
+            const std::string problem = web_login::set_enabled(on);
+            if (!problem.empty()) return "ERR " + problem;
+            BOOST_LOG(info) << "Control: the web page was turned "sv << (on ? "on"sv : "off"sv);
+            return on ? "OK on" : "OK off";
+        }
+        if (action == "FORGET") {
+            web_login::forget();
+            BOOST_LOG(info) << "Control: the web page's login was removed"sv;
+            return "OK forgotten";
+        }
+        if (action != "SET") return "ERR usage: WEBLOGIN [SET <user> <password> | ON | OFF | FORGET]";
+        in >> user;
+        std::string password;
+        std::getline(in, password);
+        if (!password.empty() && password.front() == ' ') password.erase(0, 1);  // the one space after the name
+        const std::string problem = web_login::set(user, password);
+        if (!problem.empty()) return "ERR " + problem;
+        BOOST_LOG(info) << "Control: the web page's login was set"sv;
+        return "OK set";
     }
     if (command == "PROBE") {
         // The firmware probe stops the host, and with it any stream, so not while one runs. It runs as its own payload:

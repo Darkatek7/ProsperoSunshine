@@ -1,0 +1,119 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>ProsperoSunshine</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <main id="login" class="login" hidden>
+    <form id="login-form" class="card login-card" autocomplete="on">
+      <h1>ProsperoSunshine</h1>
+      <p class="muted">Sign in with the login you set in the app on the console.</p>
+      <label>User name <input id="login-user" name="username" autocomplete="username" required></label>
+      <label>Password <input id="login-password" name="password" type="password" autocomplete="current-password" required></label>
+      <label class="check"><input id="login-remember" type="checkbox"> Remember me on this device (30 days)</label>
+      <button type="submit" class="primary">Sign in</button>
+      <p id="login-error" class="error" role="alert"></p>
+    </form>
+  </main>
+
+  <div id="app" hidden>
+    <header class="top">
+      <div class="brand">
+        <strong id="host-name">ProsperoSunshine</strong>
+        <span id="host-facts" class="muted"></span>
+      </div>
+      <nav class="tabs" role="tablist">
+        <button role="tab" data-tab="overview" aria-selected="true">Overview</button>
+        <button role="tab" data-tab="devices">Devices</button>
+        <button role="tab" data-tab="settings">Settings</button>
+        <button role="tab" data-tab="logs">Logs</button>
+      </nav>
+      <div class="actions">
+        <button id="restart" class="ghost">Restart host</button>
+        <button id="logout" class="ghost" title="Also signs out every device that is remembered">Sign out</button>
+      </div>
+    </header>
+
+    <p id="notice" class="notice" role="status" title="Tap to close" hidden></p>
+    <div id="pending" class="pending" role="status" hidden>
+      <span>Saved settings aren't applied yet: the host reads them when it starts.</span>
+      <button id="pending-restart" class="primary">Restart host</button>
+    </div>
+
+    <section id="tab-overview" class="tab">
+      <div class="card">
+        <h2>Status</h2>
+        <dl id="status" class="facts"></dl>
+      </div>
+      <div class="card" id="pairing-card">
+        <h2>Pairing</h2>
+        <p class="muted">Add the console in Moonlight, then enter the PIN Moonlight shows.</p>
+        <ul id="pairings" class="list"></ul>
+        <form id="pin-form" class="row">
+          <input id="pin" inputmode="numeric" pattern="[0-9]{4,8}" placeholder="PIN" aria-label="PIN" required>
+          <input id="pin-name" placeholder="Device name (optional)" aria-label="Device name" maxlength="64">
+          <button type="submit" class="primary">Pair</button>
+        </form>
+      </div>
+      <div class="card">
+        <h2>Streams</h2>
+        <ul id="streams" class="list"></ul>
+      </div>
+    </section>
+
+    <section id="tab-devices" class="tab" hidden>
+      <div class="card">
+        <h2>Paired devices</h2>
+        <ul id="devices" class="list"></ul>
+      </div>
+    </section>
+
+    <section id="tab-settings" class="tab" hidden>
+      <form id="settings-form" class="card">
+        <h2>Settings</h2>
+        <p class="muted">They apply when the host starts again. The Experimental switches that depend on the firmware stay in the app on the console.</p>
+        <div id="settings"></div>
+        <div class="row end">
+          <button type="submit" class="primary">Save</button>
+          <button type="button" id="save-restart">Save and restart host</button>
+        </div>
+      </form>
+    </section>
+
+    <section id="tab-logs" class="tab" hidden>
+      <div class="card">
+        <div class="row">
+          <select id="log-file" aria-label="Log file">
+            <option value="sunshine">sunshine.log</option>
+            <option value="diag">host_diag.log</option>
+            <option value="report">Diagnostic report</option>
+          </select>
+          <button id="log-refresh">Refresh</button>
+          <a id="log-download" class="button" download>Download</a>
+        </div>
+        <p id="report-hint" class="muted" hidden>The same report as the app's Diagnostics page, without addresses, device names, ids or game titles, so you can paste it into a GitHub issue.</p>
+        <pre id="log" class="log"></pre>
+      </div>
+    </section>
+  </div>
+
+  <dialog id="end-dialog" class="dialog" aria-labelledby="end-title" aria-describedby="end-text">
+    <form method="dialog">
+      <h2 id="end-title">End stream</h2>
+      <p id="end-text"></p>
+      <p class="muted">Unpairing as well keeps the device out until it pairs again with a new PIN.</p>
+      <div class="dialog-buttons">
+        <button value="unpair" class="danger">End and unpair</button>
+        <button value="end" id="end-only" class="primary">Only end stream</button>
+        <button value="">Cancel</button>
+      </div>
+    </form>
+  </dialog>
+</body>
+</html>

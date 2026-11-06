@@ -7,6 +7,7 @@
 #include "control/listener_watch.hpp"
 #include "input/title_profile.hpp"
 #include "platform/ps5/mdns_responder.hpp"
+#include "web/web_server.hpp"
 #include "platform/ps5/capture.h"
 #include "platform/ps5/experimental.h"
 #include "src/config.h"
@@ -169,11 +170,13 @@ int main(int argc, char *argv[]) {
     const Ports ports{net::map_port(nvhttp::PORT_HTTP), net::map_port(nvhttp::PORT_HTTPS),
                       net::map_port(rtsp_stream::RTSP_SETUP_PORT)};
     prospero::ControlServer control(shutdown_event);
+    prospero::web::WebServer web(control, shutdown_event);
     for (bool again = true; again;) {
         std::jthread http_thread{nvhttp::start};
         std::jthread rtsp_thread{rtsp_stream::start};
         std::jthread control_thread([&](std::stop_token stop) { control.run(stop); });
         std::jthread report_thread([&](std::stop_token stop) { control.run_report(stop); });
+        std::jthread web_thread([&](std::stop_token stop) { web.run(stop); });
         // Moonlight discovery (P9.2); on any socket problem the responder logs and ends, the host runs on.
         std::jthread mdns_thread([name = config::nvhttp.sunshine_name](std::stop_token stop) {
             prospero::mdns::run_responder(stop, name, net::map_port(nvhttp::PORT_HTTP));
@@ -194,6 +197,7 @@ int main(int argc, char *argv[]) {
         }
         control_thread.request_stop();
         report_thread.request_stop();
+        web_thread.request_stop();
         mdns_thread.request_stop();
         proc::proc.terminate();
         mdns_thread.join();
@@ -201,6 +205,7 @@ int main(int argc, char *argv[]) {
         rtsp_thread.join();
         control_thread.join();
         report_thread.join();
+        web_thread.join();
         if (again) {
             shutdown_event->reset();
             while (!std::all_of(ports.begin(), ports.end(), prospero::port_free)) std::this_thread::sleep_for(2s);

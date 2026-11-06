@@ -6,6 +6,8 @@
 //   PAIRINGS                    -> "OK <id> <client name>" per pending request, then "END"
 //   PIN <pin> [name]            -> approves the only pending request ("OK paired" / "ERR ...")
 //   PIN <id> <pin> [name]       -> approves the given request
+//   CANCELPIN <id>              -> denies the given request; Moonlight is told at once ("OK cancelled" /
+//                                  "ERR no such request" when it is gone or the id is wrong)
 //   DEVICES                     -> "OK <uuid> <streaming 0|1> <last mode or -> <name>" per paired device, then "END"
 //   STREAMS                     -> per running stream "OK uuid=<uuid> address=<ip> codec=<H.264|HEVC|AV1> hdr=<0|1>
 //                                  mode=<WxH@fps> kbps=<n> secs=<n> pads=<n> role=<capture|joined|starting> channel=<0|1|->
@@ -16,6 +18,12 @@
 //   UNPAIR <uuid>               -> removes a paired device and ends its stream ("OK removed" / "ERR ...")
 //   REPORT                      -> "OK port=<n>": for some seconds, <appdata>/diagnostics.txt is on that port
 //   AUTOLOAD [ON|OFF]           -> the Payload Manager's autoload list, for the app (autoload_host.hpp)
+//   WEBLOGIN                    -> "OK user=<name> enabled=<0|1>": the stored login, also while the page is off; the
+//                                  name is empty without one (enabled=0 then). The page serves while enabled=1.
+//   WEBLOGIN SET <user> <pass>  -> sets the web page's login and turns it on ("OK set"); the password is the rest of the line
+//   WEBLOGIN ON                 -> turns the page on with the stored login ("OK on" / "ERR no login")
+//   WEBLOGIN OFF                -> turns the page off and keeps the login ("OK off", also without one)
+//   WEBLOGIN FORGET             -> removes the login, which turns the page off ("OK forgotten")
 //   PROBE                       -> sends <appdata>/firmware_probe.elf to the ELF loader ("OK started" / "ERR ..."), refused
 //                                  while a stream runs; the probe then stops the host and starts it again
 //                                  (docs/firmware-probe.md). For the app's Diagnostics page and a web page later.
@@ -30,6 +38,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <stop_token>
 #include <string>
 
@@ -43,8 +52,10 @@ public:
     ~ControlServer();
     void run(std::stop_token stop);
     void run_report(std::stop_token stop);
-    // Handles one request line; public for tests.
-    std::string handle(const std::string &line);
+    // Who asks: the app over the socket or the web page. Each has its own STREAMS rate baseline.
+    enum class Caller { app, web };
+    // Handles one request line; the web page's thread and the socket's call it.
+    std::string handle(const std::string &line, Caller caller = Caller::app);
     // Whether RELISTEN was asked for since the last call.
     bool take_relisten() { return relisten_.exchange(false); }
 
@@ -56,13 +67,14 @@ private:
     std::atomic_bool report_listening_{false};
     std::atomic_bool relisten_{false};
     std::atomic<std::chrono::steady_clock::rep> report_until_{0};
-    // Each session's video bytes at the last STREAMS, by client certificate: the rate is the difference. One client at a
-    // time asks, so the handler's thread is the only one that touches it.
+    std::string handle_locked(const std::string &line, Caller caller);
+    std::mutex mutex_;
+    // Each session's video bytes at the caller's last STREAMS, by client certificate: the rate is the difference.
     struct SentSample {
         unsigned long long bytes;
         std::chrono::steady_clock::time_point at;
     };
-    std::map<std::string, SentSample> sent_;
+    std::map<std::string, SentSample> sent_[2];
 };
 
 }

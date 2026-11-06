@@ -3,6 +3,7 @@
 
 #include "app/psapp/experimental_list.h"
 #include "app/psapp/icons.hpp"
+#include "app/psapp/web.hpp"
 #include "platform/ps5/system.hpp"
 #include "ui/glyphs.hpp"
 
@@ -47,6 +48,13 @@ constexpr int kFirstSwitch = 8;
 // The Experimental row: the firmware switches, then surround sound, which no firmware check locks.
 constexpr int kSwitchTiles = PS_EXP_SWITCH_COUNT + 1;
 constexpr int kTiles = kFirstSwitch + kSwitchTiles;
+// Under the tiles: Save, Save and restart, Revert, and at the right end the web page.
+constexpr int kSettingsActions = 4;
+// The web page's sheet: its height, where its rows start in it, and their pitch.
+constexpr float kWebSheetHeight = 770.0f;
+constexpr float kWebRowsTop = 474.0f;
+constexpr float kWebRowStep = 68.0f;
+constexpr int kWebRows = 4;
 
 float approach(float value, float target, float dt, float speed)
 {
@@ -80,7 +88,11 @@ Screen::Screen(Host &host, const hui::ui::Fonts &fonts) : host_(host), fonts_(fo
     keyboard_.style.theme.on_primary = Color::rgb(0x2a1604);
     keyboard_.style.panel = false;
     keyboard_.style.surfaces = false; // flat caps: frosted keys pick up the sun behind the sheet
+    // The kit's standard set (Square deletes, Triangle is space, L2 shift) with R2 as Done, as on the console's own
+    // keyboard; the symbols move to R1, which no keyboard sheet uses. Options stays Done too (handle_sheet).
     keyboard_.style.bindings = hui::ui::KeyboardBindings::standard();
+    keyboard_.style.bindings.layout = InputAction::page_next;
+    keyboard_.style.bindings.done = InputAction::jump_next;
 }
 
 // ---- state helpers ----------------------------------------------------------------------------
@@ -187,11 +199,19 @@ Rect Screen::tile_rect(int index) const
 
 Rect Screen::settings_action_rect(int index) const
 {
+    if (index == 3)
+        return {1824.0f - 360.0f, 736.0f, 360.0f, 84.0f}; // the web page, apart from the three about sunshine.conf
     static const float widths[3] = {250.0f, 400.0f, 340.0f};
     float x = 96.0f;
     for (int i = 0; i < index; ++i)
         x += widths[i] + 20.0f;
     return {x, 736.0f, widths[index], 84.0f};
+}
+
+Rect Screen::web_row_rect(int index) const
+{
+    const float top = 540.0f - kWebSheetHeight / 2.0f + 10.0f;
+    return {660.0f, top + kWebRowsTop + static_cast<float>(index) * kWebRowStep, 600.0f, 60.0f};
 }
 
 Rect Screen::focus_rect() const
@@ -315,7 +335,7 @@ void Screen::update(const hui::InputFrame &input, float dt, hui::ui::Feedback &f
     streams_amount_ = approach(streams_amount_,
                                page_ == Page::home && home_row_ == 1 && streams_shown() && home_card_ == visible_pairings() ? 1.0f : 0.0f,
                                dt, 14.0f);
-    for (int i = 0; i < kTiles + 3; ++i)
+    for (int i = 0; i < kTiles + kSettingsActions; ++i)
         tile_amount_[i] = approach(tile_amount_[i], page_ == Page::settings && tile_ == i ? 1.0f : 0.0f, dt, 14.0f);
     report_amount_ = approach(report_amount_, page_ == Page::diagnostics ? 1.0f : 0.0f, dt, 14.0f);
     const float tab_target = static_cast<float>(static_cast<int>(page_));
@@ -332,7 +352,7 @@ void Screen::update(const hui::InputFrame &input, float dt, hui::ui::Feedback &f
     if (live())
         pulse_ += dt;
     keyboard_.update(dt);
-    if (sheet_ == Sheet::choice || sheet_ == Sheet::devices || sheet_ == Sheet::streams)
+    if (sheet_ == Sheet::choice || sheet_ == Sheet::devices || sheet_ == Sheet::streams || sheet_ == Sheet::web)
     {
         sheet_highlight_.update(dt, style_);
     }
@@ -420,6 +440,22 @@ void Screen::handle_home(const hui::InputFrame &input, hui::ui::Feedback &feedba
             feedback.play(hui::audio::Cue::modal_open);
         }
     }
+    else if (input.is_pressed(InputAction::west) && home_row_ == 1 && home_card_ < cards)
+    {
+        // Square denies a request, after asking, as Square removes a paired device.
+        if (busy())
+        {
+            feedback.play(hui::audio::Cue::error);
+            return;
+        }
+        const Pairing &p = snap_.pairings[static_cast<std::size_t>(home_card_)];
+        target_ = p.id;
+        target_name_ = diag::pairing_label(p.name);
+        pair_pin_.clear();
+        open_sheet(Sheet::deny_pairing, "Deny " + target_name_ + "?",
+                   "Moonlight is told no at once. It can ask again later.", "");
+        feedback.play(hui::audio::Cue::modal_open);
+    }
     if (input.is_pressed(InputAction::north))
     {
         host_.refresh();
@@ -452,7 +488,9 @@ void Screen::handle_settings(const hui::InputFrame &input, hui::ui::Feedback &fe
             else if (input.nav == Direction::up)
                 next = switches ? from_switch : second ? tile_ - kRowLength : -1;
             else
-                next = switches ? kTiles + std::min(col, 2) : second ? std::min(to_switch, kFirstSwitch + last_switch) : tile_ + kRowLength;
+                next = switches ? kTiles + (col == last_switch ? 3 : std::min(col, 2))
+                       : second ? std::min(to_switch, kFirstSwitch + last_switch)
+                                : tile_ + kRowLength;
         }
         else
         {
@@ -460,9 +498,9 @@ void Screen::handle_settings(const hui::InputFrame &input, hui::ui::Feedback &fe
             if (input.nav == Direction::left)
                 next = index > 0 ? tile_ - 1 : -1;
             else if (input.nav == Direction::right)
-                next = index < 2 ? tile_ + 1 : -1;
+                next = index < kSettingsActions - 1 ? tile_ + 1 : -1;
             else if (input.nav == Direction::up)
-                next = kFirstSwitch + std::min(index, kSwitchTiles - 1);
+                next = kFirstSwitch + (index == 3 ? kSwitchTiles - 1 : std::min(index, kSwitchTiles - 1));
             else
                 next = -1;
         }
@@ -555,6 +593,12 @@ void Screen::run(Action action, hui::ui::Feedback &feedback)
         feedback.play(hui::audio::Cue::back);
         return;
     }
+    if (action == Action::web)
+    {
+        open_web();
+        feedback.play(hui::audio::Cue::modal_open);
+        return;
+    }
     if (busy())
     {
         feedback.play(hui::audio::Cue::error);
@@ -592,6 +636,7 @@ void Screen::run(Action action, hui::ui::Feedback &feedback)
         reload_edits_ = true;
         break;
     case Action::revert:
+    case Action::web:
         break;
     }
     feedback.play(hui::audio::Cue::select);
@@ -629,6 +674,8 @@ void Screen::open_tile(int index)
 
 void Screen::open_sheet(Sheet kind, const std::string &title, const std::string &help, const std::string &initial)
 {
+    web_step_ = WebStep::none; // the web page's steps set it again after this
+    show_password_ = false;
     sheet_ = kind;
     sheet_drawn_ = kind;
     sheet_title_ = title;
@@ -679,8 +726,121 @@ void Screen::open_streams()
     open_sheet(Sheet::streams, "Streaming now", "End a device's stream. The game keeps running.", "");
 }
 
+void Screen::open_web()
+{
+    renaming_ = false;
+    pair_pin_.clear();
+    target_.clear();
+    web_user_.clear();
+    open_sheet(Sheet::web, "Web page", "Settings, devices and streams from a browser on your network.", "");
+    web_row_ = 0;
+    while (web_row_ < kWebRows - 1 && !web_row_enabled(static_cast<WebRow>(web_row_)))
+        ++web_row_;
+    sheet_highlight_.snap(web_row_rect(web_row_));
+}
+
+bool Screen::web_row_enabled(WebRow row) const
+{
+    // The host keeps the login: without a running host that knows WEBLOGIN there is nothing to change.
+    const bool host = snap_.polled && snap_.running && snap_.web_known;
+    switch (row)
+    {
+    case WebRow::toggle:
+        // Turn off while on; Turn on needs a stored login and a host that keeps one while off.
+        return host && (snap_.web_enabled || (snap_.web_switchable && !snap_.web_user.empty()));
+    case WebRow::set_login:
+        return host;
+    case WebRow::forget:
+        return host && snap_.web_switchable && !snap_.web_user.empty();
+    case WebRow::close:
+        return true;
+    }
+    return false;
+}
+
+std::string Screen::web_address() const
+{
+    const auto base = snap_.config.find("port");
+    const std::uint16_t port = web::port(base != snap_.config.end() ? base->second : std::nullopt);
+    const std::string address = web::address(snap_.address, port);
+    return address.empty() ? "Port " + std::to_string(port) + " on the console's IP" : address;
+}
+
+void Screen::handle_web(const hui::InputFrame &input, hui::ui::Feedback &feedback)
+{
+    // The rows that can't do anything now are skipped; the host's state may change under the focus.
+    if (!web_row_enabled(static_cast<WebRow>(web_row_)))
+    {
+        web_row_ = 0;
+        while (web_row_ < kWebRows - 1 && !web_row_enabled(static_cast<WebRow>(web_row_)))
+            ++web_row_;
+    }
+    if (input.nav == Direction::up || input.nav == Direction::down)
+    {
+        const int step = input.nav == Direction::up ? -1 : 1;
+        int next = web_row_ + step;
+        while (next >= 0 && next < kWebRows && !web_row_enabled(static_cast<WebRow>(next)))
+            next += step;
+        if (next >= 0 && next < kWebRows)
+        {
+            web_row_ = next;
+            feedback.play(hui::audio::Cue::focus);
+        }
+        else if (!input.nav_repeat)
+        {
+            feedback.play(hui::audio::Cue::error, 1.0f, 0.0f, 0.4f);
+        }
+    }
+    sheet_highlight_.target(web_row_rect(web_row_));
+    if (input.is_pressed(InputAction::back))
+    {
+        feedback.play(hui::audio::Cue::modal_close);
+        close_sheet();
+        return;
+    }
+    if (!input.is_pressed(InputAction::confirm))
+        return;
+    const WebRow row = static_cast<WebRow>(web_row_);
+    if (row == WebRow::close)
+    {
+        feedback.play(hui::audio::Cue::modal_close);
+        close_sheet();
+        return;
+    }
+    if (busy() || !web_row_enabled(row))
+    {
+        feedback.play(hui::audio::Cue::error);
+        return;
+    }
+    if (row == WebRow::toggle)
+    {
+        if (snap_.web_enabled)
+            host_.web_login_off();
+        else
+            host_.web_login_on();
+        feedback.play(hui::audio::Cue::toggle);
+        return;
+    }
+    if (row == WebRow::forget)
+    {
+        open_sheet(Sheet::forget_web, "Forget the login?",
+                   "The web page turns off. Turning it on again needs a new login.", "");
+        feedback.play(hui::audio::Cue::modal_open);
+        return;
+    }
+    open_sheet(Sheet::text, "Web page user", "1 to 32 letters, digits, '.', '_' or '-'. You log in with it.", snap_.web_user);
+    web_step_ = WebStep::user;
+    keyboard_.style.max_length = static_cast<int>(web::kUserMax);
+    feedback.play(hui::audio::Cue::select);
+}
+
 void Screen::handle_sheet(const hui::InputFrame &input, hui::ui::Feedback &feedback)
 {
+    if (sheet_ == Sheet::web)
+    {
+        handle_web(input, feedback);
+        return;
+    }
     if (sheet_ == Sheet::devices)
     {
         const int count = static_cast<int>(snap_.devices.size());
@@ -794,6 +954,46 @@ void Screen::handle_sheet(const hui::InputFrame &input, hui::ui::Feedback &feedb
         }
         return;
     }
+    if (sheet_ == Sheet::deny_pairing)
+    {
+        if (input.is_pressed(InputAction::confirm))
+        {
+            if (busy())
+            {
+                feedback.play(hui::audio::Cue::error);
+                return;
+            }
+            host_.deny_pairing(target_, target_name_);
+            feedback.play(hui::audio::Cue::select);
+            close_sheet();
+        }
+        else if (input.is_pressed(InputAction::back))
+        {
+            feedback.play(hui::audio::Cue::modal_close);
+            close_sheet();
+        }
+        return;
+    }
+    if (sheet_ == Sheet::forget_web)
+    {
+        if (input.is_pressed(InputAction::confirm))
+        {
+            if (busy())
+            {
+                feedback.play(hui::audio::Cue::error);
+                return;
+            }
+            host_.web_login_forget();
+            feedback.play(hui::audio::Cue::select);
+            open_web();
+        }
+        else if (input.is_pressed(InputAction::back))
+        {
+            feedback.play(hui::audio::Cue::modal_close);
+            open_web();
+        }
+        return;
+    }
     if (sheet_ == Sheet::remove_device)
     {
         if (input.is_pressed(InputAction::confirm))
@@ -882,6 +1082,11 @@ void Screen::handle_sheet(const hui::InputFrame &input, hui::ui::Feedback &feedb
     }
 
     // The keyboard: the PIN and the host name.
+    if (web_step_ == WebStep::password && input.is_pressed(InputAction::r3))
+    {
+        show_password_ = !show_password_;
+        feedback.play(hui::audio::Cue::toggle);
+    }
     const hui::ui::Event event = keyboard_.handle(input, feedback);
     for (int i = 0; i < keyboard_.erased() && !buffer_.empty(); ++i)
         buffer_.pop_back();
@@ -895,6 +1100,8 @@ void Screen::handle_sheet(const hui::InputFrame &input, hui::ui::Feedback &feedb
         feedback.play(hui::audio::Cue::modal_close);
         if (renaming_)
             open_devices();
+        else if (web_step_ != WebStep::none)
+            open_web(); // drops a typed password with the buffer
         else
             close_sheet();
         return;
@@ -911,10 +1118,51 @@ void Screen::handle_sheet(const hui::InputFrame &input, hui::ui::Feedback &feedb
         }
         // Moonlight doesn't say which device it is, so the name is asked here, as Sunshine's web page does.
         pair_pin_ = buffer_;
-        pair_suggestion_ = diag::suggested_device_name(target_name_, snap_.paired);
+        pair_suggestion_ = diag::suggested_device_name(
+            target_name_, diag::paired_names(snap_.running && snap_.devices_known, snap_.devices, snap_.paired));
         open_sheet(Sheet::text, "Name this device", "So you can tell it apart later. Options keeps this name.", pair_suggestion_);
         keyboard_.style.max_length = 24;
         feedback.play(hui::audio::Cue::select);
+        return;
+    }
+    if (web_step_ == WebStep::user)
+    {
+        const std::string problem = web::user_problem(buffer_);
+        if (!problem.empty())
+        {
+            sheet_error_ = problem;
+            feedback.play(hui::audio::Cue::error);
+            return;
+        }
+        // The password next; the name stays for it.
+        const std::string user = buffer_;
+        open_sheet(Sheet::text, "Password for " + user, "8 to 128 characters, spaces count. It goes only to the host.", "");
+        web_step_ = WebStep::password;
+        web_user_ = user;
+        keyboard_.style.max_length = static_cast<int>(web::kPasswordMax);
+        feedback.play(hui::audio::Cue::select);
+        return;
+    }
+    if (web_step_ == WebStep::password)
+    {
+        const std::string problem = web::password_problem(buffer_);
+        if (!problem.empty())
+        {
+            sheet_error_ = problem;
+            feedback.play(hui::audio::Cue::error);
+            return;
+        }
+        if (busy())
+        {
+            sheet_error_ = "One moment: the host is busy with something else";
+            feedback.play(hui::audio::Cue::error);
+            return;
+        }
+        host_.set_web_login(web_user_, buffer_);
+        std::fill(buffer_.begin(), buffer_.end(), '\0');
+        buffer_.clear();
+        feedback.play(hui::audio::Cue::select);
+        open_web(); // the outcome shows there
         return;
     }
     if (!pair_pin_.empty())
@@ -1125,11 +1373,32 @@ void Screen::draw_footer(hui::gfx::DrawList &list, std::uint32_t glass) const
     layout.text_size = 22.0f;
     if (sheet_ == Sheet::pin || sheet_ == Sheet::text)
     {
+        // The password step adds R3 to show it; the other bound keys carry their button on the key.
+        const bool password = web_step_ == WebStep::password;
         const hui::ui::Hint hints[] = {{hui::ui::Button::cross, "Type"},
                                        {hui::ui::Button::square, "Delete"},
-                                       {hui::ui::Button::options, "Done"},
+                                       {hui::ui::Button::right_stick, show_password_ ? "Hide password" : "Show password"},
+                                       {hui::ui::Button::r2, "Done"},
                                        {hui::ui::Button::circle, "Cancel"}};
-        hui::ui::draw_hints(list, fonts_, glyphs, hints, 4, 1824.0f, true, layout);
+        if (password)
+        {
+            hui::ui::draw_hints(list, fonts_, glyphs, hints, 5, 1824.0f, true, layout);
+        }
+        else
+        {
+            const hui::ui::Hint plain[] = {hints[0], hints[1], hints[3], hints[4]};
+            hui::ui::draw_hints(list, fonts_, glyphs, plain, 4, 1824.0f, true, layout);
+        }
+    }
+    else if (sheet_ == Sheet::deny_pairing)
+    {
+        const hui::ui::Hint hints[] = {{hui::ui::Button::cross, "Deny"}, {hui::ui::Button::circle, "Keep waiting"}};
+        hui::ui::draw_hints(list, fonts_, glyphs, hints, 2, 1824.0f, true, layout);
+    }
+    else if (sheet_ == Sheet::forget_web)
+    {
+        const hui::ui::Hint hints[] = {{hui::ui::Button::cross, "Forget"}, {hui::ui::Button::circle, "Keep it"}};
+        hui::ui::draw_hints(list, fonts_, glyphs, hints, 2, 1824.0f, true, layout);
     }
     else if (sheet_ == Sheet::number)
     {
@@ -1171,12 +1440,28 @@ void Screen::draw_footer(hui::gfx::DrawList &list, std::uint32_t glass) const
         const hui::ui::Hint hints[] = {{hui::ui::Button::cross, "End stream"}, {hui::ui::Button::circle, "Keep it"}};
         hui::ui::draw_hints(list, fonts_, glyphs, hints, 2, 1824.0f, true, layout);
     }
+    else if (sheet_ == Sheet::web)
+    {
+        const hui::ui::Hint hints[] = {{hui::ui::Button::cross, "Select"}, {hui::ui::Button::circle, "Close"}};
+        hui::ui::draw_hints(list, fonts_, glyphs, hints, 2, 1824.0f, true, layout);
+    }
     else if (page_ == Page::home)
     {
-        const hui::ui::Hint hints[] = {{hui::ui::Button::cross, "Select"},
+        // On a pairing card, Square denies the request.
+        const bool on_request = home_row_ == 1 && home_card_ < visible_pairings();
+        const hui::ui::Hint hints[] = {{hui::ui::Button::cross, on_request ? "Enter PIN" : "Select"},
+                                       {hui::ui::Button::square, "Deny"},
                                        {hui::ui::Button::triangle, "Reload"},
                                        {hui::ui::Button::l1, "Pages", hui::ui::Button::r1}};
-        hui::ui::draw_hints(list, fonts_, glyphs, hints, 3, 1824.0f, true, layout);
+        if (on_request)
+        {
+            hui::ui::draw_hints(list, fonts_, glyphs, hints, 4, 1824.0f, true, layout);
+        }
+        else
+        {
+            const hui::ui::Hint plain[] = {hints[0], hints[2], hints[3]};
+            hui::ui::draw_hints(list, fonts_, glyphs, plain, 3, 1824.0f, true, layout);
+        }
     }
     else if (page_ == Page::diagnostics)
     {
@@ -1265,7 +1550,8 @@ void Screen::draw_home(hui::gfx::DrawList &list, std::uint32_t glass) const
     const std::string lan = saved("lan_encryption_mode", "0");
     chip(Icon::lock, lan == "0" ? "LAN unencrypted" : lan == "1" ? "LAN encrypted when supported" : "LAN encrypted", lan != "0");
     chip(Icon::boot, snap_.autoload ? "Starts at boot" : "Manual start", snap_.autoload);
-    chip(Icon::monitor, std::to_string(snap_.paired.size()) + (snap_.paired.size() == 1 ? " paired device" : " paired devices"), false);
+    const std::size_t paired = diag::paired_names(snap_.running && snap_.devices_known, snap_.devices, snap_.paired).size();
+    chip(Icon::monitor, std::to_string(paired) + (paired == 1 ? " paired device" : " paired devices"), false);
     list.pop_transform();
     list.pop_opacity();
 
@@ -1370,6 +1656,10 @@ void Screen::draw_home(hui::gfx::DrawList &list, std::uint32_t glass) const
         list.rounded_rect(pill, 23.0f, kAccent.with_alpha(0.18f + 0.3f * f));
         hui::ui::draw_button(list, fonts_, hui::ui::GlyphStyle::dark(), hui::ui::Button::cross, pill.x + 16.0f, pill.cy(), 28.0f);
         hui::ui::text(list, fonts_.semibold, "Enter PIN", pill.x + 58.0f, pill.cy() + 8.0f, 23.0f, kInk);
+        const Rect deny{pill.x + pill.w + 16.0f, pill.y, 150.0f, pill.h};
+        list.rounded_rect(deny, 23.0f, Color::rgb(0xffffff, 0.06f + 0.06f * f));
+        hui::ui::draw_button(list, fonts_, hui::ui::GlyphStyle::dark(), hui::ui::Button::square, deny.x + 16.0f, deny.cy(), 28.0f);
+        hui::ui::text(list, fonts_.semibold, "Deny", deny.x + 58.0f, deny.cy() + 8.0f, 23.0f, kMuted);
     }
     if (snap_.pairings.size() > static_cast<std::size_t>(cards))
         hui::ui::text(list, fonts_.regular, "+" + std::to_string(snap_.pairings.size() - static_cast<std::size_t>(cards)) + " more",
@@ -1424,14 +1714,15 @@ void Screen::draw_home(hui::gfx::DrawList &list, std::uint32_t glass) const
             hui::ui::draw_button(list, fonts_, hui::ui::GlyphStyle::dark(), hui::ui::Button::cross, r.x + r.w - 30.0f - label - 46.0f, r.y + 38.0f, 28.0f);
             list.pop_opacity();
         }
-        if (snap_.paired.empty())
+        const std::vector<std::string> paired = diag::paired_names(snap_.running && snap_.devices_known, snap_.devices, snap_.paired);
+        if (paired.empty())
         {
             hui::ui::text(list, fonts_.regular, "None yet.", r.x + 30.0f, r.y + 96.0f, 24.0f, kFaint);
         }
         float cx = r.x + 30.0f, cy = r.y + 70.0f;
-        for (std::size_t i = 0; i < snap_.paired.size(); ++i)
+        for (std::size_t i = 0; i < paired.size(); ++i)
         {
-            const std::string name = shorten(fonts_.semibold, snap_.paired[i], 21.0f, 220.0f);
+            const std::string name = shorten(fonts_.semibold, paired[i], 21.0f, 220.0f);
             const float w = fonts_.semibold.measure(name, 21.0f) + 62.0f;
             if (cx + w > r.x + r.w - 24.0f)
             {
@@ -1539,6 +1830,9 @@ void Screen::draw_settings(hui::gfx::DrawList &list, std::uint32_t glass) const
                 tile_amount_[kTiles + 1], enabled);
     draw_button(list, glass, settings_action_rect(2), static_cast<int>(Icon::undo), "Revert changes", false,
                 tile_amount_[kTiles + 2], dirty());
+    const bool web_on = snap_.web_known && snap_.web_enabled;
+    draw_button(list, glass, settings_action_rect(3), static_cast<int>(Icon::globe),
+                !snap_.web_known ? "Web page" : web_on ? "Web page: on" : "Web page: off", false, tile_amount_[kTiles + 3], true);
 
     // What the focused part does.
     std::string help;
@@ -1559,8 +1853,18 @@ void Screen::draw_settings(hui::gfx::DrawList &list, std::uint32_t glass) const
         help = "Writes the changes to sunshine.conf. They apply when the host starts next.";
     else if (tile_ == kTiles + 1)
         help = "Writes the changes and restarts the host, which ends a running stream.";
-    else
+    else if (tile_ == kTiles + 2)
         help = "Puts back what sunshine.conf holds now.";
+    else
+    {
+        help = "The host's page for a browser on your network: " + web_address();
+        extra = !snap_.polled            ? std::string()
+                : !snap_.running         ? std::string("Host stopped")
+                : !snap_.web_known       ? std::string("Not in this host")
+                : snap_.web_enabled      ? "On for " + snap_.web_user
+                : snap_.web_user.empty() ? std::string("Off: no login")
+                                         : "Off, login " + snap_.web_user + " kept";
+    }
     const Rect bar{96.0f, 840.0f, 1728.0f, 64.0f};
     glass_card(list, glass, bar, 18.0f, 0.0f);
     list.circle(bar.x + 32.0f, bar.cy(), 6.0f, kAccent);
@@ -1650,6 +1954,68 @@ void Screen::draw_page(hui::gfx::DrawList &list, std::uint32_t glass) const
 
 // ---- drawing: the sheet -----------------------------------------------------------------------
 
+void Screen::draw_web(hui::gfx::DrawList &list, const Rect &card) const
+{
+    // Whether it is on and for whom.
+    const bool on = snap_.web_known && snap_.web_enabled;
+    std::string state;
+    Color dot = kFaint;
+    if (!snap_.polled)
+        state = "Checking the host...";
+    else if (!snap_.running)
+        state = "The host is stopped. Start it to set up the web page.";
+    else if (!snap_.web_known)
+        state = "The running host has no web page. Restart it to use this app's host.";
+    else if (!on && snap_.web_user.empty())
+    {
+        state = "Off. Set a login to turn it on.";
+        dot = kMuted;
+    }
+    else if (!on)
+    {
+        state = "Off. The login " + snap_.web_user + " is kept for Turn on.";
+        dot = kMuted;
+    }
+    else
+    {
+        state = "On. Log in as " + snap_.web_user + ".";
+        dot = kGood;
+    }
+    const float state_w = fonts_.semibold.measure(state, 26.0f);
+    const float sx = card.cx() - (state_w + 30.0f) / 2.0f;
+    if (on)
+        list.glow({sx - 8.0f, card.y + 245.0f, 16.0f, 16.0f}, 8.0f, 10.0f, dot.with_alpha(0.5f));
+    list.circle(sx, card.y + 253.0f, 8.0f, dot);
+    hui::ui::text(list, fonts_.semibold, state, sx + 30.0f, card.y + 262.0f, 26.0f, kInk);
+
+    // The address to open.
+    const Rect field{card.x + 90.0f, card.y + 292.0f, card.w - 180.0f, 92.0f};
+    list.rounded_rect(field, 22.0f, Color::rgb(0x0a0f22, 0.8f));
+    list.bordered_rect(field, 22.0f, kClear, 1.5f, on ? kAccent.with_alpha(0.8f) : Color::rgb(0xffffff, 0.12f));
+    hui::ui::text(list, fonts_.semibold, shorten(fonts_.semibold, web_address(), 38.0f, field.w - 60.0f), field.cx(),
+                  field.y + 60.0f, 38.0f, on ? kInk : kMuted, Align::center);
+    hui::ui::text(list, fonts_.regular, "Open it in a browser on a phone or PC in this network.", card.cx(), card.y + 418.0f,
+                  22.0f, kMuted, Align::center);
+    hui::ui::text(list, fonts_.regular, "The browser warns about the host's own certificate the first time.", card.cx(),
+                  card.y + 448.0f, 22.0f, kFaint, Align::center);
+
+    // The rows, at the same place as in handle_web.
+    const Rect h = sheet_highlight_.rect(time_);
+    list.rounded_rect(h, 18.0f, kAccent.with_alpha(0.18f));
+    list.bordered_rect(h, 18.0f, kClear, 2.5f, kAccent);
+    const char *labels[kWebRows] = {snap_.web_enabled ? "Turn off" : "Turn on",
+                                    snap_.web_user.empty() ? "Set login" : "Change login", "Forget login", "Close"};
+    const Icon row_icons[kWebRows] = {Icon::power, Icon::lock, Icon::trash, Icon::undo};
+    for (int i = 0; i < kWebRows; ++i)
+    {
+        const Rect row = web_row_rect(i);
+        const bool enabled = web_row_enabled(static_cast<WebRow>(i));
+        const Color ink = !enabled ? kFaint : i == web_row_ ? kInk : kMuted;
+        icons::draw(list, row_icons[i], row.x + 40.0f, row.cy(), 28.0f, enabled ? kAccent : kFaint);
+        hui::ui::text(list, fonts_.semibold, labels[i], row.x + 76.0f, row.cy() + 9.0f, 26.0f, ink);
+    }
+}
+
 void Screen::draw_sheet(hui::gfx::DrawList &list, std::uint32_t glass) const
 {
     if (sheet_drawn_ == Sheet::none)
@@ -1662,8 +2028,11 @@ void Screen::draw_sheet(hui::gfx::DrawList &list, std::uint32_t glass) const
     float height = keys ? 780.0f : 640.0f;
     if (sheet_drawn_ == Sheet::choice && spec != nullptr)
         height = 300.0f + static_cast<float>(spec->choices.size() + 1) * 76.0f;
-    if (sheet_drawn_ == Sheet::remove_device || sheet_drawn_ == Sheet::end_stream)
+    if (sheet_drawn_ == Sheet::remove_device || sheet_drawn_ == Sheet::end_stream || sheet_drawn_ == Sheet::deny_pairing ||
+        sheet_drawn_ == Sheet::forget_web)
         height = 270.0f;
+    if (sheet_drawn_ == Sheet::web)
+        height = kWebSheetHeight;
     const float width = sheet_drawn_ == Sheet::text ? 1120.0f : 880.0f;
     const Rect card = sheet_drawn_ == Sheet::devices || sheet_drawn_ == Sheet::streams
                           ? devices_card()
@@ -1677,7 +2046,9 @@ void Screen::draw_sheet(hui::gfx::DrawList &list, std::uint32_t glass) const
 
     const bool device_sheet = sheet_drawn_ == Sheet::devices || sheet_drawn_ == Sheet::remove_device || renaming_ ||
                               sheet_drawn_ == Sheet::streams || sheet_drawn_ == Sheet::end_stream;
-    const Icon icon = sheet_drawn_ == Sheet::pin ? Icon::link
+    const bool web_sheet = sheet_drawn_ == Sheet::web || sheet_drawn_ == Sheet::forget_web || web_step_ != WebStep::none;
+    const Icon icon = sheet_drawn_ == Sheet::pin || sheet_drawn_ == Sheet::deny_pairing ? Icon::link
+                      : web_sheet                ? Icon::globe
                       : device_sheet             ? Icon::monitor
                       : spec != nullptr          ? kOptionIcons[std::min<std::size_t>(6, static_cast<std::size_t>(spec - option_specs().data()))]
                                                  : Icon::link; // the device's name when pairing
@@ -1711,9 +2082,45 @@ void Screen::draw_sheet(hui::gfx::DrawList &list, std::uint32_t glass) const
         const Rect field{card.x + 90.0f, card.y + 220.0f, card.w - 180.0f, 96.0f};
         list.rounded_rect(field, 22.0f, Color::rgb(0x0a0f22, 0.8f));
         list.bordered_rect(field, 22.0f, kClear, 3.0f, kAccent);
-        const float w = hui::ui::text(list, fonts_.semibold, buffer_, field.x + 30.0f, field.y + 62.0f, 38.0f, kInk);
+        float w = 0.0f;
+        if (web_step_ == WebStep::password)
+        {
+            // A dot a character, as many as fit, and the count on the right; R3 shows the text itself (its end where
+            // it is longer than the field), which is only drawn, never logged.
+            const float count_w = buffer_.empty() ? 0.0f
+                                                  : hui::ui::text(list, fonts_.regular, std::to_string(buffer_.size()),
+                                                                  field.x + field.w - 30.0f, field.y + 60.0f, 24.0f, kMuted,
+                                                                  Align::right);
+            const float room = field.w - 90.0f - count_w;
+            if (show_password_)
+            {
+                std::size_t from = 0;
+                while (from < buffer_.size() && fonts_.semibold.measure(buffer_.substr(from), 38.0f) > room)
+                    ++from;
+                // The ellipsis takes about one character's room.
+                const std::string shown =
+                    from == 0 ? buffer_ : "\xE2\x80\xA6" + buffer_.substr(std::min(from + 1, buffer_.size()));
+                w = hui::ui::text(list, fonts_.semibold, shown, field.x + 30.0f, field.y + 62.0f, 38.0f, kInk);
+            }
+            else
+            {
+                const int fit = static_cast<int>(room / 22.0f);
+                const int dots = std::min(static_cast<int>(buffer_.size()), std::max(0, fit));
+                for (int i = 0; i < dots; ++i)
+                    list.circle(field.x + 40.0f + static_cast<float>(i) * 22.0f, field.cy(), 7.0f, kInk);
+                w = static_cast<float>(dots) * 22.0f;
+            }
+        }
+        else
+        {
+            w = hui::ui::text(list, fonts_.semibold, buffer_, field.x + 30.0f, field.y + 62.0f, 38.0f, kInk);
+        }
         if (buffer_.empty())
-            hui::ui::text(list, fonts_.regular, spec != nullptr ? std::string("Default (network name)") : pair_suggestion_,
+            hui::ui::text(list, fonts_.regular,
+                          spec != nullptr                  ? std::string("Default (network name)")
+                          : web_step_ == WebStep::user     ? std::string("User name")
+                          : web_step_ == WebStep::password ? std::string("Password")
+                                                           : pair_suggestion_,
                           field.x + 30.0f, field.y + 62.0f, 32.0f, kFaint);
         if (std::fmod(time_, 1.0f) < 0.6f)
             list.rounded_rect({field.x + 34.0f + (buffer_.empty() ? 0.0f : w), field.y + 24.0f, 3.0f, 50.0f}, 1.5f, kAccent);
@@ -1753,6 +2160,8 @@ void Screen::draw_sheet(hui::gfx::DrawList &list, std::uint32_t glass) const
         }
         list.pop_transform();
     }
+    if (sheet_drawn_ == Sheet::web)
+        draw_web(list, card);
     if (sheet_drawn_ == Sheet::devices)
     {
         const int count = static_cast<int>(snap_.devices.size());

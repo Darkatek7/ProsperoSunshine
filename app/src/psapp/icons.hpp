@@ -27,6 +27,7 @@ enum class Icon
     save,
     undo,
     wifi,     // the console's address
+    trash,    // forget the web page's login
 };
 
 void draw(hui::gfx::DrawList &list, Icon icon, float cx, float cy, float size, hui::gfx::Color color);

@@ -46,3 +46,6 @@ run_test probe_scrub_test
 run_test host_control_test
 run_test quit_policy_test
 run_test encoder_qp_test
+run_test web_auth_test
+run_test web_lines_test
+run_test log_throttle_test

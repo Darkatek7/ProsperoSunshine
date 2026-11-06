@@ -2,15 +2,17 @@
 // The app's screen, drawn with ps5-homebrew-ui in its 1920x1080 virtual canvas. Three pages under a
 // tab bar (L1/R1):
 //   Home      a hero with the host's state and the sun emblem, the host's actions (start or stop,
-//             restart, start at boot), pairing requests as cards (Cross: the PIN), the running streams
+//             restart, start at boot), pairing requests as cards (Cross: the PIN, Square: deny it), the running streams
 //             while someone streams (Cross: a list with what each gets, to end one) and the paired
 //             devices (Cross: a list to rename or remove them);
 //   Settings  one tile per sunshine.conf option (Cross opens its editor, Square puts it back to the
 //             host's default), the Experimental section's switches among them (Cross flips one), then
-//             Save, Save and restart, and Revert;
+//             Save, Save and restart, Revert, and the host's web page (a sheet with its address, to turn
+//             it on or off, set or change its login, or forget it);
 //   Diagnostics the report for a bug report, to read here, as a file and over the network.
 // Editors and the PIN come up as a sheet over the page: a list for choices, a stepper for numbers,
-// the on-screen keyboard for text and the PIN. The page is frosted behind cards and sheets (the
+// the on-screen keyboard for text and the PIN (R2 or Options: Done; R1 the symbols, L2 shift; R3 shows
+// the web page's password while it is typed). The page is frosted behind cards and sheets (the
 // kit's glass), and focus, pages, sheets and messages move with springs and fades.
 #pragma once
 
@@ -68,6 +70,9 @@ class Screen
         remove_device,
         streams,
         end_stream,
+        deny_pairing, // asks before a pending request is denied
+        web,          // the web page: its state and address, Turn on or off, Set login, Forget login
+        forget_web,   // asks before the web page's login is removed
     };
     enum class Action
     {
@@ -77,6 +82,21 @@ class Screen
         save,
         save_restart,
         revert,
+        web, // opens the web page's sheet
+    };
+    // The web page's sheet: its rows, and which step of setting a login the text sheet is at.
+    enum class WebRow
+    {
+        toggle,    // Turn on (a login is stored, the page is off) or Turn off
+        set_login, // Set login, or Change login with one stored
+        forget,    // Forget login
+        close,
+    };
+    enum class WebStep
+    {
+        none,
+        user,
+        password,
     };
 
     // Input.
@@ -91,6 +111,10 @@ class Screen
     void close_sheet();
     void open_devices();
     void open_streams();
+    void open_web();
+    void handle_web(const hui::InputFrame &input, hui::ui::Feedback &feedback);
+    bool web_row_enabled(WebRow row) const;
+    std::string web_address() const; // https://<console>:<port>, or a line saying where when the address is unknown
 
     // State helpers.
     bool busy() const
@@ -115,6 +139,7 @@ class Screen
     hui::gfx::Rect device_row_rect(int visible) const; // visible: counted from the first row in view
     hui::gfx::Rect tile_rect(int index) const;
     hui::gfx::Rect settings_action_rect(int index) const;
+    hui::gfx::Rect web_row_rect(int index) const;
     int visible_pairings() const;
     // The home page's lower row: the pairing cards, the streams card while someone streams, the paired devices.
     bool streams_shown() const
@@ -133,6 +158,7 @@ class Screen
     void draw_home(hui::gfx::DrawList &list, std::uint32_t glass) const;
     void draw_settings(hui::gfx::DrawList &list, std::uint32_t glass) const;
     void draw_diagnostics(hui::gfx::DrawList &list, std::uint32_t glass) const;
+    void draw_web(hui::gfx::DrawList &list, const hui::gfx::Rect &card) const;
     void draw_button(hui::gfx::DrawList &list, std::uint32_t glass, const hui::gfx::Rect &r, int icon,
                      const std::string &label, bool primary, float focus, bool enabled) const;
     void draw_footer(hui::gfx::DrawList &list, std::uint32_t glass) const;
@@ -162,8 +188,8 @@ class Screen
     int home_row_ = 0; // 0 the actions, 1 the pairing cards and the paired devices
     int home_action_ = 0;
     int home_card_ = 0; // the pairing cards, then the streams card (while someone streams), then the paired devices
-    int tile_ = 0; // the option tiles, then the three actions under them
-    float tile_amount_[8 + PS_EXP_SWITCH_COUNT + 1 + 3] = {};
+    int tile_ = 0; // the option tiles, then the four actions under them
+    float tile_amount_[8 + PS_EXP_SWITCH_COUNT + 1 + 4] = {};
     float action_amount_[3] = {};
     float card_amount_[2] = {};
     float devices_amount_ = 0.0f; // the paired devices' focus
@@ -197,6 +223,10 @@ class Screen
     std::string pair_pin_;        // the PIN while the device's name is asked after it
     std::string pair_suggestion_; // the name that takes when the field is left empty
     bool renaming_ = false;       // the text sheet renames the device target_
+    WebStep web_step_ = WebStep::none; // the text sheet asks for the web page's user or password
+    std::string web_user_;             // the user name while the password is asked after it
+    bool show_password_ = false;       // R3: the password in clear while it is typed; off with every new sheet
+    int web_row_ = 0;                  // the focused row of the web page's sheet
     int device_row_ = 0;          // the focused row of the device list or the stream list
     int device_top_ = 0;          // the first row in view
     int choice_ = 0; // the focused row of a choice sheet (0: the default)

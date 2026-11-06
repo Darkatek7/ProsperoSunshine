@@ -678,6 +678,57 @@ nach 10 s per `/resume` mit 5.1 bei (`--surround 51`, 20 s), beide H.264 1080p60
 
 Nicht geprüft: eine Konsole mit 5.1-Ausgabe und ein abgelehnter Typ 3 (dann bleibt es bei Stereo bis zur nächsten Sitzung).
 
+### Webseite (2026-11-05, 13.00, Branch `webui`, nicht veröffentlicht)
+
+Host und App aus dem Arbeitsstand des Branches, über die App installiert. Den Login hat für den Test `WEBLOGIN SET` vom PC
+gesetzt (dafür lag kurz `control_lan` im Datenordner, danach gelöscht und der Host neu gestartet; der Steuer-Socket war
+danach vom PC aus wieder geschlossen). Gemessen mit curl vom PC im LAN:
+
+- Ohne Login war 47990 zu; nach `WEBLOGIN SET` lieferte die Seite 200, die API ohne Cookie 401.
+- Anmelden: ohne den Header `X-Prospero` 403, mit ihm 200 und ein Cookie `Secure; HttpOnly; SameSite=Strict`, die
+  Content-Security-Policy im Kopf. Fünf falsche Passwörter je 401, der sechste Versuch 429 mit 30 s Wartezeit. Im
+  `sunshine.log` nur „login from“ mit der Adresse, kein Passwort; ein Login dauerte rund 0,1 s.
+- Übersicht, Geräte, Einstellungen (ohne die Experimental-Schalter) und Logs lieferten die Daten der Konsole.
+- „Restart host“ über die API: nach etwa 4 s war der Host wieder da, der Login blieb, die alte Sitzung bekam 401.
+- `RELISTEN`: „Starting the services anew“, danach „Web page on port 47990“ und ein neuer Login ging.
+- Der Diagnosebericht über die Seite kam in 0,03 s, ohne Adressen und Gerätenamen.
+- In der App: der Eintrag „Web page“ zeigte die Adresse und „On for tester“; „Turn off“ schloss 47990 sofort. Später „Set login“ über die
+  Bildschirmtastatur (Name, dann Passwort als Punkte mit Zeichenzahl): „The web page is on“, und ein Login vom PC mit diesen
+  Daten bekam 200.
+- Die Oberfläche selbst lief gegen einen Nachbau der API im Browser am PC, auch in Handybreite; den echten Host konnte der
+  Browser des Tests wegen des selbst signierten Zertifikats nicht öffnen.
+
+Der Diagnosebericht, die Sperre über alle Adressen (20 Fehlversuche) und das Lesen nur des Log-Endes kamen mit einem zweiten
+aufgespielten Stand; auf ihm liefen Bericht, Logs, Übersicht, Login und „Restart host“ erneut, die Sperre über alle Adressen
+nur im Unit-Test, das Log-Ende nur mit einem kurzen Log.
+
+Danach hat der Besitzer die Seite im Browser seines Handys gegen die Konsole geöffnet, sich angemeldet und sie angesehen:
+ohne Befund.
+
+Nicht geprüft: ein Browser am PC gegen die Konsole, PIN, „End
+stream“, Umbenennen und Entfernen über die Seite, eine Adresse außerhalb des LAN, echter Ruhemodus.
+
+### Webseite nach der Testrunde auf 10.20 (2026-11-05, 13.00, Testbuild `v0.3.2-webui-2`)
+
+Host `bc38f990` aus dem Testbuild, App-Ordner und ELF per FTP aufgespielt, der alte Host beendet und das ELF gesendet.
+
+- Zertifikat der Seite, mit `openssl s_client` vom PC gelesen: CN „ProsperoSunshine web page“, `CA:FALSE`, Key Usage
+  Digital Signature, EKU TLS Web Server Authentication, SAN `localhost`, die Adresse der Konsole und 127.0.0.1, gültig
+  825 Tage. `web_cert.pem` und `web_key.pem` lagen danach im Datenordner.
+- `sunshine_state.json` gesichert und durch 15.283 Null-Bytes ersetzt, Host neu gestartet: „Moved the unreadable ...
+  to sunshine_state.json.corrupt“, `/serverinfo` mit einer neuen uniqueid, die neue Datei 112 Bytes. Ein frischer
+  Testclient (`pair.py`) paarte sich (PairStatus=1), die Datei wuchs auf 1.378 Bytes. Danach die Sicherung zurückgespielt;
+  nach dem nächsten Start war die alte uniqueid wieder da.
+- Ablehnen einer Anfrage (dafür lag kurz `control_lan` im Datenordner, danach umbenannt): `PAIRINGS` zeigte die Anfrage,
+  `CANCELPIN <id>` „OK cancelled“, ein zweites „ERR no such request“, ohne ID „ERR usage“. Der wartende Client bekam
+  HTTP 400 „Pairing request cancelled by operator“; derselbe Client paarte sich gleich danach ohne Wartezeit.
+- „Restart host“ hat der Besitzer am Handy auf der Seite gedrückt: im Kernel-Log „restart asked for“, „host stopped“,
+  dann vom Helfer „relaunch after the old host was gone (1250 ms): sent the host to the ELF loader“ und der neue Host bis
+  „Web page on port 47990“. Danach lief nur noch ein Host-Prozess, der Steuer-Socket war wieder nur lokal.
+
+Nicht geprüft: der Neustart auf 10.20, Safari auf dem iPhone mit dem neuen Zertifikat, „Turn on“/„Forget login“ und
+„Deny“ in der App, R2/R3 in der Tastatur der App, „End stream“ auf dem Geräte-Tab, das gedrosselte Zertifikats-Log.
+
 ### Testbuild für 13.40 (2026-11-05, 13.00)
 
 Pre-Release `v0.3.1-fw1340-1` für Issue #14: 13.40 und alles bis 13.60 bekommt den Datensatz von 13.60. Gemessen nur auf

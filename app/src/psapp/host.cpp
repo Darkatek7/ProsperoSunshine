@@ -5,8 +5,10 @@
 
 #include "app/psapp/autoload.hpp"
 #include "app/psapp/io.hpp"
+#include "app/psapp/web.hpp"
 #include "platform/ps5/system.hpp"
 
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <cstdio>
@@ -150,6 +152,10 @@ void Host::submit_pin(const std::string &id, const std::string &pin, const std::
 {
     push({Kind::pin, id, pin, name, {}, false});
 }
+void Host::deny_pairing(const std::string &id, const std::string &name)
+{
+    push({Kind::deny, id, name, {}, {}, false});
+}
 void Host::rename_device(const std::string &id, const std::string &name)
 {
     push({Kind::rename_device, id, name, {}, {}, false});
@@ -161,6 +167,22 @@ void Host::remove_device(const std::string &id, const std::string &name)
 void Host::end_stream(const std::string &id, const std::string &name)
 {
     push({Kind::end_stream, id, name, {}, {}, false});
+}
+void Host::set_web_login(const std::string &user, const std::string &password)
+{
+    push({Kind::web_set, user, password, {}, {}, false});
+}
+void Host::web_login_on()
+{
+    push({Kind::web_on, {}, {}, {}, {}, false});
+}
+void Host::web_login_off()
+{
+    push({Kind::web_off, {}, {}, {}, {}, false});
+}
+void Host::web_login_forget()
+{
+    push({Kind::web_forget, {}, {}, {}, {}, false});
 }
 void Host::start_host()
 {
@@ -252,6 +274,9 @@ void Host::run()
             case Kind::pin:
                 do_pin(job);
                 break;
+            case Kind::deny:
+                do_deny(job);
+                break;
             case Kind::rename_device:
                 do_rename_device(job);
                 break;
@@ -260,6 +285,12 @@ void Host::run()
                 break;
             case Kind::end_stream:
                 do_end_stream(job);
+                break;
+            case Kind::web_set:
+            case Kind::web_on:
+            case Kind::web_off:
+            case Kind::web_forget:
+                do_web(job);
                 break;
             case Kind::start:
                 do_start();
@@ -474,6 +505,21 @@ void Host::poll()
                 streams.push_back(stream);
         }
     }
+    // The web page's login: whether there is one, for whom, and whether the page is on.
+    bool web_known = false;
+    web::LoginState web_state;
+    if (running && error.empty())
+    {
+        const io::Exchange reply = io::exchange(kControlPort, web::kQuery, any_line, 3000);
+        if (!reply.lines.empty())
+        {
+            if (const auto state = web::parse_state(reply.lines.front()))
+            {
+                web_known = true;
+                web_state = *state;
+            }
+        }
+    }
     // The host offers the report for some seconds after each of these.
     bool served = false;
     if (serve_ && running)
@@ -498,6 +544,10 @@ void Host::poll()
     state_.devices = devices;
     state_.streams_known = streams_known;
     state_.streams = streams;
+    state_.web_known = web_known;
+    state_.web_user = web_state.user;
+    state_.web_enabled = web_state.enabled;
+    state_.web_switchable = web_state.switchable;
 }
 
 bool Host::wait_control(bool open, int timeout_ms)
@@ -578,6 +628,33 @@ void Host::do_pin(const Job &job)
     }
 }
 
+void Host::do_deny(const Job &job)
+{
+    set_busy("Denying " + job.b + "...");
+    const io::Exchange reply = io::exchange(kControlPort, diag::deny_request(job.a), any_line, 5000);
+    if (reply.connect_refused)
+    {
+        finish("The host is not running", false);
+        return;
+    }
+    const std::string answer = reply.lines.empty() ? std::string() : reply.lines.front();
+    switch (diag::parse_deny(answer))
+    {
+    case diag::DenyOutcome::denied:
+        finish("Denied " + job.b + ". Moonlight was told no.", true);
+        break;
+    case diag::DenyOutcome::gone:
+        finish(job.b + " is not waiting anymore", true);
+        break;
+    case diag::DenyOutcome::unsupported:
+        finish("The running host can't deny yet. Restart it to use this app's host.", false);
+        break;
+    case diag::DenyOutcome::failed:
+        finish("Could not deny " + job.b, false);
+        break;
+    }
+}
+
 void Host::do_rename_device(const Job &job)
 {
     set_busy("Renaming...");
@@ -609,6 +686,67 @@ void Host::do_end_stream(const Job &job)
         finish(job.b + " is not streaming anymore", true);
     else
         finish("Could not end the stream of " + job.b, false);
+}
+
+// The request line holds the password: it goes to the socket and nowhere else, and the messages (which
+// finish() logs) hold only the user name and the host's reason.
+void Host::do_web(const Job &job)
+{
+    const bool set = job.kind == Kind::web_set;
+    std::string request, busy;
+    switch (job.kind)
+    {
+    case Kind::web_set:
+        request = web::set_request(job.a, job.b);
+        busy = "Setting the web page's login...";
+        break;
+    case Kind::web_on:
+        request = web::kOn;
+        busy = "Turning the web page on...";
+        break;
+    case Kind::web_forget:
+        request = web::kForget;
+        busy = "Forgetting the web page's login...";
+        break;
+    default:
+        request = web::kOff;
+        busy = "Turning the web page off...";
+        break;
+    }
+    set_busy(busy);
+    // The host hashes the password before it answers.
+    const io::Exchange reply = io::exchange(kControlPort, request, any_line, 15000);
+    std::fill(request.begin(), request.end(), '\0');
+    if (reply.connect_refused)
+    {
+        finish("Start the host first: it keeps the web page's login", false);
+        return;
+    }
+    if (reply.lines.empty())
+    {
+        finish("Web page: " + (reply.error.empty() ? std::string("no answer") : reply.error), false);
+        return;
+    }
+    const web::Outcome outcome = web::parse_outcome(reply.lines.front());
+    if (outcome.unknown)
+        finish("The running host has no web page yet. Restart it to use this app's host.", false);
+    else if (!outcome.ok)
+        finish("Web page: " + outcome.reason, false);
+    else if (set)
+        finish("The web page is on. Log in as " + job.a + ".", true);
+    else if (job.kind == Kind::web_on)
+    {
+        std::string user;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            user = state_.web_user;
+        }
+        finish(user.empty() ? std::string("The web page is on") : "The web page is on. Log in as " + user + ".", true);
+    }
+    else if (job.kind == Kind::web_forget)
+        finish("The web page's login is gone, and the page is off", true);
+    else
+        finish("The web page is off", true);
 }
 
 void Host::do_start()
@@ -764,7 +902,7 @@ std::string Host::build_report()
                          (io::same_content(kBundledElf, kHostElf) ? "same as the app's" : "differs from the app's"));
     line("Capture", diag::capture_summary(host_log));
     line("Notice", snap.notice.text.empty() ? "none" : snap.notice.text);
-    line("Paired devices", std::to_string(snap.paired.size()));
+    line("Paired devices", std::to_string(diag::paired_names(snap.running && snap.devices_known, snap.devices, snap.paired).size()));
     line("Network", snap.address.empty() ? "no LAN address" : "has a LAN address");
     const auto port = [](std::uint16_t number) { return std::string(io::port_open(number) ? "open" : "closed"); };
     line("Ports", "ELF loader " + std::to_string(kLoaderPort) + " " + port(kLoaderPort) + ", control " +
@@ -772,6 +910,10 @@ std::string Host::build_report()
                       std::to_string(kStreamPort) + " " + port(kStreamPort));
     if (!snap.poll_error.empty())
         line("Control socket", snap.poll_error);
+    line("Web page", !snap.web_known      ? "unknown"
+                     : snap.web_enabled   ? "on"
+                     : snap.web_user.empty() ? "off, no login"
+                                             : "off, login kept");
 
     out += "\nPaths (this title's view, uid " + std::to_string(::getuid()) + "):\n";
     for (const char *path : {kDataDir, kConfPath, kHostElf, kHostDiagPath, kHostLogPath, "/data/pldmgr", autoload::kListPath,
@@ -792,6 +934,8 @@ std::string Host::build_report()
         out += "  none\n";
 
     std::vector<std::string> names = snap.paired;
+    for (const diag::Device &device : snap.devices)
+        names.push_back(device.name);
     const auto name = snap.config.find("sunshine_name");
     if (name != snap.config.end() && name->second)
         names.push_back(*name->second);

@@ -11,6 +11,6 @@ ln -s "$repo/app/src/psapp" "$work/include/app/psapp"
 cxx=$(command -v clang++-18 || command -v clang++ || command -v g++)
 "$cxx" -std=c++20 -O1 -Wall -Wextra -Werror -fsanitize=address,undefined -I "$work/include" \
     "$repo/app/tests/psapp_test.cpp" "$repo/app/src/psapp/conf.cpp" "$repo/app/src/psapp/autoload.cpp" \
-    "$repo/app/src/psapp/diag.cpp" \
+    "$repo/app/src/psapp/diag.cpp" "$repo/app/src/psapp/web.cpp" \
     -o "$work/psapp_test"
 "$work/psapp_test"

@@ -1,5 +1,57 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **A web page to control the host** from a phone or PC, so nobody has to leave the game for the app: the host's status,
+  version and firmware, the PIN for a pending pairing, the running streams with "End stream" per device, renaming and
+  removing paired devices, the settings (without the Experimental switches, which stay in the app), the end of
+  `sunshine.log` and `host_diag.log` with a download, the same diagnostic report as the app's (scrubbed for a public issue),
+  and a host restart. It is off until you set a user name and password
+  under **Web page** in the app's Settings, and the app can turn it off again. Then it is at `https://<console-ip>:47990`
+  (the base port plus one) with the host's own self-signed certificate, so the browser warns once. It answers only the LAN
+  and Tailscale (100.64.0.0/10), and comes back after rest mode like the other services. Don't forward 47990 to the
+  internet. After 5 failed sign-ins from one address it waits 30 seconds, doubling up to 15 minutes, and after 20 from all
+  addresses together every address waits the same way until the next good sign-in; failed sign-ins are
+  logged with the address, never the password, and the password is stored only as a salted PBKDF2-SHA256 hash. The control
+  socket has `WEBLOGIN [SET <user> <password>|ON|OFF|FORGET]` for it (GitHub issue #21). Measured on 13.00, and the page
+  was checked in a phone's browser.
+- **After a tester's round on 10.20 (PR #27):**
+  - "Restart host" on the page no longer has the host send itself to the loader while it is still going away; once on
+    10.20 that hung the console. The host hands a small helper to the loader and stops, and the helper starts the host
+    once the old process is gone, as the app does.
+  - The page has its own certificate (serverAuth, the console's addresses, 825 days, renewed by the host), so iPhones show
+    a plain warning instead of refusing. Moonlight's pinned certificate stays as it is.
+  - Turning the page off in the app keeps the login for **Turn on**; **Forget login** removes it.
+  - Deny a pending pairing, on the page and in the app (`CANCELPIN`): Moonlight hears that the operator cancelled it, and
+    the device can ask again right away instead of getting "a pairing session already exists" for 5 minutes.
+  - **End stream** on the Devices tab too, and it offers to unpair the device as well; the round trip is coloured (below
+    40 ms, up to 80 ms, above).
+  - After **Save** the page offers to restart the host, and a banner stays while saved settings aren't applied yet.
+    Notices stay at the top of the window.
+  - In the app's keyboards R2 is **Done**, and R3 shows the web page's password while it is typed.
+  - Clients over ps5-tailscale all arrive as 127.0.0.1, so they share one lockout; the log and the README say so.
+  - **End stream** asks once, with three answers: **End and unpair**, **Only end stream** and **Cancel**. It used to ask
+    twice in a row.
+  - **Remember me on this device (30 days)** on the sign-in, off unless ticked. Such a session outlasts a host restart
+    and a closed tab; the host keeps only a hash of its token. Changing or forgetting the login, turning the page off and
+    **Sign out** end every remembered session.
+  - The video sent is coloured against the bit rate asked for, like the round trip: from 85 % good, from 60 % fair,
+    below that poor. A still picture needs less, so the colour waits for the first 10 seconds and says so in its tooltip.
+  - The app's home screen counts the paired devices from the running host, as **Manage** does, so a device paired on the
+    page shows up there right away instead of after **Reload**.
+
+### Fixed
+
+- **A broken `sunshine_state.json` no longer stops pairing.** After a console hang a tester's file was all zeros; from
+  then on the host advertised an empty `uniqueid` and never saved a new pairing again. The file is now written to a
+  temporary file, synced and renamed over the old one, so a cut leaves the old or the new file. One that can't be read is
+  kept as `sunshine_state.json.corrupt` and the host starts over without pairings (PR #27).
+- **An unpaired Moonlight no longer fills `sunshine.log`.** Moonlight asks for `/serverinfo` every few seconds, and each
+  failed certificate check logged a warning. Now it is logged once per client certificate, with its address, and then at
+  most every 10 minutes.
+
 ## 0.3.4 (2026-11-06)
 
 ### Fixed
