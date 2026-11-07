@@ -8,6 +8,9 @@
   on a PS5 with 9.60, and the probe's opt-in phases `ratesearch` and `qp` that found them. Not tested here; 9.60 stays
   unverified, and firmware below 9 gets the same record as a guess. Records for 10.x and 13.x are unchanged. Thanks to
   @IlushaKAI (#30).
+- **The app without `/data`:** where a title's sandbox has no `/data` (seen on 9.60), the app reaches its files through the
+  running host (`FILE` and `INSTALL` on the control socket, from the console itself only, a fixed list of files, no
+  credentials, and `sunshine.conf` without keys that point the host at other files). Thanks to @IlushaKAI.
 
 ### Fixed
 
