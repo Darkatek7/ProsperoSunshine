@@ -8,6 +8,9 @@
   map or inventory in most games, on controllers whose client reports no touchpad. Neither Create nor Options goes out
   for them, nor the PS that holding View makes. An Xbox Series controller's Share button is the touchpad click too, where
   the client passes it on (Moonlight for Windows doesn't). Before, an Xbox controller had no way to press the touchpad.
+- **Trigger knock:** `trigger_knock_strength` in `sunshine.conf` (0 to 100, 100 unless set) turns down trigger effect
+  `0x26`, the knock Uncharted sends at full strength when firing. A client writes it to a DualSense as it is, a hard knock.
+  The host picks up a change within seconds, in a running stream too. Thanks to @IlushaKAI (#30).
 
 ## 0.4.1 (2026-11-07)
 

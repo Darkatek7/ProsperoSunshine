@@ -177,6 +177,9 @@ von P9.10.
 
 - `map_trigger_effects` in `src/input/gamepad_map.hpp` setzt die Flags nur für den Trigger, dessen Block sich geändert hat (Test in
   `tests/gamepad_map_test.cpp`). `set_triggers` in `src/sunshine/platform_ps5.cpp` stellt die Meldung in Sunshines Warteschlange.
+- `soften_knock` in derselben Datei skaliert die 3-Bit-Stärken der zehn Zonen von Effekt `0x26` (Bytes 2 bis 5) mit `trigger_knock_strength`
+  (Vorgabe 100, also unverändert). Uncharted schickt beim Schießen Stärke 7 in allen Zonen; gemessen auf 9.60 mit Artemis und einem
+  DualSense über Bluetooth. Der Host prüft alle 2 s, ob sich `sunshine.conf` geändert hat; ein neuer Wert gilt ab dem nächsten Effekt.
 - Beim Anlegen eines Pads geht der Ruhewert an beide Trigger, weil der Merker leer ist. Das löst auch einen Trigger, der von einer
   früheren Sitzung noch hart ist.
 

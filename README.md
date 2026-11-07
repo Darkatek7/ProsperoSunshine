@@ -338,6 +338,8 @@ address.
 - Adaptive triggers work with Moonlight on a PC and a DualSense; the other official clients ignore them. A user reports them
   working with R3VALATiON's Artemis fork on Android and a DualSense over Bluetooth. Only Teardown has been tested. If a stream
   ends during an effect, the trigger stays stiff until you connect again, because Moonlight doesn't reset it.
+  If a game's knock on firing is too hard, `trigger_knock_strength` in `sunshine.conf` turns it down (0 to 100, 100 unless
+  set, read within seconds while the host runs).
 - Moonlight can't wake the console. It wakes a host with a Wake-on-LAN packet, and the PS5 ignores those: it only wakes for
   Remote Play's own wake message. The host can't help either, because the console stops it in rest mode. To wake the console
   from your phone, use a Remote Play client that can wake it, such as chiaki-ng, then start Moonlight.

@@ -5,6 +5,29 @@
 using namespace prospero;
 
 int main() {
+    {
+        // The knock of a shot, as Uncharted sends it: strength 7 in every zone comes out as 5, the rest of the block as it was.
+        TriggerBlock knock{0x03, 0x26, 0xff, 0x03, 0xff, 0xff, 0xff, 0x3f, 0, 0, 1, 0, 0x26, 0xff, 0x03, 0xff, 0xff, 0xff, 0x3f, 0, 0, 1, 0, 0};
+        const auto zones = [](const std::array<uint8_t, 10> &data) {
+            return data[2] | uint32_t(data[3]) << 8 | uint32_t(data[4]) << 16 | uint32_t(data[5]) << 24;
+        };
+        const auto full = map_trigger_effects(knock, triggers_off);  // 100%, the default: as the game sent it
+        assert(zones(full.left) == 0x3fffffff && zones(full.right) == 0x3fffffff);
+        assert(map_trigger_effects(knock, triggers_off, 100).left == full.left);
+        const auto soft = map_trigger_effects(knock, triggers_off, 70);
+        assert(soft.type_left == 0x26 && soft.left[0] == 0xff && soft.left[1] == 0x03 && soft.left[8] == 1);
+        for (int zone = 0; zone < 10; ++zone) assert((zones(soft.left) >> (3 * zone) & 7u) == 5);
+        assert(soft.right == soft.left);
+        assert(soft.flags == full.flags);
+        // 0% silences the zones and leaves the bytes around them alone, the two bits above the zones too.
+        knock[7] = 0xff;
+        const auto silent = map_trigger_effects(knock, triggers_off, 0);
+        assert(zones(silent.left) == 0xc0000000u && silent.left[0] == 0xff && silent.left[8] == 1);
+        // Other effects stay as they are.
+        TriggerBlock resistance{0x03, 0x21, 0xe0, 0x03, 0, 0, 0, 0, 0, 0, 0, 0, 0x25, 0x14, 0, 1};
+        const auto same = map_trigger_effects(resistance, triggers_off, 70);
+        assert(same.left[0] == 0xe0 && same.left[1] == 0x03 && same.right[0] == 0x14 && same.right[2] == 1);
+    }
     const auto idle = map_gamepad(0, 0, 0, 0, 0, 0, 0);
     assert(idle.buttons == 0);
     assert(idle.lx == 128 && idle.ly == 127 && idle.rx == 128 && idle.ry == 127);  // centre within one step
@@ -76,6 +99,6 @@ int main() {
     static_assert(wakes_pad(moonlight::a, 0, 0, 0, 0, 0, 0));
     static_assert(wakes_pad(0, 0, trigger_threshold, 0, 0, 0, 0));
     static_assert(wakes_pad(0, 0, 0, 0, -stick_wake, 0, 0) && wakes_pad(0, 0, 0, 0, 0, 0, -32768));
-    std::cout << "PASS: gamepad mapping (face, system, Share as touchpad, Select and Start as touchpad without one, sticks, triggers, trigger effects, PS and Create for the host only, "
+    std::cout << "PASS: gamepad mapping (face, system, Share as touchpad, Select and Start as touchpad without one, sticks, triggers, trigger effects, trigger knock, PS and Create for the host only, "
                  "a guest's pad opens on its first use)\n";
 }
