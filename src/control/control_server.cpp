@@ -2,6 +2,7 @@
 #include "control/control_server.hpp"
 #include "control/autoload_host.hpp"
 #include "control/stream_list.hpp"
+#include "control/http_guard.hpp"
 #include "host_control.hpp"
 #include "sunshine/video_ps5.hpp"
 #include "web/web_login.hpp"
@@ -346,6 +347,7 @@ void ControlServer::run(std::stop_token stop) {
         }
         std::string buffer;
         char chunk[256];
+        bool refused = false;
         // One client at a time; requests are short and rare.
         while (!stop.stop_requested()) {
             pollfd cfd{client, POLLIN, 0};
@@ -357,10 +359,16 @@ void ControlServer::run(std::stop_token stop) {
                 std::string line = buffer.substr(0, nl);
                 buffer.erase(0, nl + 1);
                 if (!line.empty() && line.back() == '\r') line.pop_back();
+                if (control::http_request_line(line)) {
+                    // A browser: its POST body would run as commands (http_guard.hpp). Nothing is answered.
+                    BOOST_LOG(warning) << "Control socket: an HTTP request was refused, the connection closed"sv;
+                    refused = true;
+                    break;
+                }
                 const std::string answer = handle(line) + '\n';
                 send(client, answer.data(), answer.size(), 0);
             }
-            if (buffer.size() > 4096) break;
+            if (refused || buffer.size() > 4096) break;
         }
         close(client);
     }

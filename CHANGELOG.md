@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- The control socket closes a connection that starts with an HTTP request line. Before, a web page in the console's
+  browser (or, with `control_lan`, on any PC in the network) could send a POST whose body lines the host ran as
+  commands, such as `WEBLOGIN SET` or `AUTOLOAD`.
 - The web page answers `http://` with a redirect to `https://` on the same address and port. Before, the host closed the
   connection, and browsers showed an empty response (`ERR_EMPTY_RESPONSE`, #31, thanks to @natkokrasevac).
 - The host's process is called `ProsperoSunshine` instead of `payload.elf`, so the Payload Manager's list of running
