@@ -86,11 +86,23 @@ struct PadState {
 // The host's pad plays as the console's user; every other pad is a guest the console asked about (pad_roles.hpp). Unless
 // the owner allows it for all (ps_button_all_players), a guest's PS and Create don't go through, so a guest can't leave
 // the game, open the control center, reach the settings or open the Create menu, which captures and broadcasts what the
-// console shows. Sunshine has already turned a held Select into home here, so that way is closed too.
+// console shows. Sunshine has already turned a held Select into home here, so that way is closed too, and the keyboard
+// pad's F1 and F2 are home and back by then as well.
 enum class PadRole { host, guest };
-constexpr uint32_t allowed_buttons(uint32_t flags, PadRole role, bool all_players) {
-    return role == PadRole::host || all_players ? flags : flags & ~(moonlight::home | moonlight::back);
+// Once the owner has chosen which console profiles reach the console's menus (control/menu_access.hpp), a pad seated in
+// a profile by the host (its device has profiles of its own) has PS and Create only as such a profile, whatever its role:
+// allowed or denied. by_role: the menus aren't chosen, or the pad's device can choose freely, so the role decides as above.
+enum class MenuAccess : uint8_t { by_role, allowed, denied };
+constexpr bool has_menu_buttons(PadRole role, bool all_players, MenuAccess access) {
+    return access == MenuAccess::allowed || (access == MenuAccess::by_role && (role == PadRole::host || all_players));
 }
+constexpr uint32_t allowed_buttons(uint32_t flags, PadRole role, bool all_players, MenuAccess access = MenuAccess::by_role) {
+    return has_menu_buttons(role, all_players, access) ? flags : flags & ~(moonlight::home | moonlight::back);
+}
+// While no game is in front (the home screen, the console's own screens, a media app or homebrew), a pad denied the menus
+// passes nothing on: the home screen gives Settings to the D-pad, no PS needed, and from there someone could update the
+// system or sign in to PSN. It plays again once a game is in front.
+constexpr bool passes_input(MenuAccess access, bool game_in_front) { return game_in_front || access != MenuAccess::denied; }
 
 // Moonlight's controller capabilities in the arrival message (LI_CCAP_TOUCHPAD).
 inline constexpr uint16_t capability_touchpad = 0x08;
