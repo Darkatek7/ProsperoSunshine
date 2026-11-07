@@ -205,7 +205,15 @@ jobs:
           prerelease=()
           [[ "$version" != *-* ]] || prerelease=(--prerelease)
           if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" "${files[@]}" SHA256SUMS --clobber
+            # A release made by hand (gh release create, CLAUDE.md) was tested on the console, and the store's catalog has
+            # its zip's sha256: its files stay. Only the ones it doesn't have yet (the debug flavor) are added.
+            have=$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name')
+            missing=()
+            for f in "${files[@]}"; do grep -qxF "$f" <<< "$have" || missing+=("$f"); done
+            if [ ${#missing[@]} -gt 0 ]; then
+              sha256sum "${missing[@]}" > SHA256SUMS-ci
+              gh release upload "$GITHUB_REF_NAME" "${missing[@]}" SHA256SUMS-ci
+            fi
           else
             gh release create "$GITHUB_REF_NAME" "${files[@]}" SHA256SUMS --draft --verify-tag "${prerelease[@]}" \
               --title "$version" --notes-file notes.md

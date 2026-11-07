@@ -754,7 +754,9 @@ fail:
         atomic_store(&retry_without_slices[slot], 1);
     }
     atomic_store(&failure_step[slot], step);
-    SLOG(slot, "open failed step=%s error=%d rc=%#x\n", step, error, atomic_load(&last_open_rc));
+    // The self-check's open only stops here on purpose, after a good open: not a failure to whoever reads the log.
+    if (strcmp(step, "open only") == 0) SLOG(slot, "open only ok, closed again\n");
+    else SLOG(slot, "open failed step=%s error=%d rc=%#x\n", step, error, atomic_load(&last_open_rc));
     ps_capture_close(s);
     return error;
 }

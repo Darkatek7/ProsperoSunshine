@@ -687,7 +687,7 @@ std::string gamepad_owner(const feedback_queue_t &queue) {
 }
 }  // namespace
 
-// Patch 0020 calls this right before binding a stream port; the debug build writes it to host_diag.log first.
+// Patch 0024 calls this right before binding a stream port; the debug build writes it to host_diag.log first.
 void trace_call(const std::string &what) { ps_diag_trace("%s\n", what.c_str()); }
 
 void set_gamepad_owner(const feedback_queue_t &queue, std::string_view owner) {

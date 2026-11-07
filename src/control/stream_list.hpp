@@ -23,7 +23,7 @@ struct StreamFacts {
     int sent_kbps = -1;  // video kbit/s sent lately
     int rtt_ms = -1;  // round-trip time of the control connection
     int recoveries = 0;  // times the client asked for a new picture after a loss
-    int missing_frames = 0;  // frames the client reported lost (patch 0021)
+    int missing_frames = 0;  // frames the client reported lost (patch 0025)
 };
 
 // kbit/s from a count of bytes sent over some seconds; -1 when there's too little time to tell.
@@ -107,7 +107,7 @@ inline std::string stream_line(const StreamFacts &stream, const std::vector<Capt
 }
 
 // The log line for one stream every few seconds while the log level is debug (main_ps5.cpp): the same facts as its
-// STREAMS line without who it is (no uuid, address or name), plus the frames the client reported lost (patch 0021) and,
+// STREAMS line without who it is (no uuid, address or name), plus the frames the client reported lost (patch 0025) and,
 // in brackets, how many recoveries and lost frames came since the last line. `number` counts the running streams from 1.
 inline std::string stats_line(int number, const StreamFacts &stream, const std::vector<CaptureFacts> &captures,
                               int recoveries_before, int missing_before) {
