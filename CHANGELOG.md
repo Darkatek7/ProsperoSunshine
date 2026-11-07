@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.2 (2026-11-07)
 
 ### Added
 
@@ -8,6 +8,12 @@
   map or inventory in most games, on controllers whose client reports no touchpad. Neither Create nor Options goes out
   for them, nor the PS that holding View makes. An Xbox Series controller's Share button is the touchpad click too, where
   the client passes it on (Moonlight for Windows doesn't). Before, an Xbox controller had no way to press the touchpad.
+
+### Fixed
+
+- Right after a stream, Moonlight could show "PS5 Screen" as still running and offer to quit it; confirming that left
+  Moonlight on "Quitting PS5 Screen..." for good. The host listed the app as running for the moment the stream's capture
+  took to close (100 to 400 ms), just when Moonlight asks. Now it is no longer listed once the stream ends.
 
 ## 0.4.1 (2026-11-07)
 
