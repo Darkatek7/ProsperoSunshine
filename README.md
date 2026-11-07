@@ -98,6 +98,12 @@ closes nothing.
 short press of Select sends Create when you let go, which means Create cannot be held. To get a plain Create button
 back, set `back_button_timeout = -1` in `sunshine.conf`; a value of 0 or more is the hold time in milliseconds.
 
+**Touchpad on a controller without one** (Xbox and most others): press **View and Menu together**, the buttons in the
+places of Create and Options, for the touchpad click (the map or inventory in most games). Press View first or both at
+once: Menu alone is Options at once. A DualSense or DualShock 4 on the client sends its own touchpad. Where a client passes
+on an Xbox Series controller's Share button, that is the touchpad click too; Moonlight for Windows doesn't, as Windows
+keeps it for the Game Bar.
+
 **Several controllers on one device:** every controller on a Moonlight client is a player of its own. The host's first
 controller plays as the console's user, and for each further one the console asks "Who's using this controller?" once it
 is first used: a controller the client announces but never uses (Steam Input's virtual one next to the real one, the

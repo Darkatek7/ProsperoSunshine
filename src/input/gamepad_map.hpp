@@ -14,6 +14,8 @@ inline constexpr uint32_t start = 0x0010, back = 0x0020, left_stick = 0x0040, ri
 inline constexpr uint32_t left_button = 0x0100, right_button = 0x0200, home = 0x0400;
 inline constexpr uint32_t a = 0x1000, b = 0x2000, x = 0x4000, y = 0x8000;
 inline constexpr uint32_t touchpad = 0x100000;
+// The button below the Xbox button on an Xbox Series controller (Share), sent as Sunshine's MISC_BUTTON.
+inline constexpr uint32_t misc = 0x200000;
 }
 
 // ScePadButton bits (src/platform/ps5/pad.h).
@@ -38,6 +40,41 @@ enum class PadRole { host, guest };
 constexpr uint32_t allowed_buttons(uint32_t flags, PadRole role, bool all_players) {
     return role == PadRole::host || all_players ? flags : flags & ~(moonlight::home | moonlight::back);
 }
+
+// Moonlight's controller capabilities in the arrival message (LI_CCAP_TOUCHPAD).
+inline constexpr uint16_t capability_touchpad = 0x08;
+constexpr bool has_touchpad(uint16_t capabilities, uint32_t supported_buttons) {
+    return (capabilities & capability_touchpad) || (supported_buttons & moonlight::touchpad);
+}
+
+// A controller without a touchpad (an Xbox one, mostly; its Share button seldom reaches Moonlight, as Windows keeps it)
+// clicks the touchpad with Select and Start together, the buttons in the places of Create and Options. Pressed together,
+// Start is the touchpad until it comes up, and neither Create nor Options goes out. Sunshine turns Select held for
+// back_button_timeout into PS (and forces Select up first): that PS is dropped for a while after the combination starts,
+// as the timer ran from the Select press, which came before. Times are in milliseconds of any steady clock.
+struct TouchpadCombo {
+    bool active = false;
+    int64_t quiet_until = 0;  // Sunshine's PS from the held Select is dropped until then
+
+    // ps_hold_ms: back_button_timeout, negative when Sunshine makes no PS from Select.
+    constexpr uint32_t apply(uint32_t flags, int64_t now, int64_t ps_hold_ms) {
+        constexpr uint32_t pair = moonlight::back | moonlight::start;
+        if (!active && (flags & pair) == pair) {
+            active = true;
+            quiet_until = now + (ps_hold_ms > 0 ? ps_hold_ms : 0) + 300;
+        }
+        if (active && !(flags & pair)) active = false;
+        if (active) {
+            const bool click = flags & moonlight::start;
+            flags &= ~pair;
+            if (click) flags |= moonlight::touchpad;
+        }
+        if (now < quiet_until) flags &= ~moonlight::home;
+        return flags;
+    }
+    // While true, a Select coming up is not a tap of Create.
+    constexpr bool busy(int64_t now) const { return active || now < quiet_until; }
+};
 
 // A trigger counts as pressed (the digital L2/R2 bit) above this analog value.
 inline constexpr uint8_t trigger_threshold = 8;
@@ -71,6 +108,8 @@ constexpr PadState map_gamepad(uint32_t flags, uint8_t lt, uint8_t rt, int16_t l
         {moonlight::left_stick, dualsense::l3},   {moonlight::right_stick, dualsense::r3},
         {moonlight::start, dualsense::options},   {moonlight::back, dualsense::create},
         {moonlight::home, dualsense::ps},         {moonlight::touchpad, dualsense::touchpad},
+        // An Xbox controller has no touchpad; its Share button stands in for the touchpad click.
+        {moonlight::misc, dualsense::touchpad},
     };
     uint32_t buttons = 0;
     for (const auto &p : table)

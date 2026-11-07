@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Touchpad on a controller without one:** View and Menu (Select and Start) pressed together are the touchpad click, the
+  map or inventory in most games, on controllers whose client reports no touchpad. Neither Create nor Options goes out
+  for them, nor the PS that holding View makes. An Xbox Series controller's Share button is the touchpad click too, where
+  the client passes it on (Moonlight for Windows doesn't). Before, an Xbox controller had no way to press the touchpad.
+
 ## 0.4.1 (2026-11-07)
 
 ### Added

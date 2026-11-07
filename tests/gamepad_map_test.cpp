@@ -13,6 +13,36 @@ int main() {
     const auto system = map_gamepad(moonlight::home | moonlight::start | moonlight::back | moonlight::touchpad, 0, 0, 0,
                                     0, 0, 0);
     assert(system.buttons == (dualsense::ps | dualsense::options | dualsense::create | dualsense::touchpad));
+    // An Xbox controller's Share button is the touchpad click; with both held it is still one press.
+    assert(map_gamepad(moonlight::misc, 0, 0, 0, 0, 0, 0).buttons == dualsense::touchpad);
+    assert(map_gamepad(moonlight::misc | moonlight::touchpad | moonlight::a, 0, 0, 0, 0, 0, 0).buttons ==
+           (dualsense::touchpad | dualsense::cross));
+    // A controller without a touchpad: Select and Start together are the touchpad click.
+    static_assert(has_touchpad(capability_touchpad, 0) && has_touchpad(0, moonlight::touchpad));
+    static_assert(!has_touchpad(0x43, 0xF7FF));  // an Xbox controller on Moonlight for PC
+    {
+        constexpr uint32_t sel = moonlight::back, start = moonlight::start;
+        TouchpadCombo c;
+        assert(c.apply(sel, 0, 500) == sel && !c.busy(0));                       // Select alone stays Select
+        assert(c.apply(sel | start | moonlight::a, 100, 500) == (moonlight::touchpad | moonlight::a));
+        assert(c.busy(100));
+        assert(c.apply(start, 500, 500) == moonlight::touchpad);                 // Sunshine forced Select up: still held
+        assert(c.apply(start | moonlight::home, 501, 500) == moonlight::touchpad); // its PS from the held Select is dropped
+        assert(c.apply(0, 700, 500) == 0 && !c.active && c.busy(700));
+        assert(c.apply(moonlight::home, 950, 500) == moonlight::home && !c.busy(950));  // a real PS later goes through
+        // Start first, then Select: Options went out already, then it becomes the touchpad.
+        TouchpadCombo d;
+        assert(d.apply(start, 0, 500) == start);
+        assert(d.apply(start | sel, 50, 500) == moonlight::touchpad);
+        assert(d.apply(sel, 80, 500) == 0);                                       // Start up: click over, Select swallowed
+        assert(d.apply(0, 120, 500) == 0 && !d.active);
+        assert(d.apply(start, 2000, 500) == start);                               // later, Start is Options again
+        // Without Sunshine's held-Select PS the quiet time is short.
+        TouchpadCombo e;
+        e.apply(sel | start, 0, -1);
+        e.apply(0, 10, -1);
+        assert(!e.busy(300));
+    }
     const auto corners = map_gamepad(0, 0, 0, -32768, 32767, 32767, -32768);
     assert(corners.lx == 0 && corners.ly == 0);      // full left, full up
     assert(corners.rx == 255 && corners.ry == 255);  // full right, full down
@@ -46,6 +76,6 @@ int main() {
     static_assert(wakes_pad(moonlight::a, 0, 0, 0, 0, 0, 0));
     static_assert(wakes_pad(0, 0, trigger_threshold, 0, 0, 0, 0));
     static_assert(wakes_pad(0, 0, 0, 0, -stick_wake, 0, 0) && wakes_pad(0, 0, 0, 0, 0, 0, -32768));
-    std::cout << "PASS: gamepad mapping (face, system, sticks, triggers, trigger effects, PS and Create for the host only, "
+    std::cout << "PASS: gamepad mapping (face, system, Share as touchpad, Select and Start as touchpad without one, sticks, triggers, trigger effects, PS and Create for the host only, "
                  "a guest's pad opens on its first use)\n";
 }

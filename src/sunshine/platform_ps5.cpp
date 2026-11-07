@@ -529,6 +529,9 @@ struct input_raw_t {
     std::array<bool, MAX_GAMEPADS> back{};    // Select is down
     std::array<bool, MAX_GAMEPADS> ps_held{}; // a guest's PS or Create press that was held back, logged once per press
     std::array<std::chrono::steady_clock::time_point, MAX_GAMEPADS> back_since{};
+    // A controller without a touchpad clicks it with Select and Start together (gamepad_map.hpp, TouchpadCombo).
+    std::array<bool, MAX_GAMEPADS> touch_combo{};
+    std::array<prospero::TouchpadCombo, MAX_GAMEPADS> combo{};
     std::array<feedback_queue_t, MAX_GAMEPADS> feedback{};
     std::array<uint8_t, MAX_GAMEPADS> client_index{};
     std::array<std::array<uint8_t, 2>, MAX_GAMEPADS> motors{};
@@ -707,12 +710,16 @@ static bool open_pad(input_raw_t &input, int nr, bool host) {
     return true;
 }
 
-int alloc_gamepad(input_t &input, const gamepad_id_t &id, const gamepad_arrival_t &, feedback_queue_t feedback) {
+int alloc_gamepad(input_t &input, const gamepad_id_t &id, const gamepad_arrival_t &arrival, feedback_queue_t feedback) {
     if (id.globalIndex < 0 || id.globalIndex >= MAX_GAMEPADS) return -1;
     const std::string owner = gamepad_owner(feedback);
     std::lock_guard lock(input->mutex);
     input->feedback[id.globalIndex] = std::move(feedback);
     input->client_index[id.globalIndex] = id.clientRelativeIndex;
+    input->touch_combo[id.globalIndex] = !prospero::has_touchpad(arrival.capabilities, arrival.supportedButtons);
+    input->combo[id.globalIndex] = {};
+    if (input->touch_combo[id.globalIndex])
+        BOOST_LOG(info) << "PS5 virtual pad "sv << id.globalIndex << ": no touchpad, Select and Start together click it"sv;
     auto *&pad = input->pads[id.globalIndex];
     if (!pad && !input->waiting[id.globalIndex]) {
         // The host's pad plays as the console's user. Every other one, from another device or a second controller on the
@@ -764,6 +771,7 @@ void free_gamepad(input_t &input, int nr) {
     input->touch[nr].clear();
     input->back[nr] = false;
     input->ps_held[nr] = false;
+    input->combo[nr] = {};
     BOOST_LOG(info) << "PS5 virtual pad "sv << nr << " detached ("sv << rc << ')'
                     << (was_host ? (input->roles.host_away() ? ", the host's device keeps the role"sv : ", the host role is free"sv) : ""sv);
 }
@@ -790,17 +798,23 @@ void gamepad_update(input_t &input, int nr, const gamepad_state_t &state) {
     // Sunshine turns a held Select into PS (back_button_timeout), but Select is Create here and pressing it
     // first would open the Create menu. So Create only goes out, as a tap, when Select comes up early. The
     // margin keeps Sunshine's own forced release at the timeout from counting as early.
+    const auto now = std::chrono::steady_clock::now();
+    const auto timeout = config::input.back_button_timeout;
+    const int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+    uint32_t pressed = state.buttonFlags;
+    if (input->touch_combo[nr]) pressed = input->combo[nr].apply(pressed, now_ms, timeout.count());
     const auto role = input->roles.is_host(nr) ? prospero::PadRole::host : prospero::PadRole::guest;
-    uint32_t flags = prospero::allowed_buttons(state.buttonFlags, role, input->ps_all_players);
-    if ((state.buttonFlags & ~flags) && !(input->ps_held[nr]))
+    uint32_t flags = prospero::allowed_buttons(pressed, role, input->ps_all_players);
+    if ((pressed & ~flags) && !(input->ps_held[nr]))
         BOOST_LOG(info) << "PS5 virtual pad "sv << nr << ": PS or Create ignored, only the host has them (ps_button_all_players)"sv;
-    input->ps_held[nr] = state.buttonFlags & ~flags;
+    input->ps_held[nr] = pressed & ~flags;
     bool create_tap = false;
-    if (const auto timeout = config::input.back_button_timeout; timeout >= 0ms) {
+    if (timeout >= 0ms) {
         const bool back = flags & BACK;
-        const auto now = std::chrono::steady_clock::now();
         if (back && !input->back[nr]) input->back_since[nr] = now;
-        create_tap = !back && input->back[nr] && now - input->back_since[nr] < timeout - 20ms;
+        // Select that went into the touchpad combination is no tap of Create when it comes up.
+        create_tap = !back && input->back[nr] && now - input->back_since[nr] < timeout - 20ms &&
+                     !(input->touch_combo[nr] && input->combo[nr].busy(now_ms));
         input->back[nr] = back;
         flags &= ~BACK;
     }
