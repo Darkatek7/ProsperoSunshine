@@ -8,6 +8,16 @@
   map or inventory in most games, on controllers whose client reports no touchpad. Neither Create nor Options goes out
   for them, nor the PS that holding View makes. An Xbox Series controller's Share button is the touchpad click too, where
   the client passes it on (Moonlight for Windows doesn't). Before, an Xbox controller had no way to press the touchpad.
+- **Vibration of PS5 games, as rumble (experimental, off by default):** PS5 games send their vibration through a haptic
+  channel and leave the classic motors alone, so clients got nothing. `haptic_mode = rumble` in `sunshine.conf` reads that
+  channel during a stream and passes its level on as the two motor values, a rough match for a DualSense on the console.
+  `haptic_strength` (0 to 200, 100 unless set) sets the strength. A game with rumble of its own keeps it. Measured on 9.60.
+  Thanks to @IlushaKAI (#30).
+
+### Changed
+
+- **Stopping the host:** the control socket now closes after the streams and their capture session, so "Restart host" and
+  `host_restart.elf` don't start a new host while the old one still holds capture.
 
 ## 0.4.1 (2026-11-07)
 
