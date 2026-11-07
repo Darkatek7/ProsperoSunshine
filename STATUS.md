@@ -527,6 +527,29 @@ nachgemessen; die Angaben stammen aus den beiden `report.txt`.
   sie nicht: 360p 23, 540p und 1080p 34, 720p, 1440p und 2160p 45. HEVC: 6, 9, 12, 17, 23, 34. Über 32 Slices lehnen die
   Hardware-Decoder von FFmpeg unter Windows ab.
 
+### Firmware-Sonde auf 9.60 (2026-11-06, PS5, nicht Pro, Bericht von IlushaKAI in Issue 30)
+
+Hier nicht nachgemessen, es gibt keine Konsole mit 9.60. Die Angaben stammen aus dem Fork des Mitwirkenden (Branch
+`firmware-9.60`, `STATUS.md` dort), `firmware_probe.elf` aus 0.3.4, ein Lauf ohne Optionen, 137 s.
+
+- **Datensatz:** Von −`0x40` bis +`0x20` öffnet nur `0x2c0` (−`0x20`), ohne innere Köpfe. `0x2c8` (10.x), `0x2d0`, `0x2e0` (13.00)
+  und `0x2e8` (13.60) lehnt der Validator mit `0x81950001` ab. Er schützt `0x80`, `0x168`, `0x1d8` und `0x2a8`.
+- **Bilder:** H.264 und HEVC 8/10 Bit (nur `cfg+0x24`) von 360p bis 1440p. 2160p scheitert an `OpenVideo` mit `0x81950008`
+  (`video out mode` `0x34`, ohne das 4K-Bit). Slices wie auf 10.x: H.264 1080p 34, HEVC 17.
+- **QP:** `cfg+0xc4`/`+0xc8` ändern hier nichts. Die Phase `ratesearch` fand ihn in `cfg+0xac`/`+0xb0`, 0x18 tiefer als auf 10.x.
+  Startbildschirm, 1 s, IDR alle 6 Bilder: ohne 4692 kbit/s, 24/28 6275, 18/22 11016, 12/16 19315, 8/12 28197.
+  `SetVideoBitrate` mit 1 bis 12 Mbit/s antwortet 0 und ändert nichts, 16 und 20 Mbit/s beenden den Kanal (`0x80c78000`).
+- **Systembibliotheken:** `libSceAvcap2` hat 5 Exporte weniger als 13.00. ResourceArbitrator per NID an den Offsets von 10.20.
+- **Streams:** Mit dem Datensatz `0x2c0` auf 0.3.4 H.264 1080p60 mit Ton und Controller aus Moonlight für Android. Auf 0.4.0 mit
+  denselben Änderungen 2 Minuten HEVC HDR in einem Spiel. 1440p im Spiel fiel auf 1080p zurück. Die Webseite lief dort nicht.
+- **Die App sieht `/data` auf dieser Konsole nicht** (Sandbox eines Titels). Ohne die Brücke über den Host im Fork kann die App
+  dort keine Einstellungen speichern.
+- **Drei ungeklärte Abschaltungen** der Konsole während der Tests, die Logs enden davor. Die Konsole schaltet sich laut
+  Mitwirkendem auch sonst gelegentlich ab.
+- **Übernommen** (2026-11-07): der Datensatz `0x2c0`, der QP-Offset (`ps_qp_offset`) und die Probe-Phasen `ratesearch` und
+  `qp`. 9.60 bleibt ungeprüft (`known=0`, Experimental-Schalter wie auf anderen ungeprüften Versionen). Alles unter 10 bekommt
+  diesen Datensatz, für 8.40 (Issue 23) ist das geraten. Für 13.00 und 10.20 bleiben die Datensätze byte-gleich (`tests/capture_records.golden`).
+
 ### Profil je Spiel und eigene Liste (2026-11-04, 10.20, PS5 Pro)
 
 Gemessen wie oben (Moonlight für Linux, Hostlog), Host aus `keyboard-mouse-pad` mit Patch 0016 und 0017,

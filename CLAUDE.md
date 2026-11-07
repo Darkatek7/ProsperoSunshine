@@ -97,8 +97,8 @@ Toolchain: PS5 Payload SDK v0.45 in the Docker image `prosperosunshine-sdk:v0.45
   user selection.
 - Rest mode closes the host's listening sockets and stops its log files; `wait_or_ports_lost` in `main_ps5.cpp` notices
   refused ports and starts the services anew in the same process.
-- Whether a game sends trigger effects: only some do (Teardown yes, GTA III not in the sessions measured), and only Moonlight
-  for PC passes them to a DualSense. See `docs/re/adaptive-triggers.md`.
+- Whether a game sends trigger effects: only some do (Teardown yes, GTA III not in the sessions measured), and among the official clients only
+  Moonlight for PC passes them to a DualSense (a contributor reports R3VALATiON's Artemis fork on Android too, issue 30). See `docs/re/adaptive-triggers.md`.
 - Autoload through the Payload Manager: `/data/pldmgr/autoload.txt`, slot `local/prospero-sunshine`.
 - The app is installed at `/data/homebrew/PPSA47989`. A ShadowMountPlus scan does **not** pick up changes to
   `sce_sys` (param.json, icon, background) of an already registered title. Re-register it:

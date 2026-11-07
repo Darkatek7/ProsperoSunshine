@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+
+- **Firmware 9.60:** its own capture record (`0x2c0`) and QP fields (`cfg+0xac`/`+0xb0`), measured with the firmware probe
+  on a PS5 with 9.60, and the probe's opt-in phases `ratesearch` and `qp` that found them. Not tested here; 9.60 stays
+  unverified, and firmware below 9 gets the same record as a guess. Records for 10.x and 13.x are unchanged. Thanks to
+  @IlushaKAI (#30).
+
 ### Fixed
 
 - The control socket closes a connection that starts with an HTTP request line. Before, a web page in the console's
