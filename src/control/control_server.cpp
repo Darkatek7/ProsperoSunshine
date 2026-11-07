@@ -4,6 +4,7 @@
 #include "control/file_bridge.hpp"
 #include "control/stream_list.hpp"
 #include "control/http_guard.hpp"
+#include "control/uuid_lines.hpp"
 #include "host_control.hpp"
 #include "sunshine/platform_ps5.hpp"
 #include "sunshine/video_ps5.hpp"
@@ -235,6 +236,9 @@ std::string ControlServer::handle_locked(const std::string &line, Caller caller)
         rtsp_stream::terminate_sessions_by_cert(cert);
         modes_.forget(uuid);
         profiles_.forget(uuid);
+        // The web page names devices by uuid in its lists too.
+        prospero::change_uuid_lines(platf::appdata() / "web_trusted.txt", {uuid}, false);
+        prospero::change_uuid_lines(platf::appdata() / "web_risk_ack.txt", {uuid}, false);
         DeviceSeats(platf::appdata() / "device_seats.txt").forget(uuid);
         BOOST_LOG(info) << "Control: a paired device was removed"sv;
         return "OK removed";

@@ -52,5 +52,6 @@ run_test quit_policy_test
 run_test encoder_qp_test
 run_test web_auth_test
 run_test web_lines_test
+run_test uuid_lines_test
 run_test web_plain_test
 run_test log_throttle_test
