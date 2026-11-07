@@ -688,8 +688,8 @@ std::string Host::quit_and_wait()
         return "QUIT: " + reply.error;
     if (!wait_control(false, 20000))
         return "the host did not stop within 20 s";
-    // The control socket closes first; give the rest of the host a moment to let go of its ports
-    // and the capture service. With UPnP on, the host removes its router mappings last and waits up to 3 s for that
+    // The control socket closes after the streams and the capture service; give the rest of the host a moment to let go
+    // of its pads. With UPnP on, the host removes its router mappings last and waits up to 3 s for that
     // (removal_budget in src/net/upnp_client.cpp): a new host started meanwhile maps the same ports, which the old one may
     // then remove, and both write upnp_permanent.txt.
     sleep_ms(2000 + (upnp_on ? 3000 : 0));

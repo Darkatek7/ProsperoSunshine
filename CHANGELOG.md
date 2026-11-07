@@ -8,6 +8,11 @@
   `0x26`, the knock Uncharted sends at full strength when firing. A client writes it to a DualSense as it is, a hard knock.
   The host picks up a change within seconds, in a running stream too. Thanks to @IlushaKAI (#30).
 
+### Changed
+
+- **Stopping the host:** the control socket now closes after the streams and their capture session, so "Restart host" and
+  `host_restart.elf` don't start a new host while the old one still holds capture.
+
 ## 0.6.7-beta.2 (2026-11-22, pre-release)
 
 ### Added
