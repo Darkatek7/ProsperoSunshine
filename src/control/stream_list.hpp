@@ -23,6 +23,7 @@ struct StreamFacts {
     int sent_kbps = -1;  // video kbit/s sent lately
     int rtt_ms = -1;  // round-trip time of the control connection
     int recoveries = 0;  // times the client asked for a new picture after a loss
+    int missing_frames = 0;  // frames the client reported lost (patch 0025)
 };
 
 // kbit/s from a count of bytes sent over some seconds; -1 when there's too little time to tell.
@@ -46,6 +47,41 @@ inline std::string codec_name(int video_format) {
     return video_format == 1 ? "HEVC" : video_format == 2 ? "AV1" : "H.264";
 }
 
+// What a stream shows: what the client asked for until it holds or joined a capture channel, then that channel's codec,
+// dynamic range, mode and bit rate.
+struct Shown {
+    std::string role = "starting";  // capture, joined or starting
+    std::string channel = "-";
+    std::string mode = "-";  // WxH@fps
+    int kbps = 0;
+    int video_format = 0;
+    bool hdr = false;
+};
+
+inline Shown shown(const StreamFacts &stream, const std::vector<CaptureFacts> &captures) {
+    Shown out;
+    int width = stream.width, height = stream.height, fps = stream.fps;
+    out.kbps = stream.kbps;
+    out.video_format = stream.video_format;
+    out.hdr = stream.hdr && stream.video_format != 0;
+    for (const CaptureFacts &capture : captures) {
+        if (stream.cert.empty()) break;
+        const bool holds = capture.cert == stream.cert;
+        if (!holds && std::find(capture.joined.begin(), capture.joined.end(), stream.cert) == capture.joined.end()) continue;
+        out.role = holds ? "capture" : "joined";
+        out.channel = std::to_string(capture.channel);
+        width = capture.width;
+        height = capture.height;
+        fps = capture.fps;
+        out.kbps = capture.kbps;
+        out.video_format = capture.video_format;
+        out.hdr = capture.hdr;
+        break;
+    }
+    if (width > 0 && height > 0 && fps > 0) out.mode = std::to_string(width) + 'x' + std::to_string(height) + '@' + std::to_string(fps);
+    return out;
+}
+
 // "OK uuid=<uuid> address=<ip> codec=<H.264|HEVC|AV1> hdr=<0|1> mode=<WxH@fps> kbps=<n> secs=<n> pads=<n>
 //  role=<capture|joined|starting> channel=<0|1|-> sent_kbps=<n|-> rtt_ms=<n|-> recoveries=<n> name=<name>". The name comes
 // last because it may hold spaces; "-" stands for an unknown uuid, address, mode, channel, rate or round-trip time. role: capture holds a capture channel, joined gets its picture,
@@ -54,27 +90,7 @@ inline std::string codec_name(int video_format) {
 // network: the video sent lately, the control connection's round-trip time, and how often the client lost a picture.
 inline std::string stream_line(const StreamFacts &stream, const std::vector<CaptureFacts> &captures, const std::string &uuid,
                                const std::string &name) {
-    std::string role = "starting", channel = "-";
-    int width = stream.width, height = stream.height, fps = stream.fps, kbps = stream.kbps;
-    int video_format = stream.video_format;
-    bool hdr = stream.hdr && stream.video_format != 0;
-    for (const CaptureFacts &capture : captures) {
-        if (stream.cert.empty()) break;
-        const bool holds = capture.cert == stream.cert;
-        if (!holds && std::find(capture.joined.begin(), capture.joined.end(), stream.cert) == capture.joined.end()) continue;
-        role = holds ? "capture" : "joined";
-        channel = std::to_string(capture.channel);
-        width = capture.width;
-        height = capture.height;
-        fps = capture.fps;
-        kbps = capture.kbps;
-        video_format = capture.video_format;
-        hdr = capture.hdr;
-        break;
-    }
-    const std::string mode = width > 0 && height > 0 && fps > 0
-                                 ? std::to_string(width) + 'x' + std::to_string(height) + '@' + std::to_string(fps)
-                                 : "-";
+    const Shown show = shown(stream, captures);
     // A name is one line; the app takes the rest of it.
     std::string clean_name = name;
     std::replace_if(clean_name.begin(), clean_name.end(), [](char c) { return c == '\n' || c == '\r'; }, ' ');
@@ -82,12 +98,31 @@ inline std::string stream_line(const StreamFacts &stream, const std::vector<Capt
     std::string address = stream.address;
     if (address.rfind("::ffff:", 0) == 0 && address.find('.') != std::string::npos) address.erase(0, 7);
     return "OK uuid=" + (uuid.empty() ? "-" : uuid) + " address=" + (address.empty() ? "-" : address) +
-           " codec=" + codec_name(video_format) + " hdr=" + (hdr ? "1" : "0") + " mode=" + mode +
-           " kbps=" + std::to_string(std::max(0, kbps)) + " secs=" + std::to_string(std::max(0LL, stream.seconds)) +
-            " pads=" + std::to_string(std::max(0, stream.pads)) + " role=" + role + " channel=" + channel +
+           " codec=" + codec_name(show.video_format) + " hdr=" + (show.hdr ? "1" : "0") + " mode=" + show.mode +
+           " kbps=" + std::to_string(std::max(0, show.kbps)) + " secs=" + std::to_string(std::max(0LL, stream.seconds)) +
+            " pads=" + std::to_string(std::max(0, stream.pads)) + " role=" + show.role + " channel=" + show.channel +
            " sent_kbps=" + (stream.sent_kbps < 0 ? std::string("-") : std::to_string(stream.sent_kbps)) +
            " rtt_ms=" + (stream.rtt_ms < 0 ? std::string("-") : std::to_string(stream.rtt_ms)) +
            " recoveries=" + std::to_string(std::max(0, stream.recoveries)) + " name=" + clean_name;
+}
+
+// The log line for one stream every few seconds while the log level is debug (main_ps5.cpp): the same facts as its
+// STREAMS line without who it is (no uuid, address or name), plus the frames the client reported lost (patch 0025) and,
+// in brackets, how many recoveries and lost frames came since the last line. `number` counts the running streams from 1.
+inline std::string stats_line(int number, const StreamFacts &stream, const std::vector<CaptureFacts> &captures,
+                              int recoveries_before, int missing_before) {
+    const Shown show = shown(stream, captures);
+    const auto with_change = [](int now, int before) {
+        return std::to_string(std::max(0, now)) + "(+" + std::to_string(std::max(0, now - std::max(0, before))) + ")";
+    };
+    return "Stream stats: stream=" + std::to_string(number) + " role=" + show.role + " channel=" + show.channel +
+           " codec=" + codec_name(show.video_format) + " hdr=" + (show.hdr ? "1" : "0") + " mode=" + show.mode +
+           " kbps=" + std::to_string(std::max(0, show.kbps)) +
+           " sent_kbps=" + (stream.sent_kbps < 0 ? std::string("-") : std::to_string(stream.sent_kbps)) +
+           " rtt_ms=" + (stream.rtt_ms < 0 ? std::string("-") : std::to_string(stream.rtt_ms)) +
+           " recoveries=" + with_change(stream.recoveries, recoveries_before) +
+           " missing_frames=" + with_change(stream.missing_frames, missing_before) +
+           " pads=" + std::to_string(std::max(0, stream.pads)) + " secs=" + std::to_string(std::max(0LL, stream.seconds));
 }
 
 }

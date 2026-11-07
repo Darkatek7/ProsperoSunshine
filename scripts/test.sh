@@ -23,6 +23,8 @@ run_capture_test capture_records_test "-DGOLDEN=\"$root/tests/capture_records.go
 run_capture_test capture_open_test
 run_capture_test capture_slots_test
 run_capture_test probe_record_test
+run_capture_test diag_test
+run_capture_test diag_test -DPROSPERO_DEBUG=1
 run_test experimental_test
 run_test video_test
 run_test capture_session_test "$root/src/capture/capture_session.cpp"
@@ -45,6 +47,8 @@ run_test titles_test "$root/src/apps/titles.cpp"
 run_test mdns_test "$root/src/net/mdns.cpp"
 run_test ra_choose_test
 run_test probe_scrub_test
+run_test log_filter_test
+run_test remote_log_test
 run_test host_control_test
 run_test http_guard_test
 run_test file_bridge_test "$root/src/control/file_bridge.cpp"

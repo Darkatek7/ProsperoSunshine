@@ -45,6 +45,9 @@
 using namespace std::literals;
 
 extern "C" int sceNetGetMacAddress(uint8_t address[6], int flags);  // libSceNet, linked by default
+extern "C" {
+#include "platform/ps5/diag.h"
+}
 
 namespace platf {
 
@@ -824,6 +827,8 @@ std::string gamepad_owner(const feedback_queue_t &queue) {
 }
 }  // namespace
 
+// Patch 0024 calls this right before binding a stream port; the debug build writes it to host_diag.log first.
+void trace_call(const std::string &what) { ps_diag_trace("%s\n", what.c_str()); }
 static void greet_spectator(const std::string &cert);
 
 void set_gamepad_owner(const feedback_queue_t &queue, std::string_view owner) {

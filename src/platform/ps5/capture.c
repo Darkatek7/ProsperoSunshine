@@ -430,18 +430,22 @@ int ps_capture_close(ps_capture *s)
     if (flag) { rc = (expression); SLOG(slot, name " rc=%#x\n", rc); if (rc < 0) failed = 1; } \
 } while (0)
     if (ps_capture_audio_close(s)) failed = 1;
+    if (s->started || s->opened) ps_diag_trace("capture%s Stop and Close\n", slot ? "2" : "");
     CLEANUP(s->started, s->stop(s->handle), "Stop");
     CLEANUP(s->opened, s->close(s->handle), "Close");
     CLEANUP(s->has_memory, s->free_memory(s->memory, s->memory + 0x20), "free encoder memory");
     if (s->initialized) {
         pthread_mutex_lock(&init_lock);
+        if (initialized_sessions == 1) ps_diag_trace("capture%s Terminate\n", slot ? "2" : "");
         if (--initialized_sessions == 0) CLEANUP(1, s->terminate(), "Terminate");
         else SLOG(slot, "Terminate left to the other channel\n");
         pthread_mutex_unlock(&init_lock);
     }
+    if (s->requested) ps_diag_trace("capture%s ResourceArbitrator STOP\n", slot ? "2" : "");
     CLEANUP(s->requested, s->request(s->resource, "STOP", NULL, getpid()), "STOP");
     int unregistered = 1;
     if (s->registered) {
+        ps_diag_trace("capture%s ResourceArbitrator unregister\n", slot ? "2" : "");
         rc = s->unregister(s->resource);
         SLOG(slot, "unregister rc=%#x\n", rc);
         if (rc) { failed = 1; unregistered = 0; }
@@ -559,7 +563,10 @@ static int open_slot(int slot, ps_capture **out)
     // open_lock); a refusal is final.
     static ps_ra_functions ra_calls;
     static int ra_state; // 0 not yet resolved, 1 resolved, -1 refused
-    if (!ra_state) ra_state = ps_ra_resolve(ra, &ra_calls) ? -1 : 1;
+    if (!ra_state) {
+        ps_diag_trace("capture ResourceArbitrator lookup\n");
+        ra_state = ps_ra_resolve(ra, &ra_calls) ? -1 : 1;
+    }
     step = "ResourceArbitrator";
     if (ra_state < 0) { error = PS_CAPTURE_FIRMWARE; goto fail; }
     intptr_t base = kernel_dynlib_mapbase_addr(-1, ra);
@@ -573,6 +580,7 @@ static int open_slot(int slot, ps_capture **out)
     // Right after our own close the arbitrator can list the resource for a moment longer: a reopen failed on that.
     // Stay well below the 2 s a client waits for the stream.
     for (int attempt = 0;; attempt++) {
+        if (!attempt) ps_diag_trace("capture%s ResourceArbitrator list\n", slot ? "2" : "");
         if (list(active)) goto fail;
         int listed = 0;
         for (size_t i = 0; i < 32; i++) if (active[i] == s->resource) listed = 1;
@@ -604,12 +612,14 @@ static int open_slot(int slot, ps_capture **out)
     if (!init || !mode || !open_video || !start || !s->terminate || !s->stop || !s->close || !s->headers || !s->read)
         goto fail;
     step = "register";
+    ps_diag_trace("capture%s ResourceArbitrator register resource=%d\n", slot ? "2" : "", s->resource);
     int rc = reg(s->resource, (void *)resource_event, NULL);
     SLOG(slot, "register rc=%#x\n", rc);
     if (rc) goto fail;
     s->registered = 1;
     s->requested = 1; // STOP is attempted even if the RUNNING request reports failure.
     step = "RUNNING";
+    ps_diag_trace("capture%s ResourceArbitrator RUNNING\n", slot ? "2" : "");
     rc = s->request(s->resource, "RUNNING", NULL, getpid());
     SLOG(slot, "RUNNING rc=%#x\n", rc);
     if (rc < 0) goto fail;
@@ -635,6 +645,7 @@ static int open_slot(int slot, ps_capture **out)
         rc = 0;
         SLOG(slot, "Initialize done by the other channel\n");
     } else {
+        ps_diag_trace("capture%s Initialize\n", slot ? "2" : "");
         rc = init();
         SLOG(slot, "Initialize rc=%#x\n", rc);
     }
@@ -676,6 +687,7 @@ static int open_slot(int slot, ps_capture **out)
         memcpy(request + 0x30, config + 0x30, 0x58);
         u64(config, 0x198 + high, 0x50);
         u32(config, 0x1a0 + high, 1);
+        ps_diag_trace("capture%s encoder memory\n", slot ? "2" : "");
         rc = reserve(request, config + 0x1a8 + high, config + 0x1c8 + high);
         SLOG(slot, "encoder memory rc=%#x\n", rc);
         if (rc) { atomic_store(&last_open_rc, rc); atomic_store(&failure_rc[slot], rc); goto fail; }
@@ -691,6 +703,8 @@ static int open_slot(int slot, ps_capture **out)
                         : atomic_load(&video_resolution[slot]) != 4 ? 5 : 25;
     int changed = 0;
     for (int attempt = 0;; attempt++) {
+        // Once: the repeats keep their 40 ms rhythm, and "OpenVideo repeated" below tells how many there were.
+        if (!attempt) ps_diag_trace("capture%s OpenVideo codec=%u mode=%#x\n", slot ? "2" : "", atomic_load(&video_codec[slot]), (unsigned)output);
         rc = open_video(&s->handle, config, 0);
         if (rc != RESOURCE_NOT_ACTIVE || attempt == repeats || atomic_load(&revoked[slot])) {
             if (attempt) SLOG(slot, "OpenVideo repeated %d times\n", attempt);
@@ -722,6 +736,7 @@ static int open_slot(int slot, ps_capture **out)
         goto fail;
     }
     step = "Start";
+    ps_diag_trace("capture%s Start\n", slot ? "2" : "");
     rc = start(s->handle);
     SLOG(slot, "Start rc=%#x\n", rc);
     atomic_store(&failure_rc[slot], rc);
@@ -745,9 +760,35 @@ fail:
         atomic_store(&retry_without_slices[slot], 1);
     }
     atomic_store(&failure_step[slot], step);
-    SLOG(slot, "open failed step=%s error=%d rc=%#x\n", step, error, atomic_load(&last_open_rc));
+    // The self-check's open only stops here on purpose, after a good open: not a failure to whoever reads the log.
+    if (strcmp(step, "open only") == 0) SLOG(slot, "open only ok, closed again\n");
+    else SLOG(slot, "open failed step=%s error=%d rc=%#x\n", step, error, atomic_load(&last_open_rc));
     ps_capture_close(s);
     return error;
+}
+
+int ps_capture_check_ra(ps_ra_functions *out)
+{
+    if (!out) return -1;
+    memset(out, 0, sizeof *out);
+    pthread_mutex_lock(&open_lock);
+    load_fn load = NULL;
+    const char *kernels[] = {"libkernel_web.sprx", "libkernel_sys.sprx", "libkernel.sprx"};
+    for (size_t i = 0; i < sizeof kernels / sizeof kernels[0] && !load; i++) {
+        uint32_t h = 0;
+        if (!kernel_dynlib_handle(-1, kernels[i], &h) && h)
+            load = (load_fn)kernel_dynlib_dlsym(-1, h, "sceKernelLoadStartModule");
+    }
+    int rc = -1;
+    if (load && module(load, "libSceIpmi.sprx")) {
+        const uint32_t ra = module(load, "libSceResourceArbitrator.sprx");
+        if (ra) {
+            ps_diag_trace("selfcheck ResourceArbitrator lookup\n");
+            rc = ps_ra_resolve(ra, out);
+        }
+    }
+    pthread_mutex_unlock(&open_lock);
+    return rc;
 }
 
 int ps_capture_slot_open(int slot, ps_capture **out)
@@ -1032,6 +1073,7 @@ int ps_capture_set_bitrate(ps_capture *s, uint32_t average, uint32_t peak)
     u64(request, 0, sizeof request);
     u32(request, 8, average);
     u32(request, 0xc, peak);
+    ps_diag_trace("capture%s SetVideoBitrate average=%u peak=%u\n", s->slot ? "2" : "", average, peak);
     int rc = s->set_bitrate(s->handle, request);
     if (rc < 0) { SLOG(s->slot, "SetVideoBitrate rc=%#x\n", rc); return PS_CAPTURE_ERROR; }
     return 0;
@@ -1058,10 +1100,12 @@ int ps_capture_audio_open_ex(ps_capture *s, uint32_t encoder, uint32_t bitrate, 
     u64(config, 0x20, encoder == 2 ? 0x18 : 0x10);
     u32(config, 0x28, bitrate);
     u32(config, 0x30, frame_index);
+    ps_diag_trace("capture%s OpenAudio encoder=%u\n", s->slot ? "2" : "", encoder);
     int rc = s->open_audio(&s->audio, config, flag);
     SLOG(s->slot, "OpenAudio encoder=%u purpose=%u 1c=%#x flag=%u rc=%#x\n", encoder, purpose, field_1c, flag, rc);
     if (rc) return rc < 0 ? rc : PS_CAPTURE_ERROR;
     s->audio_opened = 1;
+    ps_diag_trace("capture%s audio Start\n", s->slot ? "2" : "");
     rc = s->start(s->audio);
     SLOG(s->slot, "audio Start rc=%#x\n", rc);
     if (rc) { ps_capture_audio_close(s); return PS_CAPTURE_ERROR; }
@@ -1085,6 +1129,7 @@ int ps_capture_audio_close(ps_capture *s)
 {
     if (!s) return 0;
     int failed = 0, rc;
+    if (s->audio_started || s->audio_opened) ps_diag_trace("capture%s audio Stop and Close\n", s->slot ? "2" : "");
     if (s->audio_started) {
         rc = s->stop(s->audio);
         SLOG(s->slot, "audio Stop rc=%#x\n", rc);

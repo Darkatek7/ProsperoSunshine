@@ -42,7 +42,7 @@ In `/data/prosperosunshine/firmware_probe/`:
 | --- | --- |
 | `report.txt` | Befunde mit den Codes dahinter und eine Zusammenfassung, was der Host bräuchte. Wird nach jeder Phase neu geschrieben, damit auch ein abgebrochener Lauf zeigt, was er bis dahin fand |
 | `detail.log` | Eine Zeile pro Versuch, die Datensätze als Hex |
-| `capture.log` | Die Schritte von `capture.c` (die letzten 128 KiB) |
+| `capture.log` | Die Schritte von `capture.c`, mit Millisekunden seit dem Start (bis 1 MiB; ältere Zeilen und der vorige Lauf in `capture.log.1`) |
 | `progress.txt` | Die laufende Phase, am Ende `done` |
 | `samples/` | Nur mit Zustimmung, siehe unten |
 

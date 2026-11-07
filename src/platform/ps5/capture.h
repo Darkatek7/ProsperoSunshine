@@ -3,6 +3,7 @@
 #define PROSPERO_CAPTURE_H
 #include <stddef.h>
 #include <stdint.h>
+#include "ra_resolve.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -86,6 +87,10 @@ void ps_capture_set_open_only(int open_only);
 void ps_capture_set_open_attempts(int attempts);
 // Research, after ps_capture_open failed: the raw code of the step it failed at, and that step's name.
 int ps_capture_last_failure(const char **step);
+// The debug build's self-check (src/sunshine/self_check.cpp): loads the modules and looks the ResourceArbitrator calls up
+// as the first open does, without registering or opening anything. Returns ps_ra_resolve's result, or -1 when the
+// modules don't load.
+int ps_capture_check_ra(ps_ra_functions *out);
 // One session per slot (slot 0 here, see ps_capture_slot_open). Measured FW 13.00 / AVC / SDR configuration.
 // On failure *out is NULL and any acquired resources have had cleanup attempted.
 int ps_capture_open(ps_capture **out);

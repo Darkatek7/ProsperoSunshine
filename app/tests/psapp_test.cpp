@@ -149,6 +149,28 @@ static void capture_line_tests()
     log = diag::parse_host_log("capture open start codec=0\ncapture register rc=0\n");
     CHECK(diag::capture_summary(log) == "last open has no outcome, after: register rc=0");
 
+    // Each line starts with a time stamp; the debug build adds "->" lines and the self-check's open.
+    log = diag::parse_host_log("ProsperoSunshine: host version=0.3.4-debug commit=0a1b2c3d firmware=0x10200006 known=1 "
+                               "started=2026-11-06T14:00:00\n"
+                               "[     12] ProsperoSunshine: selfcheck firmware=0x10200006 known=1 console=PS5-Pro\n"
+                               "[    900] ProsperoSunshine: capture open start codec=0 resource=180\n"
+                               "[    950] ProsperoSunshine: -> capture OpenVideo codec=0 mode=0x13c\n"
+                               "[    990] ProsperoSunshine: capture OpenVideo rc=0\n"
+                               "[    991] ProsperoSunshine: capture open failed step=open only error=-1 rc=0\n");
+    CHECK(log.version == "0.3.4-debug" && log.commit == "0a1b2c3d" && log.firmware == 0x10200006u);
+    CHECK(diag::capture_summary(log) == "not tried since the host started");
+    log = diag::parse_host_log("[ 123456] ProsperoSunshine: capture open start codec=1 resource=180\n"
+                               "[ 123500] ProsperoSunshine: capture video out mode 0x13c\n"
+                               "[ 123501] ProsperoSunshine: -> capture OpenVideo codec=1 mode=0x13c\n");
+    CHECK(diag::capture_summary(log) == "last open has no outcome, after: OpenVideo codec=1 mode=0x13c (called, no answer)");
+    log = diag::parse_host_log("[      5] ProsperoSunshine: capture open start codec=0\n"
+                               "[      9] ProsperoSunshine: capture open failed step=OpenVideo error=-1 rc=0x81950008\n"
+                               "[     10] ProsperoSunshine: host stopped\n");
+    CHECK(diag::capture_summary(log) == "last open failed at OpenVideo (error -1, rc 0x81950008)");
+    CHECK(log.stopped);
+    // A line that only looks like a time stamp stays as it is.
+    CHECK(diag::parse_host_log("[x] host stopped\n").stopped == false);
+
     // The lock no switch can lift stays visible.
     log = diag::parse_host_log("ra refusing firmware 0x9000000: ResourceArbitrator calls not resolved\n");
     CHECK(diag::capture_summary(log).find("refused: the ResourceArbitrator calls were not found") == 0);

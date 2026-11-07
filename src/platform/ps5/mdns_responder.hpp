@@ -12,4 +12,8 @@ namespace prospero::mdns {
 // Returns right away (after logging) when the socket cannot be set up.
 void run_responder(std::stop_token stop, const std::string &name, uint16_t port);
 
+// The debug build's self-check: sets the socket up as the responder does and closes it again. Empty when that worked,
+// else what failed ("no LAN address", "bind 5353 errno=48", ...).
+std::string check_socket();
+
 }

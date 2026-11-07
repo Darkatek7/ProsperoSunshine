@@ -4,7 +4,9 @@
 #   -OpenGlSdk    a ps5-opengl SDK folder to put into the build cache (only needed once; without it the
 #                 SDK is copied from PS5SD's Docker volume ps5sd-work when that exists)
 #   -RebuildImage rebuild the build image
-param([string]$HostElf, [string]$OpenGlSdk, [switch]$RebuildImage)
+#   -Debug        the debug app, bundling out/debug/prospero_sunshine.elf (scripts/build.ps1 -Debug); the result is
+#                 build/app-debug/PPSA47989 and PPSA47989-debug.zip
+param([string]$HostElf, [string]$OpenGlSdk, [switch]$RebuildImage, [switch]$Debug)
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $image = 'prosperosunshine-app:2'
@@ -31,9 +33,9 @@ if ($LASTEXITCODE -ne 0) {
     if ($LASTEXITCODE -ne 0) { throw 'copying the ps5-opengl SDK failed' }
 }
 
-if (-not $HostElf) { $HostElf = Join-Path $projectRoot 'out/prospero_sunshine.elf' }
+if (-not $HostElf) { $HostElf = Join-Path $projectRoot $(if ($Debug) { 'out/debug/prospero_sunshine.elf' } else { 'out/prospero_sunshine.elf' }) }
 $dockerArgs = @('run', '--rm', '--mount', "type=bind,source=$projectRoot,target=/repo",
-    '--mount', "type=volume,source=$cache,target=/cache")
+    '--mount', "type=volume,source=$cache,target=/cache", '-e', "APP_FLAVOR=$(if ($Debug) { 'debug' } else { 'normal' })")
 if (Test-Path $HostElf) {
     $elf = (Resolve-Path $HostElf).Path
     $dockerArgs += @('--mount', "type=bind,source=$(Split-Path -Parent $elf),target=/hostelf,readonly",

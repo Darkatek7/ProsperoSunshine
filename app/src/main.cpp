@@ -7,6 +7,7 @@
 // For unattended tests the app ends itself when /data/prosperosunshine/app.quit appears (the file
 // is removed first), as PS5SD does with its quit file.
 
+#include "app/psapp/flavor.hpp"
 #include "app/psapp/host.hpp"
 #include "app/psapp/pad_log.hpp"
 #include "app/psapp/screen.hpp"
@@ -95,7 +96,7 @@ int main()
     host.start();
     psapp::Screen screen(host, fonts);
     const std::string version = read_content_version("/app0/sce_sys/param.json");
-    screen.set_version(version);
+    screen.set_version(psapp::kDebugBuild && !version.empty() ? version + " debug" : version);
     host.set_app_version(version);
     sys::log("[PSAPP] version %s", version.empty() ? "unknown" : version.c_str());
 

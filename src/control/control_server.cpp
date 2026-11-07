@@ -31,6 +31,9 @@
 #include <thread>
 #include <unistd.h>
 #include <vector>
+extern "C" {
+#include "platform/ps5/diag.h"
+}
 
 using namespace std::literals;
 
@@ -362,6 +365,7 @@ std::string ControlServer::handle_locked(const std::string &line, Caller caller)
         return command == "FILE" ? file_bridge::file(rest) : file_bridge::install(rest == "CHECK");
     }
     if (command == "RELISTEN") {
+        ps_diag_trace("RELISTEN from the control socket: the services start anew\n");
         relisten_ = true;
         return "OK";
     }
@@ -403,6 +407,7 @@ std::string ControlServer::handle_locked(const std::string &line, Caller caller)
         return "OK started";
     }
     if (command == "QUIT") {
+        ps_diag_trace("QUIT from the control socket: the host stops\n");
         shutdown_->raise(true);
         return "OK bye";
     }
@@ -420,6 +425,7 @@ void ControlServer::run_report(std::stop_token stop) {
     addr.sin_family = AF_INET;
     addr.sin_port = htons(report_port);
     addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    ps_diag_trace("bind the report port TCP %u\n", static_cast<unsigned>(report_port));
     if (bind(listener, reinterpret_cast<sockaddr *>(&addr), sizeof addr) || listen(listener, 4)) {
         BOOST_LOG(warning) << "Report port "sv << report_port << " failed to bind"sv;
         close(listener);
@@ -469,6 +475,7 @@ void ControlServer::run(std::stop_token stop) {
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
     addr.sin_addr.s_addr = htonl(lan ? INADDR_ANY : INADDR_LOOPBACK);
+    ps_diag_trace("bind the control port TCP %u\n", static_cast<unsigned>(port));
     if (bind(listener, reinterpret_cast<sockaddr *>(&addr), sizeof addr) || listen(listener, 2)) {
         BOOST_LOG(error) << "Control socket failed to bind port "sv << port;
         close(listener);

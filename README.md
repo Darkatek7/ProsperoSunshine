@@ -430,8 +430,59 @@ address.
   if they succeed it runs, untested. The kernel log says which case applies. See [Testing other firmware](#testing-other-firmware).
 - **Diagnosis:** the app's **Diagnostics** page collects a report for a bug report, without addresses, device names, ids or
   game titles. While the page is open and the host runs, a phone or PC in the same network can open it at
-  `http://<console-ip>:47996`; it is also saved as `/data/prosperosunshine/diagnostics.txt`. For more detail, set `min_log_level = debug` in
-  `/data/prosperosunshine/sunshine.conf`; messages go to the kernel log and `sunshine.log`.
+  `http://<console-ip>:47996`; it is also saved as `/data/prosperosunshine/diagnostics.txt`. For more detail, install the
+  [debug build](#debug-build), reproduce the problem once and post its report.
+
+## Debug build
+
+Every release also comes as a debug build, `PPSA47989-debug.zip` (and `prosperosunshine-<version>-debug.tar.gz`), built by
+CI from the same commit as the normal one. It has the same features and only says more about what the host does. It is for
+reporting a problem, not for daily use:
+
+1. Install `PPSA47989-debug.zip` the way you installed the app: it is the same title and replaces the app's folder.
+2. Reproduce the problem once.
+3. Open **Diagnostics** and post the report. Every report says which build it came from: the host's version reads
+   `<version>-debug` there, in `host_diag.log`, in `sunshine.log` and on the web page, and the app shows "debug" next to its
+   version on the home screen.
+4. Install the normal `PPSA47989.zip` again.
+
+What the debug build adds:
+
+- **Log level `debug`** in `sunshine.log` unless `min_log_level` in `sunshine.conf` says otherwise. The kernel log stays at
+  `info`: each line there is written right away, about 5 ms each, and debug lines there slowed the sound down.
+- **A `->` line before each call that can hang** in `host_diag.log`, on disk before the call is made: Avcap2 (OpenVideo,
+  Start, SetVideoBitrate, OpenAudio, Stop and Close), the ResourceArbitrator, binding each port, and stopping the services
+  (`QUIT`, `RELISTEN`). If the host hangs, the last `->` line names the call it stopped at.
+- **A self-check at start**, before the services listen (so never during a stream), in a second or two: the firmware and
+  whether the console is a Pro, whether the ResourceArbitrator calls are found by NID or by the table, which of the host's
+  ports another process holds, whether the mDNS socket comes up, and a capture opened (without starting it) in the mode a
+  1080p60 H.264 client gets. Its lines in `host_diag.log` start with `selfcheck`; the last one counts the problems.
+- **A stats line per stream every 5 seconds** in `sunshine.log`: the codec and mode delivered, the bit rate asked for and sent,
+  the round-trip time, the recoveries and the frames the client reported missing, without who it is. The normal build writes
+  it too with `min_log_level = debug`.
+- **Addresses masked and floods held back:** IPv4, IPv6 and MAC addresses become `<ip>` and `<mac>` in `host_diag.log`,
+  `sunshine.log` and the kernel log. A kind of line that repeats (the same text with other numbers) is written 10 times in
+  10 seconds, then the next line says how many were held back and shows the last one.
+- **Line numbers for crashes:** CI keeps the debug host with its line info (`prospero_sunshine.debug.elf`) and the link map
+  as a workflow artifact, `prosperosunshine-debug-symbols-<commit>`, not in the zip. The host in the zip has the same code,
+  so `llvm-addr2line -f -e prospero_sunshine.debug.elf <address>` turns a crash address from the kernel log into a function,
+  file and line.
+- **A remote log, off unless you add it:** with `remote_log = <IPv4 address>[:<port>]` in `sunshine.conf`, each line of
+  `sunshine.log` and `host_diag.log` (masked as above) also goes to that address as UDP syslog, port 514 unless given, for
+  example to a small server at home that keeps the last lines when the console hangs. Only an address you type in is used,
+  nothing is sent anywhere else, and the normal build ignores the line.
+
+In every build:
+
+- **No secret reaches the logs.** At debug level Sunshine logs the arguments of each request, among them the stream's
+  encryption key and the pairing handshake, and the client's certificate: their values are written as `<hidden>` and
+  `<certificate>`. The PIN, the web page's login, certificates and keys are never logged, and nothing is uploaded: the logs
+  stay on the console until you share them.
+- **`host_diag.log` lines start with the milliseconds since the host started**, and the first line names the time it
+  started, so they line up with `sunshine.log` and the kernel log. `diag_timestamps = 0` in `sunshine.conf` turns that off.
+- **`host_diag.log` keeps the start of a problem:** up to 1 MiB, then it moves to `host_diag.log.1` and starts again with its
+  first line. The last run's file is kept as `host_diag.log.1` too, so starting the host again after a crash doesn't wipe it.
+  The diagnostics report shows the last lines of both.
 
 ## Testing other firmware
 
@@ -487,7 +538,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1
 
 The first run builds the dependencies into `out/deps` (around 30 minutes, mostly Boost). The host is
 `out/prospero_sunshine.elf`; the other ELFs are hardware probes. `app/build.ps1` then builds the app, and
-`bash scripts/package.sh` the release archive. The host names its commit in `host_diag.log` and the diagnostics report.
+`bash scripts/package.sh` the release archive. The [debug build](#debug-build) is `scripts/build.ps1 -Debug` (into
+`out/debug`, with `prospero_sunshine.debug.elf` and `prospero_sunshine.map` next to the host), `app/build.ps1 -Debug`
+(`build/app-debug/PPSA47989-debug.zip`) and `PROSPERO_DEBUG=1 bash scripts/package.sh`; CMake's switch is
+`-DPROSPERO_DEBUG=ON`. The host names its commit in `host_diag.log` and the diagnostics report.
 `scripts/build.ps1` and CI pass it in. If you run `scripts/build.sh` in the container yourself from a git worktree, git can't find it
 there and the host says `unknown`, unless you add `-e PROSPERO_COMMIT=<hash>`. Portable unit tests:
 
