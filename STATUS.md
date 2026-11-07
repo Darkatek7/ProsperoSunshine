@@ -647,6 +647,23 @@ alle H.264 1080p60 auf „PS5 Screen“ mit `--no-script`; B, C und A beim zweit
 Nicht geprüft: echtes Moonlight, ein echter DualSense an der Konsole, und ob der Dialog „Wer benutzt diesen Controller?“
 einem Gast den Nutzer des Hosts anbietet.
 
+### Apps verstecken, Issue 36 (2026-11-07, 13.00)
+
+Testhost auf `da426c3` mit den Änderungen für Issue 36 (Patch 0023), zwei gekoppelte Testclients, beide mit freier
+Profilwahl, einer in `web_trusted.txt` eingetragen. Abfragen direkt mit dem Zertifikat des jeweiligen Clients:
+- `SETAPPS PPSA99000 hidden` (ProsperoStore): `APPS` zeigt es `hidden`. Ohne vertrautes Gerät fehlte es in `/applist` bei
+  beiden (36 statt 37 Einträge); mit einem vertrauten Gerät sah nur dieses es wieder.
+- `/launch` mit der ID des Stores vom nicht vertrauten Client: HTTP-Status 403 „This app is hidden on this device“, nichts
+  gestartet, Server blieb `SUNSHINE_SERVER_FREE`.
+- Der vertraute Client startete den Store und streamte 40 s (H.264 1080p60, 2391 Bilder, fehlerfrei dekodiert). Währenddessen
+  bekam der andere auf `/resume` 403 und auf `/launch` von PS5 Screen 400 („An app is already running“). Mit dem Ende
+  schloss `/cancel` den Store wieder.
+- `sunshine.log` nennt die Ablehnungen ohne Titel.
+- Webseite: `/api/apps` listet 36 Titel; `/api/apps/hidden` versteckt den Store (danach fehlt er in `/applist` des nicht
+  vertrauten Clients) und zeigt ihn wieder; eine ungültige Titel-ID und `"hidden":"yes"` gaben 400. Die Ansicht Apps vom
+  Besitzer im Browser angesehen.
+- Nicht geprüft: echtes Moonlight.
+
 ### Profile pro Gerät, PR 33 (2026-11-07, 13.00)
 
 Testhost `1e8eab9d` (PR 33 auf `4a03c0b`), zwei Konsolenprofile (Besitzer und ein Testprofil), Testclient mit eigener

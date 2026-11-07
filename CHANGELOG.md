@@ -9,6 +9,10 @@
   Risky, with a notice and trusted devices). The host signs profiles in and out as needed, a player switches with
   Ctrl+Backspace or by holding L1+L2+R1+R2, and a device with its own profiles gets its own keyboard and mouse, in its
   profile. The control socket gets `USERS`, `PROFILES` and `SETPROFILES`. See "Profiles per device" in the README.
+- **Hide apps from devices you don't trust** (issue 36): the web page's new **Apps** hides a title, a store for example,
+  from every device that isn't trusted. It doesn't see it in Moonlight, and the host refuses to start or resume it, also
+  by an app ID the client remembers. Trusted devices, and PS5 Screen, are untouched. The control socket gets `APPS` and
+  `SETAPPS`. See "Hiding apps" in the README.
 
 ## 0.4.2 (2026-11-07)
 

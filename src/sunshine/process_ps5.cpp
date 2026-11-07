@@ -3,12 +3,17 @@
 // screen starts nothing, it only marks a session as running so nvhttp/stream can proceed. A game starts unless another title
 // is in front. Nothing here closes a game by default, because that would lose unsaved progress: ending a session leaves it
 // running. Only with close_game_on_quit in sunshine.conf does Moonlight's Terminate App close the game the session started.
+#include "apps/app_access.hpp"
 #include "apps/quit_policy.hpp"
 #include "apps/titles.hpp"
+#include "control/device_profiles.hpp"
+#include "control/uuid_lines.hpp"
 #include "platform/ps5/title_launch.h"
 #include "src/config.h"
 #include "src/logging.h"
+#include "src/nvhttp.h"
 #include "src/process.h"
+#include <algorithm>
 #include <cstdio>
 #include <fstream>
 #include <mutex>
@@ -312,6 +317,52 @@ void close_game_on_quit() {
     }
     BOOST_LOG(info) << "Closed "sv << game << " in "sv
                     << duration_cast<milliseconds>(std::chrono::steady_clock::now() - start).count() << " ms"sv;
+}
+
+namespace {
+// The title IDs the operator hid from devices they don't trust (app_access.hpp), as the web page and the control socket's
+// SETAPPS wrote them.
+std::vector<std::string> hidden_apps() {
+    std::scoped_lock lock(prospero::uuid_lines_mutex());
+    return prospero::read_uuid_lines(platf::appdata() / "hidden_apps.txt");
+}
+
+// Whether the paired device with this certificate is trusted with every app (prospero::trusted_with_apps): marked trusted
+// in the web page's Devices, and still free to play as any profile.
+bool trusted_with_apps(const std::string &cert) {
+    if (cert.empty()) return false;
+    for (const auto &client : nvhttp::get_all_clients()) {
+        const std::string uuid = client.value("uuid", "");
+        if (uuid.empty() || nvhttp::get_cert_by_uuid(uuid) != cert) continue;
+        bool marked;
+        {
+            std::scoped_lock lock(prospero::uuid_lines_mutex());
+            const auto trusted = prospero::read_uuid_lines(platf::appdata() / "web_trusted.txt");
+            marked = std::find(trusted.begin(), trusted.end(), uuid) != trusted.end();
+        }
+        const auto profiles = prospero::DeviceProfiles(platf::appdata() / "device_profiles.txt").get(uuid);
+        return prospero::trusted_with_apps(marked, profiles.has_value(), profiles && profiles->free);
+    }
+    return false;
+}
+}  // namespace
+
+bool app_allowed(const std::string &client_cert, const ctx_t &app) {
+    const bool screen = app.id == std::to_string(screen_app_id);
+    if (screen) return true;
+    const auto hidden = hidden_apps();
+    // Nothing hidden, the usual case: no need to look the device up.
+    if (std::find(hidden.begin(), hidden.end(), app.cmd) == hidden.end()) return true;
+    return prospero::app_allowed(false, true, trusted_with_apps(client_cert));
+}
+
+bool app_id_allowed(const std::string &client_cert, int app_id) {
+    if (app_id == screen_app_id) return true;
+    const std::string id = std::to_string(app_id);
+    for (const auto &app : all_apps())
+        if (app.id == id) return app_allowed(client_cert, app);
+    // No installed title has it: there is nothing to start, and /launch turns it away anyway.
+    return true;
 }
 
 const std::vector<ctx_t> &proc_t::get_apps() const { return _apps; }

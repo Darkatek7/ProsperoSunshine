@@ -31,6 +31,7 @@
       <nav class="tabs" role="tablist">
         <button role="tab" data-tab="overview" aria-selected="true">Overview</button>
         <button role="tab" data-tab="devices">Devices</button>
+        <button role="tab" data-tab="apps">Apps</button>
         <button role="tab" data-tab="settings">Settings</button>
         <button role="tab" data-tab="logs">Logs</button>
       </nav>
@@ -80,6 +81,17 @@
         <h2>Paired devices</h2>
         <p id="devices-risk" class="risk-note" hidden></p>
         <ul id="devices" class="list"></ul>
+      </div>
+    </section>
+
+    <section id="tab-apps" class="tab" hidden>
+      <div class="card">
+        <h2>Apps</h2>
+        <p class="muted">Some apps can change the console: a store installs, updates or removes games. Hide them from devices you
+          don't trust: such a device doesn't see a hidden app in Moonlight, and can't start or resume it, even from a list it saved
+          before. Trusted devices see every app. PS5 Screen is always there.</p>
+        <p id="apps-trusted" class="muted"></p>
+        <ul id="apps" class="list"></ul>
       </div>
     </section>
 

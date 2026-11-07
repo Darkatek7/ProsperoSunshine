@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "web/web_server.hpp"
+#include "apps/app_access.hpp"
 #include "control/uuid_lines.hpp"
 #include "web/web_auth.hpp"
 #include "web/web_cert.hpp"
@@ -586,6 +587,21 @@ void routes(Server &server, State &state, ControlServer &control, const std::sha
                                                                     : nullptr;
         if (!type) return send_error(response, SimpleWeb::StatusCode::client_error_not_found, "no picture");
         send(response, SimpleWeb::StatusCode::success_ok, picture, type, {{"Cache-Control", "private, max-age=3600"}});
+    });
+    // The installed titles and which of them devices that aren't trusted don't see (issue 36). Titles only, no devices:
+    // the page takes those from /api/overview.
+    get("^/api/apps$", [&control](const Response &response, const Request &) {
+        const std::string answer = control.handle("APPS", ControlServer::Caller::web);
+        if (answer.starts_with("ERR ")) return send_error(response, SimpleWeb::StatusCode::server_error_internal_server_error, answer.substr(4));
+        send_json(response, json{{"apps", records(ok_lines(answer), app_entry)}});
+    });
+    // {"id": title ID, "hidden": true | false}.
+    post("^/api/apps/hidden$", [&control](const Response &response, const json &body) {
+        const std::string id = text_field(body, "id");
+        const auto hidden = body.find("hidden");
+        if (!title_id_valid(id) || hidden == body.end() || !hidden->is_boolean())
+            return send_error(response, SimpleWeb::StatusCode::client_error_bad_request, "check the title and hidden");
+        send_answer(response, control.handle("SETAPPS " + id + (hidden->get<bool>() ? " hidden" : " shown"), ControlServer::Caller::web));
     });
     // {"uuids": [...], "trusted": true | false}: "I trust this device" and "Stop trusting" in Devices.
     post("^/api/devices/trust$", [](const Response &response, const json &body) {

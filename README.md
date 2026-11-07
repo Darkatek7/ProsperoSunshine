@@ -123,7 +123,7 @@ is the host. To give PS and Create to everyone, turn on **PS for all players** i
 
 The host can serve a small web page, so a phone or PC in your network can do what the app does without leaving the game:
 see the host's status, version and firmware, enter the PIN of a pending pairing, end a device's stream, rename or remove
-paired devices, choose the console profiles each device plays as, change the settings, read or download the end of `sunshine.log` and `host_diag.log`, get the same
+paired devices, choose the console profiles each device plays as, [hide apps](#hiding-apps) from devices you don't trust, change the settings, read or download the end of `sunshine.log` and `host_diag.log`, get the same
 diagnostic report as the app's (ready to paste into an issue), and restart the host.
 It is off until you set a login, and nothing listens on its port before that.
 
@@ -199,6 +199,23 @@ own gets a profile of their own.
 
 **Set a sign-in passcode on your own profile.** The console's own user switching stays outside the host: a device that
 has PS and Create (the host's, see [Streaming](#streaming)) can still reach it.
+
+## Hiding apps
+
+Some apps can change the console: a store installs, updates or removes games. The [web page](#web-page)'s **Apps** lists
+the installed titles; **Hide** keeps one from devices you don't trust. Such a device doesn't see it in Moonlight, and the
+host refuses to start or resume it, also when the device asks by an app ID it remembers from an older list (Moonlight
+"Launch app failed: This app is hidden on this device"). **PS5 Screen** is never hidden. While a trusted device streams a
+hidden app, the others can't join it.
+
+This only keeps the app out of Moonlight. A device streaming PS5 Screen with a controller can still open the app from the
+console's home screen, like anyone holding a controller in the room; a spectator (see [Profiles per
+device](#profiles-per-device)) can't.
+
+Trusted with every app is a device you trusted in **Devices** (**I trust this device**) that still plays as any profile.
+Limit its profiles or make it a spectator, and it counts as not trusted for apps too, while its mark stays. Nothing is
+hidden until you hide something. The list lives in `/data/prosperosunshine/hidden_apps.txt`, one title ID a line; the
+control socket has `APPS` and `SETAPPS <title id> <hidden|shown>`.
 
 ## Keyboard and mouse as a controller
 

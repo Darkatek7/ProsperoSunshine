@@ -111,6 +111,7 @@ function selectTab(name) {
   if (name !== 'overview') $('risk').hidden = true;  // the risky setup notice is Overview's; Devices says it per device
   stopPolling();
   if (name === 'overview' || name === 'devices') startPolling();
+  else if (name === 'apps') loadApps();
   else if (name === 'settings') loadSettings();
   else if (name === 'logs') loadLog();
 }
@@ -272,7 +273,7 @@ function explanation(d, profiles) {
 async function setTrust(d, trusted) {
   const name = d.name || d.uuid;
   if (trusted && !confirm(`Trust ${name}? It keeps playing as any profile on the console, yours included. Devices shows it `
-    + 'as Trusted, and the risky setup notice leaves it out.')) return;
+    + 'as Trusted, the risky setup notice leaves it out, and it sees the apps hidden in Apps.')) return;
   try {
     await api('/api/devices/trust', { uuids: [d.uuid], trusted });
     notice(trusted ? `${name} is trusted.` : `${name} is no longer trusted.`);
@@ -407,7 +408,7 @@ function profilesOf(text, trusted = false) {
     const how = p.set
       ? 'Whoever holds this device\'s controllers can pick any profile on the console, yours included, and load, overwrite or delete its saves.'
       : 'Until its profiles are chosen, this device works as "Can choose freely": the console asks who uses each controller, and any profile can be picked, yours included.';
-    if (trusted) return { text: line, badge: 'Trusted', badgeClass: 'trusted', trusted: true, why: `You trust this device. ${how}` };
+    if (trusted) return { text: line, badge: 'Trusted', badgeClass: 'trusted', trusted: true, why: `You trust this device: it also sees the apps hidden in Apps. ${how}` };
     return { text: line, badge: p.set ? 'Risky' : 'profiles not set', badgeClass: p.set ? 'risky' : 'unset', trusted: false,
       why: `${how} Choose its profiles to limit it, or trust it if it's yours.` };
   }
@@ -679,6 +680,64 @@ async function restartHost(asked) {
   selectTab(currentTab);
 }
 $('restart').addEventListener('click', () => restartHost(false));
+
+// Apps: which installed titles devices that aren't trusted don't see (issue 36). Trusted with every app is a device trusted
+// in Devices that still plays as any profile, as the host counts it (src/apps/app_access.hpp).
+function trustedWithApps(d, trusted) {
+  const p = parseProfiles(d.profiles);
+  return trusted.includes(d.uuid) && (!p.set || p.free);
+}
+
+function renderAppsTrusted(devices, trusted) {
+  const box = $('apps-trusted');
+  const devicesLink = (text) => el('button', { type: 'button', class: 'inline-link', text, onclick: () => selectTab('devices') });
+  const names = devices.filter((d) => trustedWithApps(d, trusted));
+  if (!names.length) {
+    box.replaceChildren('No device is trusted yet, so a hidden app is hidden from every device. Trust yours under its badge in ',
+      devicesLink('Devices'), '.');
+    return;
+  }
+  const links = names.flatMap((d, i) => [i ? ', ' : null,
+    el('button', { type: 'button', class: 'inline-link', text: d.name || d.uuid, onclick: () => showDevice(d.uuid) })]);
+  box.replaceChildren('Trusted, sees every app: ', ...links.filter((n) => n != null),
+    '. A trusted device limited to some profiles later counts as not trusted here. Change trust in ', devicesLink('Devices'), '.');
+}
+
+function renderApps(apps) {
+  const list = $('apps');
+  if (!apps.length) {
+    list.replaceChildren(el('li', { class: 'empty', text: 'No game or app is installed.' }));
+    return;
+  }
+  const sorted = [...apps].sort((a, b) => (a.name || '\uffff').localeCompare(b.name || '\uffff') || a.id.localeCompare(b.id));
+  list.replaceChildren(...sorted.map((app) => {
+    const hidden = app.state === 'hidden';
+    return el('li', {},
+      el('div', { class: 'grow' },
+        el('div', { class: 'title', text: app.name || app.id }),
+        el('div', { class: 'sub', text: app.name ? app.id : `${app.id}, not installed any more` })),
+      hidden ? el('span', { class: 'badge risky', text: 'hidden' }) : null,
+      el('button', { type: 'button', class: hidden ? '' : 'primary', text: hidden ? 'Show to all' : 'Hide',
+        title: hidden ? 'Every device sees it again' : 'Only trusted devices see it',
+        onclick: () => setAppHidden(app, !hidden) }));
+  }));
+}
+
+async function loadApps() {
+  try {
+    const [apps, overview] = await Promise.all([api('/api/apps'), api('/api/overview')]);
+    renderAppsTrusted(overview.devices, overview.trusted || []);
+    renderApps(apps.apps);
+  } catch (e) { failed(e); }
+}
+
+async function setAppHidden(app, hidden) {
+  try {
+    await api('/api/apps/hidden', { id: app.id, hidden });
+    notice(hidden ? `${app.name || app.id} is hidden from devices that aren't trusted.` : `Every device sees ${app.name || app.id} again.`);
+    loadApps();
+  } catch (e) { failed(e); }
+}
 
 // Logs.
 async function loadLog() {

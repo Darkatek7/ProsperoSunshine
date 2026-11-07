@@ -22,6 +22,9 @@
 //                                  (device_profiles.hpp: free, none, or ids and "guest" separated by commas)
 //   SETPROFILES <uuid> <profiles|unset> -> sets which profiles a paired device may play as; "unset" takes the setting
 //                                  away ("OK saved" / "ERR ..."). Every id must be a profile on the console.
+//   APPS                        -> "OK <title id> <hidden|shown> <name>" per installed title, then the hidden ids of titles
+//                                  no longer installed ("OK <id> hidden"), then "END" (app_access.hpp)
+//   SETAPPS <title id> <hidden|shown> -> hides an app from devices that aren't trusted, or shows it again ("OK saved")
 //   REPORT                      -> "OK port=<n>": for some seconds, <appdata>/diagnostics.txt is on that port
 //   AUTOLOAD [ON|OFF]           -> the Payload Manager's autoload list, for the app (autoload_host.hpp)
 //   WEBLOGIN                    -> "OK user=<name> enabled=<0|1>": the stored login, also while the page is off; the

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "control/control_server.hpp"
 #include "control/autoload_host.hpp"
+#include "apps/app_access.hpp"
+#include "apps/titles.hpp"
 #include "control/file_bridge.hpp"
 #include "control/stream_list.hpp"
 #include "control/http_guard.hpp"
@@ -300,6 +302,36 @@ std::string ControlServer::handle_locked(const std::string &line, Caller caller)
                             : set->users.empty() ? "guest only"s
                                                  : std::to_string(set->users.size()) + " profile(s)" + (set->guest ? " and guest" : ""))
                         << ')';
+        return "OK saved";
+    }
+    // Apps the operator hides from devices they don't trust (app_access.hpp, issue 36): every installed title, then the
+    // hidden IDs of titles no longer installed, so that they can be shown again.
+    if (command == "APPS") {
+        std::vector<std::string> hidden;
+        {
+            std::scoped_lock lock(uuid_lines_mutex());
+            hidden = read_uuid_lines(platf::appdata() / "hidden_apps.txt");
+        }
+        const auto is_hidden = [&hidden](const std::string &id) { return std::find(hidden.begin(), hidden.end(), id) != hidden.end(); };
+        std::string out;
+        std::vector<std::string> listed;
+        for (const auto &title : list_titles("/user")) {
+            if (!title_id_valid(title.id)) continue;
+            out += "OK " + title.id + (is_hidden(title.id) ? " hidden " : " shown ") + one_line(title.name) + '\n';
+            listed.push_back(title.id);
+        }
+        for (const auto &id : hidden)
+            if (std::find(listed.begin(), listed.end(), id) == listed.end()) out += "OK " + id + " hidden\n";
+        return out + "END";
+    }
+    if (command == "SETAPPS") {
+        std::string id, state, extra;
+        in >> id >> state;
+        if (!title_id_valid(id) || (state != "hidden" && state != "shown") || (in >> extra))
+            return "ERR usage: SETAPPS <title id> <hidden|shown>";
+        if (!change_uuid_lines(platf::appdata() / "hidden_apps.txt", {id}, state == "hidden")) return "ERR the list could not be saved";
+        // No title in the log: it goes into the report people post.
+        BOOST_LOG(info) << "Control: an app was "sv << (state == "hidden" ? "hidden from"sv : "shown again to"sv) << " devices that aren't trusted"sv;
         return "OK saved";
     }
     if (command == "REPORT") {

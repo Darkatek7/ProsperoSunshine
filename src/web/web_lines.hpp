@@ -112,6 +112,16 @@ inline Record device_profiles(std::string_view line) {
             {"profiles", space == std::string_view::npos ? std::string() : std::string(line.substr(space + 1))}};
 }
 
+// APPS: "<title id> <hidden|shown> <name>", the name the rest of the line (empty for a hidden title no longer installed).
+inline Record app_entry(std::string_view line) {
+    const size_t first = line.find(' ');
+    const std::string_view rest = first == std::string_view::npos ? std::string_view() : line.substr(first + 1);
+    const size_t second = rest.find(' ');
+    return {{"id", std::string(line.substr(0, first))},
+            {"state", std::string(rest.substr(0, second))},
+            {"name", second == std::string_view::npos ? std::string() : std::string(rest.substr(second + 1))}};
+}
+
 // The last `limit` bytes of a log, starting at a line.
 inline std::string tail(std::string_view text, size_t limit) {
     if (text.size() <= limit) return std::string(text);
