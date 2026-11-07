@@ -647,6 +647,15 @@ alle H.264 1080p60 auf „PS5 Screen“ mit `--no-script`; B, C und A beim zweit
 Nicht geprüft: echtes Moonlight, ein echter DualSense an der Konsole, und ob der Dialog „Wer benutzt diesen Controller?“
 einem Gast den Nutzer des Hosts anbietet.
 
+### Release 0.4.2 auf der Konsole (2026-11-07, 13.00)
+
+App nach `/data/homebrew/PPSA47989` kopiert, Host-ELF nach `/data/prosperosunshine/` und mit `host_restart.elf` neu gestartet
+(vorne lief ein Spiel, daher nicht über die App): Kernel-Log `version=0.4.2 commit=d440adfe`, Steuerport nur lokal. Das
+Neuregistrieren lehnte ShadowMountPlus ab, solange das Spiel läuft (`game_active`), die App zeigt ihre neue Version also erst
+nach dem nächsten Neuregistrieren. Testclient, Spiel vorne: H.264 und HEVC 1080p je 30 s mit je 1794 Bildern bei 59,94 bzw.
+59,93 fps, fehlerfrei dekodiert, ohne Tonfehler. Der Fix für „PS5 Screen“ nach einem Stream (Moonlight hing bei
+„Quitting PS5 Screen...“, im Host-Log kam kein `/cancel` an) vorher als Testhost mit Moonlight am PC vom Besitzer geprüft.
+
 ### Touchpad ohne Touchpad und „Restart host“ im Stream (2026-11-07, 13.00)
 
 Moonlight für Windows meldet einen Xbox-Controller mit `type 01`, `capabilities 0043` und `supportedButtonFlags 0000F7FF`
