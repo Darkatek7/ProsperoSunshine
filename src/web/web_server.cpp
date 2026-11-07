@@ -551,16 +551,19 @@ void routes(Server &server, State &state, ControlServer &control, const std::sha
                   {"name", config::nvhttp.sunshine_name},
                   {"port", net::map_port(0)},
                   {"settings_pending", settings_pending()}};
-        // Each device with the profiles it may play as: null while they are not set.
+        // Each device with the profiles it may play as: null while they are not set. While the file can't be read, every
+        // device only watches (device_profiles.hpp), and the page shows that.
+        const std::string profiles_answer = control.handle("PROFILES", Caller::web);
+        const bool profiles_unreadable = profiles_answer.starts_with("ERR ");
         std::map<std::string, std::string> profiles;
-        for (const auto &line : ok_lines(control.handle("PROFILES", Caller::web))) {
+        for (const auto &line : ok_lines(profiles_answer)) {
             const auto record = device_profiles(line);
             profiles[record.at("uuid")] = record.at("profiles");
         }
         json devices = records(ok_lines(control.handle("DEVICES", Caller::web)), device);
         for (auto &d : devices) {
             const auto it = profiles.find(d.value("uuid", ""));
-            d["profiles"] = it == profiles.end() ? json(nullptr) : json(it->second);
+            d["profiles"] = profiles_unreadable ? json("none") : it == profiles.end() ? json(nullptr) : json(it->second);
         }
         send_json(response, json{{"host", host},
                                  {"status", status_lines.empty() ? json::object() : json(status(status_lines.front()))},

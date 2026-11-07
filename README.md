@@ -197,6 +197,9 @@ them to the devices you lend. A device with all four can play with four controll
 Unlike Quick Play, these profiles keep their saves, shared by everyone who plays on them; a friend who wants to keep their
 own gets a profile of their own.
 
+The setting lives in `/data/prosperosunshine/device_profiles.txt`. A device whose line there is damaged only watches, and
+so does every device while the file can't be read: an error never gives a device a free choice.
+
 **Set a sign-in passcode on your own profile.** The console's own user switching stays outside the host: a device that
 has PS and Create (the host's, see [Streaming](#streaming)) can still reach it.
 

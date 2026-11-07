@@ -56,11 +56,25 @@ int main() {
         assert(!profiles.get("b") && !profiles.get("c"));
     }
     {
-        // A line damaged by hand is skipped; the others stay.
+        // A line damaged by hand: its device only watches, never a free choice; the others stay. One without profiles
+        // names no setting.
         std::ofstream(file, std::ios::app) << "d not,a,list\ne\nf 1b1d9383 extra\n";
         DeviceProfiles profiles(file);
-        assert(profiles.get("a") && !profiles.get("d") && !profiles.get("e") && !profiles.get("f"));
-        assert(profiles.all().size() == 1);
+        assert(profiles.readable());
+        assert(format_profiles(*profiles.get("a")) == "1b1d9381,guest");
+        assert(profiles.get("d")->none() && profiles.get("f")->none() && !profiles.get("e"));
+        assert(profiles.all().size() == 3);
+    }
+    {
+        // A file there that can't be read (a folder in its place here): every device watches, and nothing is written.
+        const auto unreadable = dir / "unreadable_profiles.txt";
+        std::filesystem::create_directories(unreadable);
+        DeviceProfiles profiles(unreadable);
+        assert(!profiles.readable());
+        assert(profiles.get("a") && profiles.get("a")->none() && !profiles.get("a")->free);
+        assert(!profiles.get(""));
+        assert(!profiles.set("a", parse_profiles("free")) && profiles.get("a")->none());
+        assert(std::filesystem::is_directory(unreadable));
     }
     // The profile a controller switches to.
     const auto three = *parse_profiles("a,b,c,guest");

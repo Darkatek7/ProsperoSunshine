@@ -6,6 +6,9 @@
 //   <list>   comma-separated, at least one of: a profile's user id in hex (its /user/home folder), and "guest" (Quick
 //            Play, a one-time guest whose savegames aren't kept)
 // A device without a line has not been set yet and plays as before this setting: the console asks for each controller.
+// Errors fail closed, as a device limited to some profiles must not get a free choice by one: a line whose profiles don't
+// read only watches ("none"), and while the file exists but can't be read every device only watches, and nothing is
+// written over it.
 // Portable, tested in tests/device_profiles_test.cpp.
 #pragma once
 #include <algorithm>
@@ -93,19 +96,38 @@ inline std::string format_profiles(const ProfileSet &set) {
 class DeviceProfiles {
 public:
     explicit DeviceProfiles(std::filesystem::path file) : file_(std::move(file)) {
+        std::error_code ec;
+        const auto status = std::filesystem::status(file_, ec);
+        if (status.type() == std::filesystem::file_type::not_found) return;  // none set yet
+        if (ec || status.type() != std::filesystem::file_type::regular) {
+            readable_ = false;
+            return;
+        }
         std::ifstream in(file_);
+        if (!in) {
+            readable_ = false;
+            return;
+        }
         for (std::string line; std::getline(in, line);) {
             std::istringstream fields(line);
             std::string uuid, text, extra;
-            if (!(fields >> uuid >> text) || (fields >> extra)) continue;
-            if (const auto set = parse_profiles(text)) profiles_[uuid] = *set;
+            if (!(fields >> uuid >> text)) continue;
+            const auto set = (fields >> extra) ? std::nullopt : parse_profiles(text);
+            profiles_[uuid] = set ? *set : ProfileSet{};  // a damaged line: the device only watches
+        }
+        if (in.bad()) {
+            readable_ = false;
+            profiles_.clear();
         }
     }
+
+    // False when the file is there but couldn't be read: then every device only watches, and set() changes nothing.
+    bool readable() const { return readable_; }
 
     // nullopt: the device has not been set (its line goes). False when the file couldn't be written: then nothing changed,
     // here or for the platform, which reads the file.
     bool set(const std::string &uuid, const std::optional<ProfileSet> &set) {
-        if (uuid.empty()) return false;
+        if (uuid.empty() || !readable_) return false;
         std::scoped_lock lock(mutex_);
         const auto before = profiles_;
         const auto it = profiles_.find(uuid);
@@ -124,6 +146,7 @@ public:
     bool forget(const std::string &uuid) { return set(uuid, std::nullopt); }
 
     std::optional<ProfileSet> get(const std::string &uuid) const {
+        if (!readable_) return uuid.empty() ? std::nullopt : std::optional<ProfileSet>(ProfileSet{});
         std::scoped_lock lock(mutex_);
         const auto it = profiles_.find(uuid);
         if (it == profiles_.end()) return std::nullopt;
@@ -150,6 +173,7 @@ private:
     }
 
     std::filesystem::path file_;
+    bool readable_ = true;
     mutable std::mutex mutex_;
     std::map<std::string, ProfileSet> profiles_;
 };

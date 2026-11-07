@@ -89,6 +89,11 @@ void ControlServer::migrate_profiles() {
     const auto marker = platf::appdata() / "device_profiles.migrated";
     std::error_code ec;
     if (std::filesystem::exists(marker, ec)) return;
+    if (!profiles_.readable()) {
+        // Not now: it would take the devices whose line it can't see for unset and give them a free choice.
+        BOOST_LOG(warning) << "Control: device_profiles.txt can't be read, every device only watches"sv;
+        return;
+    }
     ProfileSet any;
     any.free = true;
     int kept = 0;
@@ -254,6 +259,7 @@ std::string ControlServer::handle_locked(const std::string &line, Caller caller)
         return out + "END";
     }
     if (command == "PROFILES") {
+        if (!profiles_.readable()) return "ERR device_profiles.txt can't be read, every device only watches";
         std::string out;
         for (const auto &[uuid, set] : profiles_.all()) out += "OK " + uuid + ' ' + format_profiles(set) + '\n';
         return out + "END";
