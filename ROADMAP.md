@@ -1,8 +1,8 @@
 # ProsperoSunshine Roadmap und Umsetzungsplan
 
-Stand: 7. November 2026, nach Release 0.4.2. Dieses Dokument ist der verbindliche Arbeitsplan. `PLAN.md` enthält Ziel, Regeln für das PS5-Backend und Hintergründe, `STATUS.md` den jeweils nachgewiesenen Stand. Bei Widersprüchen gilt für Fakten `STATUS.md`, für Reihenfolge und Abnahme dieses Dokument.
+Stand: 7. November 2026, nach Release 0.5.0. Dieses Dokument ist der verbindliche Arbeitsplan. `PLAN.md` enthält Ziel, Regeln für das PS5-Backend und Hintergründe, `STATUS.md` den jeweils nachgewiesenen Stand. Bei Widersprüchen gilt für Fakten `STATUS.md`, für Reihenfolge und Abnahme dieses Dokument.
 
-## Stand (7. November 2026, nach Release 0.4.2)
+## Stand (7. November 2026, nach Release 0.5.0)
 
 Seit 0.1.5 sind folgende Releases dazugekommen:
 
@@ -53,6 +53,11 @@ Seit 0.1.5 sind folgende Releases dazugekommen:
 - **0.4.2:**
   - View und Menu zusammen sind das Touchpad für Controller ohne eines (Xbox, Moonlight für Windows gibt Share nicht
     weiter); „PS5 Screen“ hängt nach einem Stream nicht mehr bei Moonlights „Quitting…“.
+- **0.5.0:**
+  - Konsolenprofile pro gekoppeltem Gerät (PR #33): nur diese Profile, nur zuschauen oder freie Wahl; Fehler in der
+    Profildatei führen zu „nur zuschauen“.
+  - Apps vor nicht vertrauten Geräten verstecken (Issue #36), auch Start und Fortsetzen per ID werden abgelehnt.
+  - Ein Debug-Build in jedem Release, von CI aus demselben Commit gebaut (Issue #28, PR #29).
 
 Firmware: 13.00 und 10.20 sind geprüft. 9.60 (Issue #30), 10.40, 11.40, 12.70, 13.40 und 13.60 streamen laut Nutzerberichten (Issues #1, #2, #14, #17, #24), dort aber nicht
 gemessen.

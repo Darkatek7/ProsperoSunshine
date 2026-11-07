@@ -647,6 +647,19 @@ alle H.264 1080p60 auf „PS5 Screen“ mit `--no-script`; B, C und A beim zweit
 Nicht geprüft: echtes Moonlight, ein echter DualSense an der Konsole, und ob der Dialog „Wer benutzt diesen Controller?“
 einem Gast den Nutzer des Hosts anbietet.
 
+### Release 0.5.0 auf der Konsole (2026-11-07, 13.00)
+
+App nach `/data/homebrew/PPSA47989` kopiert (`contentVersion` `01.000.024`) und neu registriert, Host-ELF nach
+`/data/prosperosunshine/` und mit `host_restart.elf` neu gestartet: Kernel-Log `version=0.5.0`, Steuerport nur lokal.
+Testclient, Home-Bildschirm, je 30 s 1080p60:
+
+| Variante | H.264: Bilder, Lücken | HEVC: Bilder, Lücken |
+| --- | --- | --- |
+| Normal | 1793, 0 | 1792, 0 |
+| Debug (`0.5.0-debug`, Selbsttest `problems=0`) | 1794, 0 | 1792, 0 |
+
+Alle fehlerfrei dekodiert, ohne Tonfehler. Danach wieder die normale Variante über `host_restart.elf`.
+
 ### Debug-Build (PR 29) zusammen mit Profilen und Apps auf main (2026-11-07, 13.00)
 
 Host `d19bce53` (PR 29 mit den Review-Änderungen auf main gemergt, Patches 0001 bis 0025), Testclient, Home-Bildschirm:
