@@ -5,6 +5,7 @@
 // doing that didn't get as far as its first log line, and the host stopped right after the title came up. A linked probe got
 // the title's app id back and kept running.
 #include "title_launch.h"
+#include "user_service.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -15,8 +16,6 @@ typedef struct {
     uint32_t flags;
 } launch_context;
 
-int sceUserServiceInitialize(void *);
-int sceUserServiceTerminate(void);
 int sceUserServiceGetForegroundUser(uint32_t *);
 int sceSystemServiceLaunchApp(const char *, char **, launch_context *);
 int sceLncUtilGetAppIdOfRunningBigApp(void);
@@ -43,14 +42,12 @@ int ps_title_close(const char *title_id)
 
 int ps_title_launch(const char *title_id)
 {
-    // Something else in this process may have initialized it already.
-    const int already_initialized = (int)0x80960003;
-    const int init = sceUserServiceInitialize(NULL);
-    if (init && init != already_initialized) return init;
+    // The host's one user service (user_service.c): never terminated here, another thread may be using it.
+    int rc = ps_user_service_ready();
+    if (rc) return rc;
     launch_context context = {.size = sizeof context};
-    int rc = sceUserServiceGetForegroundUser(&context.user_id);
+    rc = sceUserServiceGetForegroundUser(&context.user_id);
     char *args[] = {NULL};
     if (rc == 0) rc = sceSystemServiceLaunchApp(title_id, args, &context);
-    if (init == 0) sceUserServiceTerminate();
     return rc;
 }

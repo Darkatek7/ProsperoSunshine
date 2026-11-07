@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Console profiles per paired device:** the web page sets which console profiles each paired device plays as: only
+  those (the console doesn't ask "Who's using this controller?"), none (it only watches), or, as before, any (marked
+  Risky, with a notice and trusted devices). The host signs profiles in and out as needed, a player switches with
+  Ctrl+Backspace or by holding L1+L2+R1+R2, and a device with its own profiles gets its own keyboard and mouse, in its
+  profile. The control socket gets `USERS`, `PROFILES` and `SETPROFILES`. See "Profiles per device" in the README.
+
 ## 0.4.2 (2026-11-07)
 
 ### Added
