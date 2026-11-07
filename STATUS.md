@@ -647,6 +647,22 @@ alle H.264 1080p60 auf „PS5 Screen“ mit `--no-script`; B, C und A beim zweit
 Nicht geprüft: echtes Moonlight, ein echter DualSense an der Konsole, und ob der Dialog „Wer benutzt diesen Controller?“
 einem Gast den Nutzer des Hosts anbietet.
 
+### Profile pro Gerät, PR 33 (2026-11-07, 13.00)
+
+Testhost `1e8eab9d` (PR 33 auf `4a03c0b`), zwei Konsolenprofile (Besitzer und ein Testprofil), Testclient mit eigener
+Kopplung (`stream_test`, ein Pad vom Typ PS ohne Touchpad, `--no-script` mit zwei Steuerkreuz-Ticks, teils Tasten):
+- Beim ersten Start behielten die 12 gekoppelten Geräte die freie Wahl (`free`); `USERS`, `PROFILES`, `SETPROFILES` antworten.
+- Gerät auf das Testprofil beschränkt, das an der Konsole angemeldet war: Pad nicht hinzugefügt („signed in on the console by
+  someone else“). Ebenso mit dem Profil des Besitzers, das vorne angemeldet ist.
+- Gerät auf `none`: Hinweis als Zuschauer beim Streamstart, kein Pad, keine Tastatur.
+- Freies Gerät: Pad wie bisher als Controller des Hosts, sauber entfernt.
+- Testprofil vorher an der Konsole abgemeldet: Der Host meldete es an, das Pad war nach 2 ms im Profil, ohne die Frage der
+  Konsole; die Tastatur des Geräts bekam ein eigenes Gerät im Profil (`0x3000000170100`).
+- Neu verbunden 10 s nach dem Ende: gleiches Profil ohne neue Anmeldung. 45 s nach dem letzten Pad abgemeldet (`rc 0`),
+  keine Fehler beim Zurücksetzen der Rechte. Alle Streams fehlerfrei dekodiert.
+- Nicht geprüft: Profilwechsel (nur ein Profil frei) und ein echter Controller, der über die Benutzerauswahl der Konsole
+  dazukommt (vom Autor als offene Grenze genannt).
+
 ### Release 0.4.2 auf der Konsole (2026-11-07, 13.00)
 
 App nach `/data/homebrew/PPSA47989` kopiert, Host-ELF nach `/data/prosperosunshine/` und mit `host_restart.elf` neu gestartet
