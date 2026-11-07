@@ -23,9 +23,13 @@
 #include <unistd.h>
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <condition_variable>
+#include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <mutex>
 #include <memory>
 #include <optional>
@@ -550,6 +554,7 @@ struct input_raw_t {
     int sessions = 0;
     uint32_t user = 0;
     bool ps_all_players = false;  // ps_button_all_players: every pad may press PS and Create, not only the host's
+    std::atomic_int knock_percent{100};  // trigger_knock_strength
     prospero::PadRoles<MAX_GAMEPADS> roles;  // who is the host: a paired device, not a slot (GitHub issue 15)
     std::jthread output_thread;
 };
@@ -570,7 +575,7 @@ static void set_color(input_raw_t &input, int nr, uint8_t r, uint8_t g, uint8_t 
 
 static void set_triggers(input_raw_t &input, int nr, const prospero::TriggerBlock &block) {
     if (input.triggers[nr] == block) return;
-    const auto effects = prospero::map_trigger_effects(block, input.triggers[nr]);
+    const auto effects = prospero::map_trigger_effects(block, input.triggers[nr], input.knock_percent);
     input.triggers[nr] = block;
     static constexpr char digits[] = "0123456789abcdef";
     std::string hex;
@@ -584,12 +589,33 @@ static void set_triggers(input_raw_t &input, int nr, const prospero::TriggerBloc
     }
 }
 
+// Sunshine doesn't know this key. Read again whenever the file changes, so a change takes effect within seconds, in a running
+// stream too, from the next effect the game sends.
+static void load_knock_strength(input_raw_t &input) {
+    const auto settings = config::parse_config(file_handler::read_file(config::sunshine.config_file.c_str()));
+    const auto found = settings.find("trigger_knock_strength");
+    const int percent = found == settings.end() ? 100 : std::clamp(std::atoi(found->second.c_str()), 0, 100);
+    if (input.knock_percent.exchange(percent) != percent) BOOST_LOG(info) << "PS5 input: trigger knock "sv << percent << '%';
+}
+
 // Reads what the system wants from each pad at the cadence of Remote Play's own reader and passes on
 // changes of the motors, the light bar and the trigger effects. Only titles using the classic two-motor rumble set the motors;
 // see docs/re/pad-output.md.
 static void poll_pad_output(std::stop_token stop, input_raw_t *input) {
     std::array<bool, MAX_GAMEPADS> failed{};
+    std::error_code time_ec;
+    auto settings_written = std::filesystem::last_write_time(config::sunshine.config_file, time_ec);
+    auto settings_checked = std::chrono::steady_clock::now();
     while (!stop.stop_requested()) {
+        const auto now = std::chrono::steady_clock::now();
+        if (now - settings_checked >= 2s) {
+            settings_checked = now;
+            const auto written = std::filesystem::last_write_time(config::sunshine.config_file, time_ec);
+            if (!time_ec && written != settings_written) {
+                settings_written = written;
+                load_knock_strength(*input);
+            }
+        }
         {
             std::lock_guard lock(input->mutex);
             for (int nr = 0; nr < MAX_GAMEPADS; ++nr) {
@@ -656,6 +682,7 @@ input_t input() {
     raw->ps_all_players = all != settings.end() && all->second == "1";
     BOOST_LOG(info) << (raw->ps_all_players ? "PS5 input: every player can press PS and Create"sv
                                             : "PS5 input: only the host can press PS and Create"sv);
+    load_knock_strength(*raw);
     raw->output_thread = std::jthread(poll_pad_output, raw);
     return input_t{raw};
 }
