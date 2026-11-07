@@ -7,6 +7,11 @@
 - **Trigger knock:** `trigger_knock_strength` in `sunshine.conf` (0 to 100, 100 unless set) turns down trigger effect
   `0x26`, the knock Uncharted sends at full strength when firing. A client writes it to a DualSense as it is, a hard knock.
   The host picks up a change within seconds, in a running stream too. Thanks to @IlushaKAI (#30).
+- **Vibration of PS5 games, as rumble (experimental, off by default):** PS5 games send their vibration through a haptic
+  channel and leave the classic motors alone, so clients got nothing. `haptic_mode = rumble` in `sunshine.conf` reads that
+  channel during a stream and passes its level on as the two motor values, a rough match for a DualSense on the console.
+  `haptic_strength` (0 to 200, 100 unless set) sets the strength. A game with rumble of its own keeps it. Measured on 9.60.
+  Thanks to @IlushaKAI (#30).
 
 ### Changed
 

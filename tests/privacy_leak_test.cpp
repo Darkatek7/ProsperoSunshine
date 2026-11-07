@@ -118,6 +118,10 @@ std::vector<Sample> samples() {
     // ---- What a developer needs stays (nothing private in these) -----------------------------------------------------------------
     out.push_back({"host_diag.log: the capture steps and codes", "ProsperoSunshine: capture OpenVideo rc=0x80c78000 step=Start", {}, {}, {}, {"rc=0x80c78000", "step=Start"}});
     out.push_back({"host_diag.log: the header", "ProsperoSunshine: host version=0.6.0-debug commit=8fa42cd5 firmware=0x13000040 known=1 started=2026-11-10T18:01:13", {}, {}, {}, {"0.6.0-debug", "8fa42cd5", "0x13000040", "2026-11-10T18:01:13"}});
+    out.push_back({"sunshine.log: a fault in the haptic channel names code and memory addresses of the host, no one's network address",
+                   "[2026-11-22 18:01:13.081]: Warning: PS5 haptics: read faulted, signal 11 at 00000008000A1B2C, address 0000000000010000; "
+                   "off until the host restarts",
+                   {}, {}, {}, {"signal 11", "off until the host restarts"}});
     out.push_back({"host_diag.log: the ports a bind waits on", "ProsperoSunshine: -> bind the RTSP port TCP 48010", {}, {}, {}, {"48010"}});
     out.push_back({"sunshine.log: the stats line of a stream", "Stream stats: stream=1 role=capture channel=0 codec=H.264 hdr=0 mode=1920x1080@60 kbps=20000 sent_kbps=18300 rtt_ms=4 recoveries=0(+0) missing_frames=0(+0) pads=1 secs=25",
                    {}, {}, {}, {"mode=1920x1080@60", "rtt_ms=4", "pads=1"}});
