@@ -647,6 +647,17 @@ alle H.264 1080p60 auf „PS5 Screen“ mit `--no-script`; B, C und A beim zweit
 Nicht geprüft: echtes Moonlight, ein echter DualSense an der Konsole, und ob der Dialog „Wer benutzt diesen Controller?“
 einem Gast den Nutzer des Hosts anbietet.
 
+### Debug-Build (PR 29) zusammen mit Profilen und Apps auf main (2026-11-07, 13.00)
+
+Host `d19bce53` (PR 29 mit den Review-Änderungen auf main gemergt, Patches 0001 bis 0025), Testclient, Home-Bildschirm:
+- Normal: `version=0.4.2`, H.264 und HEVC 1080p je 30 s mit 1792 und 1787 Bildern, keine Lücken, fehlerfrei dekodiert,
+  ohne Tonfehler.
+- Debug: `version=0.4.2-debug`, Selbsttest in 179 ms mit `ra=resolved by_nid=4`, `ports=free`, `mdns=ok`,
+  `capture=opens … step=open only rc=0`, `problems=0`; das Kernel-Log zeigt jetzt „capture open only ok, closed again“
+  statt „open failed“. `->`-Zeilen vor jedem Capture-Schritt und jedem Bind.
+- Host-, Debug- und App-Build mit beiden Testsuiten grün. Nicht geprüft: die Release-Job-Änderung (nur beim nächsten Tag
+  in CI sichtbar).
+
 ### Apps verstecken, Issue 36 (2026-11-07, 13.00)
 
 Testhost auf `da426c3` mit den Änderungen für Issue 36 (Patch 0023), zwei gekoppelte Testclients, beide mit freier
