@@ -81,7 +81,7 @@ Signaturen aus den Wrappern abgeleitet; Argumente, die nur als 4/8-Byte-Puffer s
 | `pN0hIQZsMzc` | 0xDD0 | `sceAvcap2ReadVideo` | - | `(h, dst, cap, desc*0x70, flags)` AVC-only, kopiert Meta nach desc |
 | `jkv9MlN7gvs` | 0xF00 | `sceAvcap2ReadVideo2` | - | 11-Byte-Thunk: `ReadVideo3(h,dst,cap,desc,NULL,flags)` |
 | `TyUnv8GHF0o` | 0xF10 | `sceAvcap2ReadVideo3` | - | `(h, dst, cap, desc*, extra*0x2DC oder NULL, flags)` neuere Variante, Desc >= 0x88 |
-| `1Xp85wUaVTE` | 0x10E0 | `sceAvcap2ReadHaptic` | - | `(h, dst, cap, hdr*, flags)`, Header 0x18 |
+| `1Xp85wUaVTE` | 0x10E0 | `sceAvcap2ReadHaptic` | - | aus dem 13.00-Wrapper gelesen `(h, dst, cap, hdr*, flags)`, Header 0x18; auf 9.60 gemessen `(h, buffer, hdr*, flags)` (Abschnitt „Haptik auf 9.60“) |
 | `8j-pBJmjL7M` | 0x1170 | `sceAvcap2ReadPadSpk` | - | `(h, dst, cap, hdr*, flags)`, Header 0x20 |
 | `ysFbdZrSCMM` | 0x1200 | `sceAvcap2Select` | - | `(n, h*[n], u64* readyMask)` wartet (Event-Flag) bis mind. ein Kanal Daten hat; kein IPC |
 | `S4nvYDibKBw` | 0x1340 | unbekannt | - | `(h, u64*)` Event-Flag-Poll (kein IPC, sceKernelWaitEventFlag Timeout 0) |
@@ -390,3 +390,17 @@ bei fehlender Grant sinnlos; sie hilft nur, wenn die Grant-Callback-Antwort noch
   `0x80Cxxxxx` den Kanal schließen/neu öffnen, statt weiterzulesen.
 
 **Nachtrag (HEVC-Spike, `docs/re/hevc.md`):** Hypothese (b) trifft für HEVC zu: Ein Kanal, der mit der Bitrate in `cfg+0xC8/0xCC` geöffnet wird, läuft bis 100 Mbit/s fehlerfrei, und nur `SetVideoBitrate` über den Anfangswert hinaus führt zu `0x80C78000`. Für H.264 ist das nicht getestet. `libSceVenc` liegt inzwischen unter `.cache/re/`.
+
+## Haptik auf 9.60 (Bericht aus Issue 30, nicht selbst nachgemessen)
+
+Ein Contributor hat den Haptik-Kanal auf einer PS5 mit 9.60 benutzt. Auf 13.00 ist davon nichts geprüft; die Signatur in der
+Tabelle oben stammt nur aus dem Wrapper und kann falsch sein.
+
+- `ReadHaptic` hat dort vier Argumente: `(h, buffer, hdr*, flags)`. Das Paket beginnt bei `buffer + 8`, höchstens 0x800 Bytes,
+  der Header ist 0x18 groß. Wie `ReadAudio` aufgerufen stürzt es ab, weil die Kapazität im Header-Argument landet.
+- `OpenHaptic` öffnet mit dem ersten Block der Audio-Konfiguration: Größe 0x18, Art 0, Zweck 2, Encoder 2, RA-Id, Flag 0.
+  Encoder 0 und 1 geben `0x81950001`.
+- Format: 47 Pakete pro Sekunde zu 2048 Bytes, davon tragen nur die ersten 64 Frames Float-Stereo Samples, also etwa 3 kHz
+  (die Rate der Bluetooth-Haptik eines DualSense). Der Kanal liefert auch mit einem virtuellen Pad.
+- Uncharted lässt die klassischen Motoren auf null (2:40 Spielzeit, keine Motor-Zeile im Debug-Log); die Hüllkurve des
+  Haptik-Kanals auf Rumble abgebildet ergibt dort spürbares Rumble.

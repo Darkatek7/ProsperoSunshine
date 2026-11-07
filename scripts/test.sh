@@ -36,6 +36,8 @@ run_test keyboard_pad_test
 run_test title_profile_test
 run_test listener_watch_test
 run_test device_modes_test
+run_test device_profiles_test
+run_test profile_rules_test
 run_test stream_list_test
 run_test capture_mode_test
 run_test channel_choice_test
@@ -48,8 +50,13 @@ run_test probe_scrub_test
 run_test log_filter_test
 run_test remote_log_test
 run_test host_control_test
+run_test http_guard_test
+run_test file_bridge_test "$root/src/control/file_bridge.cpp"
 run_test quit_policy_test
 run_test encoder_qp_test
 run_test web_auth_test
 run_test web_lines_test
+run_test uuid_lines_test
+run_test app_access_test
+run_test web_plain_test
 run_test log_throttle_test

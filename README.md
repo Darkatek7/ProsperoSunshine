@@ -5,10 +5,10 @@
 A native, Sunshine-compatible game-stream host for the PlayStation 5. Add your console to Moonlight and stream
 the PS5 screen, game audio and controller input over your LAN.
 
-> **Status: 0.4.0 ([changelog](CHANGELOG.md)).** Pairing, H.264, HEVC and HDR from 360p up to 4K at 30 or 60 fps, game audio, controller, keyboard and mouse input work end to end
+> **Status: 0.4.2 ([changelog](CHANGELOG.md)).** Pairing, H.264, HEVC and HDR from 360p up to 4K at 30 or 60 fps, game audio, controller, keyboard and mouse input work end to end
 > with Moonlight on PC, in the browser (Moonlight Web) and on iPhone. Sessions of 30 minutes and ten reconnects
 > were tested without errors on firmware 13.00. Firmware 10.20 was tested by a contributor at 1080p. Users report streams on
-> 10.40, 11.40, 12.70, 13.40 and 13.60, not measured here. A second device can join a running stream as another player, in its own codec, dynamic range or resolution up to 1080p. Not every client or game has
+> 9.60, 10.40, 11.40, 12.70, 13.40 and 13.60, not measured here. A second device can join a running stream as another player, in its own codec, dynamic range or resolution up to 1080p. Not every client or game has
 > been tried.
 
 ## How it works
@@ -32,7 +32,9 @@ reverse-engineering notes: `docs/` (German).
 
 - PS5 firmware: **13.00 and 10.20 are tested** (10.20 from 360p to 1080p, where the encoder takes no bitrate; its picture quality
   follows the bitrate set in Moonlight instead, and it sends well below it). Other versions are
-  untested; the host refuses them only if its system-library lookups fail (`docs/firmware-porting.md`, German).
+  untested; the host refuses them only if its system-library lookups fail (`docs/firmware-porting.md`, German). Firmware
+  9.60 has its own capture record, measured by a contributor; there the app can't save settings yet, as a title's sandbox
+  has no `/data` on that console.
 - A homebrew environment with an **ELF loader** (for example one listening on port 9021). The app also needs
   [ShadowMountPlus](https://github.com/drakmor/ShadowMountPlus), which registers titles from `/data/homebrew/`.
 - No PS VR session while streaming.
@@ -73,7 +75,8 @@ on, and the device stays paired and can connect again.
 ## Streaming
 
 Start **"PS5 Screen"** in Moonlight to stream what the console shows, or pick a game to start it as well. The first time, the
-console asks **"Who's using this controller?"** inside the stream; answer it with your Moonlight controller.
+console asks **"Who's using this controller?"** inside the stream; answer it with your Moonlight controller. A device given
+its own profiles doesn't get the question ([Profiles per device](#profiles-per-device)).
 
 By default the host never closes a game, because that could lose unsaved progress. Quitting in Moonlight ends the stream, and
 the game keeps running on the console. If another game is open, in front or behind the settings app, picking a game fails
@@ -96,9 +99,15 @@ closes nothing.
 short press of Select sends Create when you let go, which means Create cannot be held. To get a plain Create button
 back, set `back_button_timeout = -1` in `sunshine.conf`; a value of 0 or more is the hold time in milliseconds.
 
+**Touchpad on a controller without one** (Xbox and most others): press **View and Menu together**, the buttons in the
+places of Create and Options, for the touchpad click (the map or inventory in most games). Press View first or both at
+once: Menu alone is Options at once. A DualSense or DualShock 4 on the client sends its own touchpad. Where a client passes
+on an Xbox Series controller's Share button, that is the touchpad click too; Moonlight for Windows doesn't, as Windows
+keeps it for the Game Bar.
+
 **Several controllers on one device:** every controller on a Moonlight client is a player of its own. The host's first
 controller plays as the console's user, and for each further one the console asks "Who's using this controller?" once it
-is first used: a controller the client announces but never uses (Steam Input's virtual one next to the real one, the
+is first used (on a device with its own profiles, it joins as the next one instead): a controller the client announces but never uses (Steam Input's virtual one next to the real one, the
 on-screen controls) doesn't appear on the console at all. Two people on one PC need one
 Moonlight with both controllers connected, not two clients. Measured here with the test client (two pads on one device),
 and a contributor played with two controllers on one Moonlight client on 10.20.
@@ -114,7 +123,7 @@ is the host. To give PS and Create to everyone, turn on **PS for all players** i
 
 The host can serve a small web page, so a phone or PC in your network can do what the app does without leaving the game:
 see the host's status, version and firmware, enter the PIN of a pending pairing, end a device's stream, rename or remove
-paired devices, change the settings, read or download the end of `sunshine.log` and `host_diag.log`, get the same
+paired devices, choose the console profiles each device plays as, [hide apps](#hiding-apps) from devices you don't trust, change the settings, read or download the end of `sunshine.log` and `host_diag.log`, get the same
 diagnostic report as the app's (ready to paste into an issue), and restart the host.
 It is off until you set a login, and nothing listens on its port before that.
 
@@ -140,6 +149,73 @@ It is off until you set a login, and nothing listens on its port before that.
 - Settings changed on the page apply when the host starts again. After **Save** the page offers to restart it, and until
   then a banner says the saved settings aren't applied yet. The Experimental switches stay in the app, where they are
   checked against the firmware.
+
+## Profiles per device
+
+Each paired device can be given the console profiles it plays as. Lend the console to a friend and they play on their own
+profile, with their own saves, and nobody at their place can load, overwrite or delete yours. The [web page](#web-page) asks
+right after pairing, and **Devices** changes it later; the app only says that it is set there.
+
+- **Only these profiles:** each controller of the device joins as the next of its profiles that is free, and the console
+  doesn't ask "Who's using this controller?". The host signs the profile in if needed, and the console shows "<profile>
+  joined the party". A profile isn't free while another controller of the host plays as it, of any device, or while
+  someone signed it in on the console, as a controller in the room may play as it: sign it out there first. A controller
+  beyond the device's profiles doesn't join, and the console says why.
+  - With a controller, the device's keyboard and mouse are its own, in the profile that controller plays as: they type
+    into text fields as that profile, and the console doesn't ask who uses them.
+  - Without one, they play as a controller of their own ([Keyboard and mouse as a controller](#keyboard-and-mouse-as-a-controller)).
+  - They never reach the console's shared keyboard and mouse, which belong to no profile: the console would ask "Who's
+    using this mouse?" and let anyone pick.
+- **Watching only:** with none ticked, Devices marks the device **Spectator**. It streams but doesn't play: the console
+  shows "<device> joined as a spectator", and its controllers, keyboard and mouse don't join. Give it a profile while it
+  streams and the console tells it at once; its next press joins as it, without reconnecting.
+- **Can choose freely** (marked Risky): as before, the console asks and any profile can be picked, yours too. Devices
+  paired before profiles start like this, so nothing changes until you choose. Overview warns about them; **Don't show
+  again** stops it for those devices, and Devices still marks them Risky. Tap a device's badge in **Devices** for why it
+  is risky and **I trust this device**: it then shows **Trusted**, the notice leaves it out, and its badge has **Stop
+  trusting**.
+
+**Switching profile:** a player on a device with more than one profile switches to its next free one with
+**Ctrl+Backspace** on a keyboard, or by holding **L1+L2+R1+R2** for two seconds on a controller. The console shows "<old>
+passed the controller to <new>", and that controller starts there next time. Once it has gone round all of them, or after
+a refused switch, it waits 20 seconds before it can switch again, so nobody fills the screen with notifications.
+
+**Changing a device's profiles while it streams:** the stream goes on. Profiles added are there at once, and the console
+says so: a spectator joins with its next press, a player can switch to them. A controller playing as a profile taken away
+leaves it, and the console says so: it only watches until a button joins it as another of the device's profiles, if one
+is free.
+
+**Signing in and out:** the console takes four signed-in users at most. With four, a controller whose profile can't be
+signed in watches, and the console says why; a press tries again. The host signs out the profiles it signed in 45 seconds
+after their last controller left, so a Moonlight client that reconnects finds the profile, and the game it was in, as they
+were, and when it stops. It leaves signed in the profile in front on the console, one that a controller which got it from
+the console's question plays as, and any while the console doesn't answer.
+
+**Guests:** the host can't add a Quick Play guest yet; the web page shows it greyed out. Until it can, create guest
+profiles on the console, up to four ("Guest 1" to "Guest 4"), as the console takes four controllers at once, and give
+them to the devices you lend. A device with all four can play with four controllers and reaches no one else's profile.
+Unlike Quick Play, these profiles keep their saves, shared by everyone who plays on them; a friend who wants to keep their
+own gets a profile of their own.
+
+**Set a sign-in passcode on your own profile.** The console's own user switching stays outside the host: a device that
+has PS and Create (the host's, see [Streaming](#streaming)) can still reach it.
+
+## Hiding apps
+
+Some apps can change the console: a store installs, updates or removes games. The [web page](#web-page)'s **Apps** lists
+the installed titles; **Hide** keeps one from devices you don't trust. Such a device doesn't see it in Moonlight, and the
+host refuses to start or resume it, also when the device asks by an app ID it remembers from an older list (Moonlight
+"Launch app failed: This app is hidden on this device"). **PS5 Screen** is never hidden. While a trusted device streams a
+hidden app, the others can't join it.
+
+This only keeps the app out of Moonlight. A device streaming PS5 Screen with a controller can still open the app from the
+console's home screen, like anyone holding a controller in the room; a spectator (see [Profiles per
+device](#profiles-per-device)) can't.
+
+Trusted with every app is a device you trusted in **Devices** (**I trust this device**) that still plays as any profile.
+Limit its profiles or make it a spectator, and it counts as not trusted for apps too, while its mark stays. Nothing is
+hidden until you hide something. The list lives in `/data/prosperosunshine/hidden_apps.txt`, one title ID a line; the
+control socket has `APPS` and `SETAPPS <title id> <hidden|shown>`.
 
 ## Keyboard and mouse as a controller
 
@@ -327,7 +403,8 @@ address.
   game open and no stream running. With a game open and a stream running, the console and the game came back in one test, but the
   host stayed unreachable until it was restarted. In an earlier test without this, the console hung after waking and had to be
   switched off at the power button; the cause is unknown. To be safe, turn the console off instead.
-- Adaptive triggers work with Moonlight on a PC and a DualSense; other clients ignore them. Only Teardown has been tested. If a stream
+- Adaptive triggers work with Moonlight on a PC and a DualSense; the other official clients ignore them. A user reports them
+  working with R3VALATiON's Artemis fork on Android and a DualSense over Bluetooth. Only Teardown has been tested. If a stream
   ends during an effect, the trigger stays stiff until you connect again, because Moonlight doesn't reset it.
 - Moonlight can't wake the console. It wakes a host with a Wake-on-LAN packet, and the PS5 ignores those: it only wakes for
   Remote Play's own wake message. The host can't help either, because the console stops it in rest mode. To wake the console

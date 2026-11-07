@@ -47,6 +47,7 @@ extern "C" {
 #include <ps5/klog.h>
 #include "platform/ps5/diag.h"
 #include "platform/ps5/ra_nids.h"
+int sceKernelSetProcessName(const char *name);
 }
 
 using namespace std::literals;
@@ -186,6 +187,9 @@ void note_installed_titles(const std::filesystem::path &file) {
 }
 
 int main(int argc, char *argv[]) {
+    // The ELF loader names every payload "payload.elf"; this is what the Payload Manager's process list shows (issue
+    // 32). The kernel keeps at most 19 characters, so not "prospero_sunshine.elf".
+    const int name_rc = sceKernelSetProcessName("ProsperoSunshine");
     const auto klog = add_klog_sink();
     std::error_code ec;
     std::filesystem::create_directories(platf::appdata(), ec);
@@ -198,6 +202,7 @@ int main(int argc, char *argv[]) {
     ps_diag_open((platf::appdata() / "host_diag.log").c_str(), header);
     ps_diag_log("ProsperoSunshine: host appdata=%s mkdir_ec=%d config=%s\n", platf::appdata().c_str(), ec.value(),
                 config::sunshine.config_file.c_str());
+    if (name_rc != 0) ps_diag_log("ProsperoSunshine: host process name not set rc=%#x\n", name_rc);
     if (kDebugBuild) {
         // Debug unless sunshine.conf sets min_log_level (verbose is too much for a long session).
         config::sunshine.min_log_level = 1;

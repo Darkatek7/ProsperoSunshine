@@ -42,7 +42,11 @@ beim Suchen: `ENABLE_HAPTICS_MAGIC` (`InputStream.c:663-683`) schaltet nur die R
   durch (`session.cpp:267`); mit Flags 0 passiert am Controller vermutlich nichts, der Host muss sie also setzen.
 - Nicht geprüft: Moonlight Web, Forks, Verhalten über Bluetooth, ob der Client die Effekte am Stream-Ende löst.
 
-Nutzen daher: **nur Moonlight PC mit angeschlossenem DualSense.** Am iPhone ändert sich nichts.
+Nutzen daher: **unter den offiziellen Clients nur Moonlight PC mit angeschlossenem DualSense.** Am iPhone ändert sich nichts.
+
+Nachtrag (2026-11-07, Bericht in Issue 30, hier nicht gemessen): Der Besitzer einer PS5 mit 9.60 spürte Trigger-Effekte in
+Uncharted mit einem DualSense per Bluetooth an einem Android-17-Telefon, Client ist der Artemis-Fork von R3VALATiON (Branch
+`feature/native-dualsense-adaptive`).
 
 ## 3. Konsole
 
@@ -157,8 +161,10 @@ Die Messung ändert nichts am Spielzustand und braucht keinen Ruhemodus.
 **Für Moonlight nicht machbar.** Auf der Konsole gibt es den Weg: `sceAvcap2OpenHaptic`/`ReadHaptic`
 (`docs/re/avcap2-exports.md:75,84`), in `SceRemotePlay` die Zeichenketten `AvCap audioThread haptic ...`, und `chiaki-ng` empfängt
 einen eigenen Haptik-Audiostrom (`streamconnection.c:192,1239`). Aber das Protokoll hat keinen Kanal dafür, also bräuchte es eine
-eigene Erweiterung in Host und jedem Client. Die Hüllkurve auf Rumble abzubilden wäre denkbar, ist aber weder versucht noch ist das
-Format von `ReadHaptic` gelesen. Das bleibt außerhalb von P9.10.
+eigene Erweiterung in Host und jedem Client. Die Hüllkurve auf Rumble abzubilden geht laut einem Bericht von 9.60 (Issue 30):
+Uncharted lässt die klassischen Motoren auf null, die abgebildete Hüllkurve ergibt grob passendes Rumble. Format und Aufruf von
+`ReadHaptic` dort: `docs/re/avcap2-exports.md`, Abschnitt „Haptik auf 9.60“. Auf 13.00 nicht nachgemessen; das bleibt außerhalb
+von P9.10.
 
 ## Urteil
 

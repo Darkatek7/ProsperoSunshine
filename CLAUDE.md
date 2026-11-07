@@ -8,7 +8,7 @@ verified state with evidence: `STATUS.md` (both German).
 - `src/sunshine/` – PS5 replacements for Sunshine parts (video, audio, input, process, main).
 - `src/platform/ps5/` – Avcap2 capture (`capture.c`), `SharedCapture`, backend glue.
 - `src/capture/`, `src/video/` – portable logic with unit tests in `tests/`.
-- `src/web/` – the web page (HTTPS on base port + 1, off without a login): `web_auth.hpp`, `web_lines.hpp` portable with
+- `src/web/` – the web page (HTTPS on base port + 1, off without a login): `web_auth.hpp`, `web_lines.hpp`, `web_plain.hpp` (plain HTTP gets a redirect) portable with
   tests in `tests/`; `web_login.cpp`, `web_server.cpp` host-only; `page/` HTML/JS/CSS embedded into the ELF by `CMakeLists.txt`.
 - `patches/<dep>/` – patches applied on top of pinned sources; `deps.lock` pins every source by SHA256.
 - `app/` – the PS5 settings app `PPSA47989` (ps5-homebrew-ui, ShadowMountPlus title folder).
@@ -95,7 +95,7 @@ Toolchain: PS5 Payload SDK v0.45 in the Docker image `prosperosunshine-sdk:v0.45
 
 - The host is an ELF payload (ELF loader on port 9021); state lives in `/data/prosperosunshine/`.
   Control socket on TCP 47995, 127.0.0.1 only (the empty file `control_lan` there opens it to the LAN):
-  `STATUS`, `PAIRINGS`, `PIN [<id>] <pin> [name]`, `DEVICES`, `STREAMS`, `ENDSTREAM <uuid>`, `RENAME <uuid> <name>`, `UNPAIR <uuid>`, `REPORT`, `AUTOLOAD [ON|OFF]`, `RELISTEN`, `PROBE`, `CANCELPIN <id>`, `WEBLOGIN [SET <user> <password>|ON|OFF|FORGET]`, `QUIT` (one client at a time). `STREAMS` lists the running streams, one `OK uuid=... address=... codec=... hdr=... mode=... kbps=... secs=... pads=... role=... channel=... name=...` line each, then `END` (format in `src/control/stream_list.hpp`); `ENDSTREAM` ends one device's stream while the game and the others go on. `REPORT` makes the
+  `STATUS`, `PAIRINGS`, `PIN [<id>] <pin> [name]`, `DEVICES`, `STREAMS`, `ENDSTREAM <uuid>`, `RENAME <uuid> <name>`, `UNPAIR <uuid>`, `USERS`, `PROFILES`, `SETPROFILES <uuid> <profiles|unset>`, `APPS`, `SETAPPS <title id> <hidden|shown>`, `REPORT`, `AUTOLOAD [ON|OFF]`, `RELISTEN`, `PROBE`, `FILE`, `INSTALL`, `CANCELPIN <id>`, `WEBLOGIN [SET <user> <password>|ON|OFF|FORGET]`, `QUIT` (one client at a time). `STREAMS` lists the running streams, one `OK uuid=... address=... codec=... hdr=... mode=... kbps=... secs=... pads=... role=... channel=... name=...` line each, then `END` (format in `src/control/stream_list.hpp`); `ENDSTREAM` ends one device's stream while the game and the others go on. `USERS` lists the console's profiles (`OK <id> <name>` lines, then `END`), `PROFILES` the profiles each paired device plays as (`OK <uuid> <free|none|ids[,guest]>`), and `SETPROFILES` sets or unsets one device's (format in `src/control/device_profiles.hpp`); the web page uses them. `REPORT` makes the
   host answer on TCP 47996 for some seconds with `diagnostics.txt` (a title may not listen on the network).
   `RELISTEN` starts the host's services anew as after rest mode took its ports; `out/relisten_probe.elf` sends it.
   `PROBE` sends `/data/prosperosunshine/firmware_probe.elf` to the ELF loader unless a stream runs (`docs/firmware-probe.md`).
@@ -109,9 +109,11 @@ Toolchain: PS5 Payload SDK v0.45 in the Docker image `prosperosunshine-sdk:v0.45
   user selection.
 - Rest mode closes the host's listening sockets and stops its log files; `wait_or_ports_lost` in `main_ps5.cpp` notices
   refused ports and starts the services anew in the same process.
-- Whether a game sends trigger effects: only some do (Teardown yes, GTA III not in the sessions measured), and only Moonlight
-  for PC passes them to a DualSense. See `docs/re/adaptive-triggers.md`.
+- Whether a game sends trigger effects: only some do (Teardown yes, GTA III not in the sessions measured), and among the official clients only
+  Moonlight for PC passes them to a DualSense (a contributor reports R3VALATiON's Artemis fork on Android too, issue 30). See `docs/re/adaptive-triggers.md`.
 - Autoload through the Payload Manager: `/data/pldmgr/autoload.txt`, slot `local/prospero-sunshine`.
+- A title may have no `/data` (9.60): then the app reaches the files listed in `src/control/file_bridge.cpp` through `FILE` and `INSTALL` on
+  the control socket, while the host runs, and the host closes it through `/app0/app.quit`.
 - The app is installed at `/data/homebrew/PPSA47989`. A ShadowMountPlus scan does **not** pick up changes to
   `sce_sys` (param.json, icon, background) of an already registered title. Re-register it:
   `POST http://<console>:10101/api/v1/games/uninstall {"title_id":"PPSA47989"}` (keeps the source folder),

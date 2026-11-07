@@ -527,6 +527,29 @@ nachgemessen; die Angaben stammen aus den beiden `report.txt`.
   sie nicht: 360p 23, 540p und 1080p 34, 720p, 1440p und 2160p 45. HEVC: 6, 9, 12, 17, 23, 34. Über 32 Slices lehnen die
   Hardware-Decoder von FFmpeg unter Windows ab.
 
+### Firmware-Sonde auf 9.60 (2026-11-06, PS5, nicht Pro, Bericht von IlushaKAI in Issue 30)
+
+Hier nicht nachgemessen, es gibt keine Konsole mit 9.60. Die Angaben stammen aus dem Fork des Mitwirkenden (Branch
+`firmware-9.60`, `STATUS.md` dort), `firmware_probe.elf` aus 0.3.4, ein Lauf ohne Optionen, 137 s.
+
+- **Datensatz:** Von −`0x40` bis +`0x20` öffnet nur `0x2c0` (−`0x20`), ohne innere Köpfe. `0x2c8` (10.x), `0x2d0`, `0x2e0` (13.00)
+  und `0x2e8` (13.60) lehnt der Validator mit `0x81950001` ab. Er schützt `0x80`, `0x168`, `0x1d8` und `0x2a8`.
+- **Bilder:** H.264 und HEVC 8/10 Bit (nur `cfg+0x24`) von 360p bis 1440p. 2160p scheitert an `OpenVideo` mit `0x81950008`
+  (`video out mode` `0x34`, ohne das 4K-Bit). Slices wie auf 10.x: H.264 1080p 34, HEVC 17.
+- **QP:** `cfg+0xc4`/`+0xc8` ändern hier nichts. Die Phase `ratesearch` fand ihn in `cfg+0xac`/`+0xb0`, 0x18 tiefer als auf 10.x.
+  Startbildschirm, 1 s, IDR alle 6 Bilder: ohne 4692 kbit/s, 24/28 6275, 18/22 11016, 12/16 19315, 8/12 28197.
+  `SetVideoBitrate` mit 1 bis 12 Mbit/s antwortet 0 und ändert nichts, 16 und 20 Mbit/s beenden den Kanal (`0x80c78000`).
+- **Systembibliotheken:** `libSceAvcap2` hat 5 Exporte weniger als 13.00. ResourceArbitrator per NID an den Offsets von 10.20.
+- **Streams:** Mit dem Datensatz `0x2c0` auf 0.3.4 H.264 1080p60 mit Ton und Controller aus Moonlight für Android. Auf 0.4.0 mit
+  denselben Änderungen 2 Minuten HEVC HDR in einem Spiel. 1440p im Spiel fiel auf 1080p zurück. Die Webseite lief dort nicht.
+- **Die App sieht `/data` auf dieser Konsole nicht** (Sandbox eines Titels). Ohne die Brücke über den Host im Fork kann die App
+  dort keine Einstellungen speichern.
+- **Drei ungeklärte Abschaltungen** der Konsole während der Tests, die Logs enden davor. Die Konsole schaltet sich laut
+  Mitwirkendem auch sonst gelegentlich ab.
+- **Übernommen** (2026-11-07): der Datensatz `0x2c0`, der QP-Offset (`ps_qp_offset`) und die Probe-Phasen `ratesearch` und
+  `qp`. 9.60 bleibt ungeprüft (`known=0`, Experimental-Schalter wie auf anderen ungeprüften Versionen). Alles unter 10 bekommt
+  diesen Datensatz, für 8.40 (Issue 23) ist das geraten. Für 13.00 und 10.20 bleiben die Datensätze byte-gleich (`tests/capture_records.golden`).
+
 ### Profil je Spiel und eigene Liste (2026-11-04, 10.20, PS5 Pro)
 
 Gemessen wie oben (Moonlight für Linux, Hostlog), Host aus `keyboard-mouse-pad` mit Patch 0016 und 0017,
@@ -624,6 +647,74 @@ alle H.264 1080p60 auf „PS5 Screen“ mit `--no-script`; B, C und A beim zweit
 Nicht geprüft: echtes Moonlight, ein echter DualSense an der Konsole, und ob der Dialog „Wer benutzt diesen Controller?“
 einem Gast den Nutzer des Hosts anbietet.
 
+### Apps verstecken, Issue 36 (2026-11-07, 13.00)
+
+Testhost auf `da426c3` mit den Änderungen für Issue 36 (Patch 0023), zwei gekoppelte Testclients, beide mit freier
+Profilwahl, einer in `web_trusted.txt` eingetragen. Abfragen direkt mit dem Zertifikat des jeweiligen Clients:
+- `SETAPPS PPSA99000 hidden` (ProsperoStore): `APPS` zeigt es `hidden`. Ohne vertrautes Gerät fehlte es in `/applist` bei
+  beiden (36 statt 37 Einträge); mit einem vertrauten Gerät sah nur dieses es wieder.
+- `/launch` mit der ID des Stores vom nicht vertrauten Client: HTTP-Status 403 „This app is hidden on this device“, nichts
+  gestartet, Server blieb `SUNSHINE_SERVER_FREE`.
+- Der vertraute Client startete den Store und streamte 40 s (H.264 1080p60, 2391 Bilder, fehlerfrei dekodiert). Währenddessen
+  bekam der andere auf `/resume` 403 und auf `/launch` von PS5 Screen 400 („An app is already running“). Mit dem Ende
+  schloss `/cancel` den Store wieder.
+- `sunshine.log` nennt die Ablehnungen ohne Titel.
+- Webseite: `/api/apps` listet 36 Titel; `/api/apps/hidden` versteckt den Store (danach fehlt er in `/applist` des nicht
+  vertrauten Clients) und zeigt ihn wieder; eine ungültige Titel-ID und `"hidden":"yes"` gaben 400. Die Ansicht Apps vom
+  Besitzer im Browser angesehen.
+- Nicht geprüft: echtes Moonlight.
+
+### Profile pro Gerät, PR 33 (2026-11-07, 13.00)
+
+Testhost `1e8eab9d` (PR 33 auf `4a03c0b`), zwei Konsolenprofile (Besitzer und ein Testprofil), Testclient mit eigener
+Kopplung (`stream_test`, ein Pad vom Typ PS ohne Touchpad, `--no-script` mit zwei Steuerkreuz-Ticks, teils Tasten):
+- Beim ersten Start behielten die 12 gekoppelten Geräte die freie Wahl (`free`); `USERS`, `PROFILES`, `SETPROFILES` antworten.
+- Gerät auf das Testprofil beschränkt, das an der Konsole angemeldet war: Pad nicht hinzugefügt („signed in on the console by
+  someone else“). Ebenso mit dem Profil des Besitzers, das vorne angemeldet ist.
+- Gerät auf `none`: Hinweis als Zuschauer beim Streamstart, kein Pad, keine Tastatur.
+- Freies Gerät: Pad wie bisher als Controller des Hosts, sauber entfernt.
+- Testprofil vorher an der Konsole abgemeldet: Der Host meldete es an, das Pad war nach 2 ms im Profil, ohne die Frage der
+  Konsole; die Tastatur des Geräts bekam ein eigenes Gerät im Profil (`0x3000000170100`).
+- Neu verbunden 10 s nach dem Ende: gleiches Profil ohne neue Anmeldung. 45 s nach dem letzten Pad abgemeldet (`rc 0`),
+  keine Fehler beim Zurücksetzen der Rechte. Alle Streams fehlerfrei dekodiert.
+- Nicht geprüft: Profilwechsel (nur ein Profil frei) und ein echter Controller, der über die Benutzerauswahl der Konsole
+  dazukommt (vom Autor als offene Grenze genannt).
+
+### Release 0.4.2 auf der Konsole (2026-11-07, 13.00)
+
+App nach `/data/homebrew/PPSA47989` kopiert, Host-ELF nach `/data/prosperosunshine/` und mit `host_restart.elf` neu gestartet
+(vorne lief ein Spiel, daher nicht über die App): Kernel-Log `version=0.4.2 commit=d440adfe`, Steuerport nur lokal. Das
+Neuregistrieren lehnte ShadowMountPlus ab, solange das Spiel läuft (`game_active`), die App zeigt ihre neue Version also erst
+nach dem nächsten Neuregistrieren. Testclient, Spiel vorne: H.264 und HEVC 1080p je 30 s mit je 1794 Bildern bei 59,94 bzw.
+59,93 fps, fehlerfrei dekodiert, ohne Tonfehler. Der Fix für „PS5 Screen“ nach einem Stream (Moonlight hing bei
+„Quitting PS5 Screen...“, im Host-Log kam kein `/cancel` an) vorher als Testhost mit Moonlight am PC vom Besitzer geprüft.
+
+### Touchpad ohne Touchpad und „Restart host“ im Stream (2026-11-07, 13.00)
+
+Moonlight für Windows meldet einen Xbox-Controller mit `type 01`, `capabilities 0043` und `supportedButtonFlags 0000F7FF`
+(Debug-Log der Ankunft): kein Touchpad, keine Share-Taste (`0x200000`), auch wenn sie gedrückt wird. View und Menu zusammen
+sind seit `8e1467b` der Touchpad-Klick für solche Controller; vom Besitzer mit diesem Xbox-Controller in einem Spiel
+bestätigt, View allein, Menu allein und die Xbox-Taste wie zuvor.
+
+„Restart host“ während eines Streams (Bericht aus Issue 30: auf 9.60 ging die Konsole dabei aus, mit dem Haptik-Kanal des
+Forks offen) wie die App nachgestellt: Testclient streamt, vorne ein Spiel, `QUIT` an den Steuerport, dann das 0.4.1-ELF an
+den Loader. Der Host beendet sich in unter 2 s sauber (Aufnahme und Ton gestoppt und geschlossen, Pad abgemeldet,
+`exit_value=0`), die Konsole bleibt an, der neue Host kommt normal hoch. Der Client hatte bis dahin 1018 Bilder fehlerfrei
+dekodiert; ein neuer Stream danach 20 s mit 1196 Bildern, fehlerfrei dekodiert, ohne Tonfehler. Auf 13.00 ohne Haptik-Kanal
+also nicht nachstellbar; mit Moonlight am PC statt Testclient und auf 9.60 ungeprüft.
+
+### Release 0.4.1 auf der Konsole (2026-11-07, 13.00)
+
+App aus `build/app` kopiert und neu registriert, sie zeigt `v01.000.022`; nach „Restart host“ meldet das Kernel-Log
+`version=0.4.1 commit=cd0d808b`, und der Prozess heißt dort und in der Prozessliste `ProsperoSunshine` statt `payload.elf`
+(Issue #32). Testclient, Home-Bildschirm: H.264 und HEVC 1080p je 30 s mit 1793 und 1792 Bildern bei 59,94 fps, fehlerfrei
+dekodiert, ohne Tonfehler. `http://` auf Port 47990 bekommt 302 auf `https://` (Issue #31; vorher leere Antwort, curl
+Fehler 52), ohne Host-Kopfzeile 400. Vor dem Release mit `control_lan` gemessen: Ein POST mit `STATUS` als Inhalt an den
+Steuerport führte auf 0.4.0 `STATUS` aus, nach der Änderung schließt der Host die Verbindung ohne Antwort, `STATUS` und
+`DEVICES` ohne HTTP antworten wie zuvor. Der Datensatz für 9.60 ändert an 13.00 nichts (Golden-Datei, Stream wie oben); auf
+9.60 selbst ist er hier nicht prüfbar, ebenso der Dateizugriff der App über den Host, den nur eine Konsole ohne `/data` in
+der Sandbox eines Titels nutzt.
+
 ### Debug-Build (Issue 28, 2026-11-06, 10.20, PS5 Pro, Testclient, Home-Bildschirm, nicht veröffentlicht)
 
 Host `commit=47dc059f` in beiden Varianten, nacheinander per ELF-Loader gestartet; der installierte Host blieb unverändert.
@@ -640,7 +731,7 @@ Für die Messung war `min_log_level` aus `sunshine.conf` entfernt, damit jede Va
   Clients als `<ip>`) und keine 32-stellige Hex-Folge. `Stream stats:` alle 5 s, einmal `Held back 2 similar lines …`. Das
   Kernel-Log blieb bei Info.
 - **Rauschen:** RTSPs Zeile „No pending session for incoming RTSP connection“ kam auf Debug alle 5 s, ausgelöst von der
-  Portüberwachung des Hosts. Patch 0022 stuft sie auf Verbose herab; danach kam sie nicht mehr.
+  Portüberwachung des Hosts. Patch 0024 stuft sie auf Verbose herab; danach kam sie nicht mehr.
 - **Normal:** `version=0.4.0`, Zeitstempel, keine `->`- und keine `selfcheck`-Zeilen, `sunshine.log` auf Info.
 - **Testclient** (Windows-Build, `--no-script`), H.264 und HEVC 1080p60 je 30 s:
 

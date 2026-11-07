@@ -1,10 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "control/control_server.hpp"
 #include "control/autoload_host.hpp"
+#include "apps/app_access.hpp"
+#include "apps/titles.hpp"
+#include "control/file_bridge.hpp"
 #include "control/stream_list.hpp"
+#include "control/http_guard.hpp"
+#include "control/uuid_lines.hpp"
 #include "host_control.hpp"
+#include "sunshine/platform_ps5.hpp"
 #include "sunshine/video_ps5.hpp"
 #include "web/web_login.hpp"
+#include "platform/ps5/console_users.h"
 #include "src/logging.h"
 #include "src/platform/common.h"
 #include "src/nvhttp.h"
@@ -59,7 +66,8 @@ long long seconds_since(std::chrono::steady_clock::time_point start, std::chrono
 }
 
 ControlServer::ControlServer(std::shared_ptr<safe::event_t<bool>> shutdown)
-    : shutdown_(std::move(shutdown)), modes_(platf::appdata() / "device_modes.txt") {
+    : shutdown_(std::move(shutdown)), modes_(platf::appdata() / "device_modes.txt"),
+      profiles_(platf::appdata() / "device_profiles.txt") {
     nvhttp::set_launch_listener([this](const nvhttp::launch_client_t &client) {
         modes_.remember(client.uuid, format_mode(client.width, client.height, client.fps));
     });
@@ -74,11 +82,35 @@ std::string ControlServer::handle(const std::string &line, Caller caller) {
     return handle_locked(line, caller);
 }
 
+// Once, on the first version with profiles: every device already paired keeps playing as it did, with the console asking
+// who uses each controller and any profile allowed, now written down as "free" (the web page marks it risky). The marker
+// file keeps it from running again, so a device paired later starts unset. Run on the first command that shows devices,
+// when Sunshine has read its pairings.
+void ControlServer::migrate_profiles() {
+    if (profiles_migrated_) return;
+    profiles_migrated_ = true;
+    const auto marker = platf::appdata() / "device_profiles.migrated";
+    std::error_code ec;
+    if (std::filesystem::exists(marker, ec)) return;
+    ProfileSet any;
+    any.free = true;
+    int kept = 0;
+    for (const auto &client : nvhttp::get_all_clients()) {
+        const std::string uuid = client.value("uuid", "");
+        if (uuid.empty() || profiles_.get(uuid)) continue;
+        profiles_.set(uuid, any);
+        ++kept;
+    }
+    std::ofstream(marker) << "device profiles introduced; devices paired before kept a free choice\n";
+    BOOST_LOG(info) << "Control: profiles introduced, "sv << kept << " device(s) paired before keep their free choice of profile"sv;
+}
+
 std::string ControlServer::handle_locked(const std::string &line, Caller caller) {
     auto &baseline = sent_[caller == Caller::web ? 1 : 0];
     std::istringstream in(line);
     std::string command;
     in >> command;
+    if (command == "DEVICES" || command == "PROFILES" || command == "SETPROFILES") migrate_profiles();
     if (command == "STATUS") {
         const auto pending = nvhttp::get_pending_pairings().size();
         std::string answer = "OK running="s + (proc::proc.running() > 0 ? "1" : "0") +
@@ -208,8 +240,102 @@ std::string ControlServer::handle_locked(const std::string &line, Caller caller)
         // Removing the pairing only stops new connections; a running stream of this device ends here.
         rtsp_stream::terminate_sessions_by_cert(cert);
         modes_.forget(uuid);
+        profiles_.forget(uuid);
+        // The web page names devices by uuid in its lists too.
+        prospero::change_uuid_lines(platf::appdata() / "web_trusted.txt", {uuid}, false);
+        prospero::change_uuid_lines(platf::appdata() / "web_risk_ack.txt", {uuid}, false);
+        DeviceSeats(platf::appdata() / "device_seats.txt").forget(uuid);
         BOOST_LOG(info) << "Control: a paired device was removed"sv;
         return "OK removed";
+    }
+    if (command == "USERS") {
+        ps_console_user users[max_profiles];
+        const int count = ps_console_users(users, static_cast<int>(max_profiles));
+        if (count < 0) return "ERR the console's profiles can't be read (" + std::to_string(-count) + ")";
+        std::string out;
+        for (int i = 0; i < count; ++i) out += "OK " + format_user_id(users[i].id) + ' ' + one_line(users[i].name) + '\n';
+        return out + "END";
+    }
+    if (command == "PROFILES") {
+        std::string out;
+        for (const auto &[uuid, set] : profiles_.all()) out += "OK " + uuid + ' ' + format_profiles(set) + '\n';
+        return out + "END";
+    }
+    if (command == "SETPROFILES") {
+        std::string uuid, text, extra;
+        in >> uuid >> text;
+        if (uuid.empty() || text.empty() || (in >> extra)) return "ERR usage: SETPROFILES <uuid> <profiles|unset>";
+        if (nvhttp::get_cert_by_uuid(uuid).empty()) return "ERR no such device";
+        if (text == "unset") {
+            if (!profiles_.set(uuid, std::nullopt)) return "ERR the profiles could not be saved";
+            BOOST_LOG(info) << "Control: a paired device's profiles were unset"sv;
+            return "OK saved";
+        }
+        const auto set = parse_profiles(text);
+        if (!set) return "ERR the profiles are not valid";
+        if (!set->users.empty()) {
+            ps_console_user users[max_profiles];
+            const int count = ps_console_users(users, static_cast<int>(max_profiles));
+            if (count < 0) return "ERR the console's profiles can't be read";
+            for (const uint32_t id : set->users) {
+                if (std::none_of(users, users + count, [id](const ps_console_user &u) { return u.id == id; }))
+                    return "ERR no profile " + format_user_id(id) + " on this console";
+            }
+        }
+        const auto before = profiles_.get(uuid);
+        if (!profiles_.set(uuid, set)) return "ERR the profiles could not be saved";
+        // A controller of the device sitting in a profile taken away leaves it and watches until a press joins it as one
+        // the device still has; the stream goes on. Profiles added apply at the next press or switch.
+        if (!before || !(*before == *set)) {
+            // What it got beside what it had; coming from a free choice (or none set), a list takes away, adds nothing.
+            // Only a device with a running session hears of them: one whose stream ended is told nothing.
+            const std::string cert = nvhttp::get_cert_by_uuid(uuid);
+            const auto sessions = rtsp_stream::session_infos();
+            const bool streams = std::any_of(sessions.begin(), sessions.end(), [&](const auto &s) { return s.client_cert == cert; });
+            std::vector<uint32_t> added;
+            if (streams && before && !before->free)
+                for (const uint32_t id : set->users)
+                    if (std::find(before->users.begin(), before->users.end(), id) == before->users.end()) added.push_back(id);
+            platf::profiles_changed(cert, added);
+        }
+        // No ids or names in the log: it goes into the report people post.
+        BOOST_LOG(info) << "Control: a paired device's profiles were set ("sv
+                        << (set->free ? "free choice"s
+                            : set->none() ? "none"s
+                            : set->users.empty() ? "guest only"s
+                                                 : std::to_string(set->users.size()) + " profile(s)" + (set->guest ? " and guest" : ""))
+                        << ')';
+        return "OK saved";
+    }
+    // Apps the operator hides from devices they don't trust (app_access.hpp, issue 36): every installed title, then the
+    // hidden IDs of titles no longer installed, so that they can be shown again.
+    if (command == "APPS") {
+        std::vector<std::string> hidden;
+        {
+            std::scoped_lock lock(uuid_lines_mutex());
+            hidden = read_uuid_lines(platf::appdata() / "hidden_apps.txt");
+        }
+        const auto is_hidden = [&hidden](const std::string &id) { return std::find(hidden.begin(), hidden.end(), id) != hidden.end(); };
+        std::string out;
+        std::vector<std::string> listed;
+        for (const auto &title : list_titles("/user")) {
+            if (!title_id_valid(title.id)) continue;
+            out += "OK " + title.id + (is_hidden(title.id) ? " hidden " : " shown ") + one_line(title.name) + '\n';
+            listed.push_back(title.id);
+        }
+        for (const auto &id : hidden)
+            if (std::find(listed.begin(), listed.end(), id) == listed.end()) out += "OK " + id + " hidden\n";
+        return out + "END";
+    }
+    if (command == "SETAPPS") {
+        std::string id, state, extra;
+        in >> id >> state;
+        if (!title_id_valid(id) || (state != "hidden" && state != "shown") || (in >> extra))
+            return "ERR usage: SETAPPS <title id> <hidden|shown>";
+        if (!change_uuid_lines(platf::appdata() / "hidden_apps.txt", {id}, state == "hidden")) return "ERR the list could not be saved";
+        // No title in the log: it goes into the report people post.
+        BOOST_LOG(info) << "Control: an app was "sv << (state == "hidden" ? "hidden from"sv : "shown again to"sv) << " devices that aren't trusted"sv;
+        return "OK saved";
     }
     if (command == "REPORT") {
         if (!report_listening_) return "ERR report port not open";
@@ -224,6 +350,13 @@ std::string ControlServer::handle_locked(const std::string &line, Caller caller)
         if (action != "ON" && action != "OFF") return "ERR usage: AUTOLOAD [ON|OFF]";
         BOOST_LOG(info) << "Control: autoload "sv << action;
         return autoload_host::set(action == "ON");
+    }
+    if (command == "FILE" || command == "INSTALL") {
+        // For the app on the console only: not for the web page, and not over the LAN switch.
+        if (!file_bridge::allowed(caller == Caller::web, client_local_)) return "ERR local clients only";
+        std::string rest;
+        std::getline(in >> std::ws, rest);
+        return command == "FILE" ? file_bridge::file(rest) : file_bridge::install(rest == "CHECK");
     }
     if (command == "RELISTEN") {
         ps_diag_trace("RELISTEN from the control socket: the services start anew\n");
@@ -346,13 +479,18 @@ void ControlServer::run(std::stop_token stop) {
     while (!stop.stop_requested()) {
         pollfd pfd{listener, POLLIN, 0};
         if (poll(&pfd, 1, 250) <= 0) continue;
-        const int client = accept(listener, nullptr, nullptr);
+        sockaddr_in peer{};
+        socklen_t peer_size = sizeof peer;
+        const int client = accept(listener, reinterpret_cast<sockaddr *>(&peer), &peer_size);
         if (client < 0) {
             std::this_thread::sleep_for(100ms);
             continue;
         }
+        client_local_ = peer.sin_addr.s_addr == htonl(INADDR_LOOPBACK);
+        setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one);
         std::string buffer;
-        char chunk[256];
+        char chunk[16384];
+        bool refused = false;
         // One client at a time; requests are short and rare.
         while (!stop.stop_requested()) {
             pollfd cfd{client, POLLIN, 0};
@@ -364,10 +502,20 @@ void ControlServer::run(std::stop_token stop) {
                 std::string line = buffer.substr(0, nl);
                 buffer.erase(0, nl + 1);
                 if (!line.empty() && line.back() == '\r') line.pop_back();
+                if (control::http_request_line(line)) {
+                    // A browser: its POST body would run as commands (http_guard.hpp). Nothing is answered.
+                    BOOST_LOG(warning) << "Control socket: an HTTP request was refused, the connection closed"sv;
+                    refused = true;
+                    break;
+                }
                 const std::string answer = handle(line) + '\n';
-                send(client, answer.data(), answer.size(), 0);
+                for (size_t sent = 0; sent < answer.size();) {
+                    const ssize_t count = send(client, answer.data() + sent, answer.size() - sent, 0);
+                    if (count <= 0) break;
+                    sent += static_cast<size_t>(count);
+                }
             }
-            if (buffer.size() > 4096) break;
+            if (refused || buffer.size() > largest_request) break;
         }
         close(client);
     }

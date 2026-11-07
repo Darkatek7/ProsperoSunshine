@@ -4,6 +4,15 @@
 
 ### Added
 
+- **Console profiles per paired device:** the web page sets which console profiles each paired device plays as: only
+  those (the console doesn't ask "Who's using this controller?"), none (it only watches), or, as before, any (marked
+  Risky, with a notice and trusted devices). The host signs profiles in and out as needed, a player switches with
+  Ctrl+Backspace or by holding L1+L2+R1+R2, and a device with its own profiles gets its own keyboard and mouse, in its
+  profile. The control socket gets `USERS`, `PROFILES` and `SETPROFILES`. See "Profiles per device" in the README.
+- **Hide apps from devices you don't trust** (issue 36): the web page's new **Apps** hides a title, a store for example,
+  from every device that isn't trusted. It doesn't see it in Moonlight, and the host refuses to start or resume it, also
+  by an app ID the client remembers. Trusted devices, and PS5 Screen, are untouched. The control socket gets `APPS` and
+  `SETAPPS`. See "Hiding apps" in the README.
 - **A debug build in every release** (issue #28): `PPSA47989-debug.zip` and `prosperosunshine-<version>-debug.tar.gz`, built
   by CI from the same commit as the normal build. Install it, reproduce a problem once, post the Diagnostics report, and go
   back to the normal zip; it isn't meant for daily use. It logs at `debug` by default (the kernel log stays at `info`), writes
@@ -26,6 +35,43 @@
 - **At debug level, `sunshine.log` no longer holds secrets:** Sunshine logged each request's arguments, among them the
   stream's encryption key and the pairing handshake, and the client's certificate. Their values are now `<hidden>` and
   `<certificate>`.
+
+## 0.4.2 (2026-11-07)
+
+### Added
+
+- **Touchpad on a controller without one:** View and Menu (Select and Start) pressed together are the touchpad click, the
+  map or inventory in most games, on controllers whose client reports no touchpad. Neither Create nor Options goes out
+  for them, nor the PS that holding View makes. An Xbox Series controller's Share button is the touchpad click too, where
+  the client passes it on (Moonlight for Windows doesn't). Before, an Xbox controller had no way to press the touchpad.
+
+### Fixed
+
+- Right after a stream, Moonlight could show "PS5 Screen" as still running and offer to quit it; confirming that left
+  Moonlight on "Quitting PS5 Screen..." for good. The host listed the app as running for the moment the stream's capture
+  took to close (100 to 400 ms), just when Moonlight asks. Now it is no longer listed once the stream ends.
+
+## 0.4.1 (2026-11-07)
+
+### Added
+
+- **Firmware 9.60:** its own capture record (`0x2c0`) and QP fields (`cfg+0xac`/`+0xb0`), measured with the firmware probe
+  on a PS5 with 9.60, and the probe's opt-in phases `ratesearch` and `qp` that found them. Not tested here; 9.60 stays
+  unverified, and firmware below 9 gets the same record as a guess. Records for 10.x and 13.x are unchanged. Thanks to
+  @IlushaKAI (#30).
+- **The app without `/data`:** where a title's sandbox has no `/data` (seen on 9.60), the app reaches its files through the
+  running host (`FILE` and `INSTALL` on the control socket, from the console itself only, a fixed list of files, no
+  credentials, and `sunshine.conf` without keys that point the host at other files). Thanks to @IlushaKAI.
+
+### Fixed
+
+- The control socket closes a connection that starts with an HTTP request line. Before, a web page in the console's
+  browser (or, with `control_lan`, on any PC in the network) could send a POST whose body lines the host ran as
+  commands, such as `WEBLOGIN SET` or `AUTOLOAD`.
+- The web page answers `http://` with a redirect to `https://` on the same address and port. Before, the host closed the
+  connection, and browsers showed an empty response (`ERR_EMPTY_RESPONSE`, #31, thanks to @natkokrasevac).
+- The host's process is called `ProsperoSunshine` instead of `payload.elf`, so the Payload Manager's list of running
+  payloads shows which one it is (#32, thanks to @natkokrasevac).
 
 ## 0.4.0 (2026-11-06)
 

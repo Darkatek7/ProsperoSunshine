@@ -6,9 +6,13 @@
 #include "input/keyboard_map.hpp"
 #include "input/pad_roles.hpp"
 #include "input/pad_touch.hpp"
+#include "input/profile_rules.hpp"
 #include "platform/ps5/kbm.h"
 #include "platform/ps5/pad.h"
+#include "platform/ps5/profile_seat.h"
 #include "platform/ps5/shared_capture.hpp"
+#include "control/device_profiles.hpp"
+#include "src/nvhttp.h"
 #include "src/config.h"
 #include "src/file_handler.h"
 #include "src/logging.h"
@@ -23,10 +27,12 @@
 #include <unistd.h>
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <condition_variable>
 #include <cstring>
 #include <mutex>
+#include <cstdio>
 #include <memory>
 #include <optional>
 #include <string>
@@ -523,32 +529,69 @@ public:
 std::unique_ptr<audio_control_t> audio_control() { return std::make_unique<silent_audio_control>(); }
 
 // Input: one native virtual DualSense per Moonlight gamepad slot, and one keyboard and one mouse shared by all clients.
-struct input_raw_t {
-    std::mutex mutex;
-    std::array<ps_pad *, MAX_GAMEPADS> pads{};
-    // A guest's slot whose pad isn't open yet: it opens on the controller's first use (wakes_pad, GitHub issue 26).
-    std::array<bool, MAX_GAMEPADS> waiting{};
-    std::array<bool, MAX_GAMEPADS> active{};  // last state had something pressed or deflected
-    std::array<bool, MAX_GAMEPADS> back{};    // Select is down
-    std::array<bool, MAX_GAMEPADS> ps_held{}; // a guest's PS or Create press that was held back, logged once per press
-    std::array<std::chrono::steady_clock::time_point, MAX_GAMEPADS> back_since{};
-    std::array<feedback_queue_t, MAX_GAMEPADS> feedback{};
-    std::array<uint8_t, MAX_GAMEPADS> client_index{};
-    std::array<std::array<uint8_t, 2>, MAX_GAMEPADS> motors{};
-    std::array<std::array<uint8_t, 3>, MAX_GAMEPADS> colors{};
-    std::array<prospero::TriggerBlock, MAX_GAMEPADS> triggers{};
-    std::array<prospero::PadTouch, MAX_GAMEPADS> touch{};
-    // Added on a client's first key or mouse event, removed when no session is left (client_session).
+// A keyboard and a mouse on the console, with what they hold. The shared ones serve the devices that can choose any
+// profile, as the console's own. A device with its own profiles gets its own, seated in the profile it plays as
+// (kbm_for_input). Added on first use, removed when their device's last controller leaves or no session is left.
+struct kbm_t {
+    std::string owner;  // the device's certificate; empty for the shared ones
+    uint32_t user = 0;  // the profile they are seated in; 0 for the shared ones
     ps_keyboard *keyboard = nullptr;
     ps_mouse *mouse = nullptr;
+    uint64_t keyboard_bus = 0, mouse_bus = 0;  // the bus ids they were seated by; 0 for the shared ones
     bool keyboard_failed = false, mouse_failed = false;
     prospero::KeyboardState keys;
     uint8_t mouse_buttons = 0;
     prospero::WheelSteps wheel, tilt;
     std::chrono::steady_clock::time_point key_down_at, button_down_at;
     std::optional<std::pair<float, float>> pointer;  // the last absolute position, for abs_mouse
+};
+
+struct input_raw_t {
+    std::mutex mutex;
+    std::array<ps_pad *, MAX_GAMEPADS> pads{};
+    // A guest's slot whose pad isn't open yet: it opens on the controller's first use (wakes_pad, GitHub issue 26).
+    std::array<bool, MAX_GAMEPADS> waiting{};
+    // A waiting pad of a device that may only watch: it has no profile to play as (none, or all taken, or the one it
+    // played as was taken away). It holds no role; a press tries again, at most once a second, and the console says why
+    // it doesn't join at most once every switch_cooldown.
+    std::array<bool, MAX_GAMEPADS> spectating{};
+    std::array<std::chrono::steady_clock::time_point, MAX_GAMEPADS> watch_tried{}, watch_told{};
+    std::array<bool, MAX_GAMEPADS> active{};  // last state had something pressed or deflected
+    std::array<bool, MAX_GAMEPADS> back{};    // Select is down
+    std::array<bool, MAX_GAMEPADS> ps_held{}; // a guest's PS or Create press that was held back, logged once per press
+    std::array<std::chrono::steady_clock::time_point, MAX_GAMEPADS> back_since{};
+    // A controller without a touchpad clicks it with Select and Start together (gamepad_map.hpp, TouchpadCombo).
+    std::array<bool, MAX_GAMEPADS> touch_combo{};
+    std::array<prospero::TouchpadCombo, MAX_GAMEPADS> combo{};
+    std::array<feedback_queue_t, MAX_GAMEPADS> feedback{};
+    std::array<uint8_t, MAX_GAMEPADS> client_index{};
+    std::array<std::array<uint8_t, 2>, MAX_GAMEPADS> motors{};
+    std::array<std::array<uint8_t, 3>, MAX_GAMEPADS> colors{};
+    std::array<prospero::TriggerBlock, MAX_GAMEPADS> triggers{};
+    std::array<prospero::PadTouch, MAX_GAMEPADS> touch{};
+    kbm_t shared;                             // removed when no session is left (client_session)
+    std::vector<std::pair<uint64_t, int>> owner_fixes;  // keep_owners: times each bus id was seated back
+    // Profiles the host signed in whose last controller left: signed out once their time comes (sign_out_due).
+    struct pending_sign_out_t {
+        uint32_t user;
+        std::chrono::steady_clock::time_point at;
+        bool told;  // the log said it waits
+    };
+    std::vector<pending_sign_out_t> sign_out_at;
+    std::vector<std::unique_ptr<kbm_t>> own;  // one per device with its own profiles that used them
     int sessions = 0;
     uint32_t user = 0;
+    // Profiles (device_profiles.hpp): the paired device each pad belongs to, by its certificate, and the profile the host
+    // seated it in (0 when the console asked).
+    std::array<std::string, MAX_GAMEPADS> owner{};
+    std::array<uint32_t, MAX_GAMEPADS> seat{};
+    // Since when a pad holds the switch (L1+L2+R1+R2, or the keyboard pad's Ctrl+Backspace), and whether it switched already.
+    std::array<std::chrono::steady_clock::time_point, MAX_GAMEPADS> switch_since{};
+    std::array<bool, MAX_GAMEPADS> switch_done{};
+    std::array<prospero::SwitchBudget, MAX_GAMEPADS> switch_budget{};  // a round of switches, then switch_cooldown
+    // The profiles this host signed in: it signs each out again once none of its pads sits in it (release_profile), so
+    // the console's four sessions don't fill up with players who left.
+    std::vector<uint32_t> host_signed_in;
     bool ps_all_players = false;  // ps_button_all_players: every pad may press PS and Create, not only the host's
     prospero::PadRoles<MAX_GAMEPADS> roles;  // who is the host: a paired device, not a slot (GitHub issue 15)
     std::jthread output_thread;
@@ -584,14 +627,28 @@ static void set_triggers(input_raw_t &input, int nr, const prospero::TriggerBloc
     }
 }
 
+static void check_seat_switches(input_raw_t &input);
+
 // Reads what the system wants from each pad at the cadence of Remote Play's own reader and passes on
 // changes of the motors, the light bar and the trigger effects. Only titles using the classic two-motor rumble set the motors;
 // see docs/re/pad-output.md.
+// How often the host checks that the console left its seated devices in their profiles (keep_owners).
+constexpr auto owner_check = 100ms;
+static void keep_owners(input_raw_t &input);
+static void sign_out_due(input_raw_t &input);
+
 static void poll_pad_output(std::stop_token stop, input_raw_t *input) {
     std::array<bool, MAX_GAMEPADS> failed{};
+    auto next_owner_check = std::chrono::steady_clock::now();
     while (!stop.stop_requested()) {
         {
             std::lock_guard lock(input->mutex);
+            check_seat_switches(*input);
+            if (const auto now = std::chrono::steady_clock::now(); now >= next_owner_check) {
+                next_owner_check = now + owner_check;
+                keep_owners(*input);
+                sign_out_due(*input);
+            }
             for (int nr = 0; nr < MAX_GAMEPADS; ++nr) {
                 if (!input->pads[nr]) {
                     failed[nr] = false;
@@ -614,32 +671,111 @@ static void poll_pad_output(std::stop_token stop, input_raw_t *input) {
     }
 }
 
+// The system bus stays busy for a while after the host removes devices. The login manager still decides about a new
+// device a few ms after it arrives, but this process learns of it later, and a bind that comes after that decision leaves
+// the console's question up. Seen once on 10.20 (2026-11-07): a keyboard pad added 50 ms after its client's pad, keyboard
+// and mouse went lost by a millisecond. That was 1 of 48 adds so soon after a removal, and none of about 210 others lost.
+// So a device to be seated in a profile is added only bus_settle after the host's last removal; keep_owners covers the
+// rest.
+constexpr auto bus_settle = 250ms;
+std::atomic<std::chrono::steady_clock::rep> last_removal{0};  // steady_clock ticks; 0 while nothing was removed
+
+static void removed_device() {
+    last_removal = std::chrono::steady_clock::now().time_since_epoch().count();
+}
+
+static void settle_bus() {
+    const auto last = last_removal.load();
+    if (!last) return;
+    const auto since = std::chrono::steady_clock::now() -
+                       std::chrono::steady_clock::time_point(std::chrono::steady_clock::duration(last));
+    if (since < bus_settle) std::this_thread::sleep_for(bus_settle - since);
+}
+
+// Removes a keyboard and mouse (they release what they hold) and forgets their state. Caller holds input.mutex.
+static void close_kbm(kbm_t &kbm) {
+    const char *whose = kbm.owner.empty() ? "" : " of a device's profile";
+    if (kbm.keyboard) {
+        const int rc = ps_keyboard_close(kbm.keyboard);
+        removed_device();
+        BOOST_LOG(info) << "PS5 virtual keyboard"sv << whose << " detached ("sv << rc << ')';
+    }
+    if (kbm.mouse) {
+        const int rc = ps_mouse_close(kbm.mouse);
+        removed_device();
+        BOOST_LOG(info) << "PS5 virtual mouse"sv << whose << " detached ("sv << rc << ')';
+    }
+    kbm.keyboard = nullptr;
+    kbm.mouse = nullptr;
+    kbm.keyboard_bus = kbm.mouse_bus = 0;
+    kbm.keyboard_failed = kbm.mouse_failed = false;
+    kbm.keys.clear();
+    kbm.mouse_buttons = 0;
+    kbm.wheel.clear();
+    kbm.tilt.clear();
+    kbm.pointer.reset();
+}
+
+// A device's own keyboard and mouse go once its last controller leaves. Caller holds input.mutex.
+static void close_own_kbm(input_raw_t &input, const std::string &owner) {
+    for (auto it = input.own.begin(); it != input.own.end();) {
+        if ((*it)->owner == owner) {
+            close_kbm(**it);
+            it = input.own.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
 static void close_keyboard_mouse(input_raw_t &input) {
-    if (input.keyboard) {
-        const int rc = ps_keyboard_close(input.keyboard);
-        BOOST_LOG(info) << "PS5 virtual keyboard detached ("sv << rc << ')';
-    }
-    if (input.mouse) {
-        const int rc = ps_mouse_close(input.mouse);
-        BOOST_LOG(info) << "PS5 virtual mouse detached ("sv << rc << ')';
-    }
-    input.keyboard = nullptr;
-    input.mouse = nullptr;
-    input.keyboard_failed = input.mouse_failed = false;
-    input.keys.clear();
-    input.mouse_buttons = 0;
-    input.wheel.clear();
-    input.tilt.clear();
-    input.pointer.reset();
+    close_kbm(input.shared);
+    for (auto &kbm : input.own) close_kbm(*kbm);
+    input.own.clear();
+}
+
+namespace {
+// The platform's input, for the control socket's thread (profiles_changed). input() sets it and freeInput clears it
+// before anything goes; taken before input.mutex, never after.
+std::mutex live_input_mutex;
+input_raw_t *live_input = nullptr;
+}  // namespace
+
+// Signing in and out borrows SceShellCore's credentials for one call (profile_seat.c). If this process's own couldn't be
+// put back afterwards, the log says so, once per new failure.
+static void note_credential_restore() {
+    static std::atomic<int> told{0};
+    const int failures = ps_profile_credential_restore_failures();
+    if (failures > told.exchange(failures))
+        BOOST_LOG(error) << "PS5 input: this process's own credentials couldn't be put back after signing a profile in or out"sv;
 }
 
 void freeInput(input_raw_t *input) {
     if (!input) return;
+    {
+        std::lock_guard live(live_input_mutex);
+        if (live_input == input) live_input = nullptr;
+    }
     input->output_thread.request_stop();
     if (input->output_thread.joinable()) input->output_thread.join();
     for (auto *&pad : input->pads) {
         ps_pad_close(pad);
         pad = nullptr;
+    }
+    // The profiles it signed in go with it, also those still in their grace (prospero::sign_out decides; no pad is left).
+    // If the console doesn't say which one is in front, they all stay: signing out the one someone plays as is worse than
+    // leaving one signed in.
+    if (!input->host_signed_in.empty()) {
+        uint32_t front = 0;
+        const bool known = ps_profile_foreground(&front) == 0;
+        if (!known) BOOST_LOG(warning) << "PS5 input: the console didn't say which profile is in front; the host's profiles stay signed in"sv;
+        for (const uint32_t user : input->host_signed_in) {
+            const prospero::SignOutFacts facts{true, false,
+                                               !known ? prospero::Answer::unknown : front == user ? prospero::Answer::yes : prospero::Answer::no,
+                                               prospero::Answer::no};
+            if (prospero::sign_out(facts) == prospero::SignOut::now) ps_profile_sign_out(user);
+        }
+        note_credential_restore();
     }
     close_keyboard_mouse(*input);
     delete input;
@@ -657,6 +793,10 @@ input_t input() {
     BOOST_LOG(info) << (raw->ps_all_players ? "PS5 input: every player can press PS and Create"sv
                                             : "PS5 input: only the host can press PS and Create"sv);
     raw->output_thread = std::jthread(poll_pad_output, raw);
+    {
+        std::lock_guard live(live_input_mutex);
+        live_input = raw;
+    }
     return input_t{raw};
 }
 
@@ -689,38 +829,497 @@ std::string gamepad_owner(const feedback_queue_t &queue) {
 
 // Patch 0024 calls this right before binding a stream port; the debug build writes it to host_diag.log first.
 void trace_call(const std::string &what) { ps_diag_trace("%s\n", what.c_str()); }
+static void greet_spectator(const std::string &cert);
 
 void set_gamepad_owner(const feedback_queue_t &queue, std::string_view owner) {
     if (!queue) return;
-    std::lock_guard lock(gamepad_owners_mutex);
-    std::erase_if(gamepad_owners, [&](const gamepad_owner_t &entry) { return entry.queue.expired() || entry.key == queue.get(); });
-    gamepad_owners.push_back({queue, queue.get(), std::string(owner)});
+    {
+        std::lock_guard lock(gamepad_owners_mutex);
+        std::erase_if(gamepad_owners, [&](const gamepad_owner_t &entry) { return entry.queue.expired() || entry.key == queue.get(); });
+        gamepad_owners.push_back({queue, queue.get(), std::string(owner)});
+    }
+    greet_spectator(std::string(owner));
 }
 
-// Caller holds input.mutex.
-static bool open_pad(input_raw_t &input, int nr, bool host) {
+namespace {
+// A paired device by its certificate: its uuid (what device_profiles.txt goes by) and its name, for notifications.
+struct paired_device_t {
+    std::string uuid, name;
+};
+paired_device_t paired_device(const std::string &cert) {
+    if (cert.empty()) return {};
+    for (const auto &client : nvhttp::get_all_clients()) {
+        const std::string uuid = client.value("uuid", "");
+        if (!uuid.empty() && nvhttp::get_cert_by_uuid(uuid) == cert) return {uuid, client.value("name", "")};
+    }
+    return {};
+}
+
+std::string profile_name(uint32_t user) {
+    char name[64];
+    ps_profile_name(user, name, sizeof name);
+    return name[0] ? std::string(name) : "A player"s;
+}
+
+// What a new pad of this device gets: the console's question (profiles not set, or free choice), one of the device's
+// profiles (open_pad picks the first it may join), or nothing (no profile: it only watches).
+struct seat_plan_t {
+    enum { ask, profile, none } kind = ask;
+    std::vector<uint32_t> users;  // profile: the device's profiles in the order to try (prospero::join_order)
+};
+std::optional<prospero::ProfileSet> profiles_of(const std::string &uuid) {
+    if (uuid.empty()) return std::nullopt;
+    return prospero::DeviceProfiles(platf::appdata() / "device_profiles.txt").get(uuid);
+}
+
+prospero::DeviceSeats seats() { return prospero::DeviceSeats(platf::appdata() / "device_seats.txt"); }
+
+// Whether another of the host's pads sits in this profile, of any device: binding a second pad to it would take it away
+// from that one.
+bool seat_taken(const input_raw_t &input, int nr, uint32_t user) {
+    for (int m = 0; m < MAX_GAMEPADS; ++m)
+        if (m != nr && input.pads[m] && input.seat[m] == user) return true;
+    return false;
+}
+
+// What the host knows of a profile for pad nr (prospero::join_block decides). Asks the console whether it is signed in.
+prospero::ProfileUse profile_use(const input_raw_t &input, int nr, uint32_t user) {
+    const int signed_in = ps_profile_signed_in(user);
+    const auto &mine = input.host_signed_in;
+    return {seat_taken(input, nr, user),
+            signed_in < 0 ? prospero::Answer::unknown : signed_in ? prospero::Answer::yes : prospero::Answer::no,
+            std::find(mine.begin(), mine.end(), user) != mine.end()};
+}
+
+// A limited device never gets the console's question: whoever answers it can pick any profile, and picking one in use
+// moves it off the controller using it (the login manager disconnects that one, seen on 10.20). A Quick Play guest
+// ("guest" in its profiles) would need the host to add one without the question, which isn't done yet.
+seat_plan_t seat_plan(const input_raw_t &input, int nr, const std::string &uuid) {
+    const auto set = profiles_of(uuid);
+    if (!set || set->free) return {};
+    if (set->users.empty()) return {seat_plan_t::none, {}};
+    return {seat_plan_t::profile, prospero::join_order(*set, seats().get(uuid, input.client_index[nr]))};
+}
+}  // namespace
+
+// A device that may only watch hears so as its stream starts, not at its first press: it has no profile to play as (a
+// list with none, or only the Quick Play guest, which isn't there yet).
+static void greet_spectator(const std::string &cert) {
+    const auto device = paired_device(cert);
+    const auto set = profiles_of(device.uuid);
+    if (!set || set->free || !set->users.empty()) return;
+    BOOST_LOG(info) << "PS5 input: a device that may only watch started streaming"sv;
+    ps_notify(((device.name.empty() ? "This device"s : device.name) + " joined as a spectator (no profile to play as)").c_str());
+}
+
+// A profile this host signed in is signed out again once none of its pads sits in it, so players who left don't keep the
+// console's four sessions: sign_out_grace after its last pad left, so that a Moonlight client that reconnects finds it as
+// it was (sign_out_due). Caller holds input.mutex.
+static void release_profile(input_raw_t &input, uint32_t user) {
+    const auto &mine = input.host_signed_in;
+    if (!user || std::find(mine.begin(), mine.end(), user) == mine.end()) return;
+    for (int m = 0; m < MAX_GAMEPADS; ++m)
+        if (input.pads[m] && input.seat[m] == user) return;
+    const auto at = std::chrono::steady_clock::now() + prospero::sign_out_grace;
+    auto &pending = input.sign_out_at;
+    const auto it = std::find_if(pending.begin(), pending.end(), [&](const auto &p) { return p.user == user; });
+    if (it != pending.end())
+        *it = {user, at, false};
+    else
+        pending.push_back({user, at, false});
+    BOOST_LOG(info) << "PS5 input: a profile the host signed in lost its last pad; it is signed out in "sv
+                    << prospero::sign_out_grace.count() << " s unless a pad joins it again"sv;
+}
+
+// Whether one of the host's pads that got its profile from the console's question (no seat of the host's) plays as the
+// profile; unknown when the bus doesn't say who one of them plays as. Caller holds input.mutex.
+static prospero::Answer unseated_pad_plays_as(const input_raw_t &input, uint32_t user) {
+    auto answer = prospero::Answer::no;
+    for (int m = 0; m < MAX_GAMEPADS; ++m) {
+        if (!input.pads[m] || input.seat[m]) continue;
+        uint32_t owner = 0;
+        if (ps_profile_owner(ps_pad_device_id(input.pads[m]), &owner) != 0)
+            answer = prospero::Answer::unknown;
+        else if (owner == user)
+            return prospero::Answer::yes;
+    }
+    return answer;
+}
+
+// The profiles whose time came (release_profile) are signed out, if prospero::sign_out says so: not one someone at the TV
+// has in front, nor one a controller the console asked about plays as, and nothing while the console doesn't say. One
+// that a pad joined again stays the host's. Caller holds input.mutex.
+static void sign_out_due(input_raw_t &input) {
+    const auto now = std::chrono::steady_clock::now();
+    auto &mine = input.host_signed_in;
+    for (auto it = input.sign_out_at.begin(); it != input.sign_out_at.end();) {
+        if (now < it->at) {
+            ++it;
+            continue;
+        }
+        const uint32_t user = it->user;
+        prospero::SignOutFacts facts;
+        facts.host_signed_in = std::find(mine.begin(), mine.end(), user) != mine.end();
+        for (int m = 0; m < MAX_GAMEPADS && !facts.seated; ++m) facts.seated = input.pads[m] && input.seat[m] == user;
+        if (facts.seated) {
+            it = input.sign_out_at.erase(it);
+            continue;
+        }
+        uint32_t front = 0;
+        facts.in_front = ps_profile_foreground(&front) != 0 ? prospero::Answer::unknown
+                         : front == user                 ? prospero::Answer::yes
+                                                          : prospero::Answer::no;
+        facts.owns_unseated_pad = unseated_pad_plays_as(input, user);
+        switch (prospero::sign_out(facts)) {
+            case prospero::SignOut::now: {
+                const int rc = ps_profile_sign_out(user);
+                note_credential_restore();
+                BOOST_LOG(info) << "PS5 input: a profile the host signed in was signed out, its last pad left ("sv << rc << ')';
+                std::erase(mine, user);
+                it = input.sign_out_at.erase(it);
+                break;
+            }
+            case prospero::SignOut::never:
+                if (facts.in_front == prospero::Answer::yes)
+                    BOOST_LOG(info) << "PS5 input: a profile the host signed in stays signed in, it is in front on the console"sv;
+                std::erase(mine, user);
+                it = input.sign_out_at.erase(it);
+                break;
+            case prospero::SignOut::later:
+                if (!it->told)
+                    BOOST_LOG(info) << "PS5 input: a profile the host signed in waits to be signed out: a controller may play as it, "
+                                       "or the console didn't say"sv;
+                it->told = true;
+                it->at = now + 10s;
+                ++it;
+                break;
+        }
+    }
+}
+
+// A seated device whose owner the console changed goes back to its profile at once. That is someone answering "Who's
+// using this controller?" (or keyboard, or mouse) for it: a bind that comes a millisecond after the login manager decided
+// to ask leaves the question up (seen once on 10.20, 2026-11-07), and whoever answers could pick any profile. A device
+// seated back more than a few times is left alone, in case the bus reports its owner some other way. Returns whether it
+// was seated back. Caller holds input.mutex.
+static bool keep_owner(input_raw_t &input, uint64_t device, uint32_t seat) {
+    uint32_t owner = 0;
+    if (!device || !seat || ps_profile_owner(device, &owner) != 0 || !owner || owner == seat) return false;
+    auto it = std::find_if(input.owner_fixes.begin(), input.owner_fixes.end(), [&](const auto &f) { return f.first == device; });
+    if (it == input.owner_fixes.end()) it = input.owner_fixes.insert(input.owner_fixes.end(), {device, 0});
+    if (it->second >= 5) return false;
+    if (++it->second == 5) BOOST_LOG(warning) << "PS5 input: a seated device keeps another owner on the bus; it is left alone"sv;
+    const int rc = ps_profile_bind(device, seat);
+    BOOST_LOG(warning) << "PS5 input: the console gave a seated device to another profile; it was seated back ("sv << rc << ')';
+    return rc == 0;
+}
+
+static void keep_owners(input_raw_t &input) {
+    for (int nr = 0; nr < MAX_GAMEPADS; ++nr) {
+        if (!input.pads[nr] || !input.seat[nr] || !keep_owner(input, ps_pad_device_id(input.pads[nr]), input.seat[nr])) continue;
+        const auto device = paired_device(input.owner[nr]);
+        ps_notify(((device.name.empty() ? "This device"s : device.name) + "'s controller only plays as " +
+                   profile_name(input.seat[nr]) + ": it went back to it")
+                      .c_str());
+    }
+    for (const auto &kbm : input.own) {
+        keep_owner(input, kbm->keyboard_bus, kbm->user);
+        keep_owner(input, kbm->mouse_bus, kbm->user);
+    }
+    // Bus ids aren't reused soon: forget those of devices gone.
+    if (input.owner_fixes.size() > 64) input.owner_fixes.erase(input.owner_fixes.begin(), input.owner_fixes.begin() + 32);
+}
+
+// What open_pad did: the pad is open, its device may only watch for now (no profile for it), or it failed.
+enum class pad_open { opened, watching, failed };
+
+// Caller holds input.mutex. No device names or profile ids in the log: it goes into the report people post.
+static pad_open open_pad(input_raw_t &input, int nr, bool host) {
     auto *&pad = input.pads[nr];
-    const int rc = ps_pad_open(host ? input.user : PS_PAD_NO_USER, &pad);
+    input.seat[nr] = 0;
+    const auto device = paired_device(input.owner[nr]);
+    const auto plan = seat_plan(input, nr, device.uuid);
+    const std::string who = device.name.empty() ? "This device"s : device.name;
+    // A pad that doesn't join watches: a press tries again at most once a second, and the console says why at most once
+    // every switch_cooldown, not at every try. A device without any profile was told so when its stream started
+    // (greet_spectator).
+    const auto tell = [&](std::string_view reason, const std::string &text) {
+        if (const auto now = std::chrono::steady_clock::now(); now - input.watch_told[nr] >= prospero::switch_cooldown) {
+            input.watch_told[nr] = now;
+            BOOST_LOG(info) << "PS5 virtual pad "sv << nr << " not added: "sv << reason;
+            if (!text.empty()) ps_notify(text.c_str());
+        }
+    };
+    if (plan.kind == seat_plan_t::none) {
+        tell("its device has no profile, it may only watch"sv, {});
+        return pad_open::watching;
+    }
+    if (plan.kind == seat_plan_t::profile) {
+        // The first of the device's profiles the pad may join (prospero::join_block), signed in if it isn't. Signing one in
+        // fails when the console already has its four sessions (0x80960101 on 10.20).
+        uint32_t user = 0, full = 0, elsewhere = 0;
+        bool unknown = false;
+        for (const uint32_t candidate : plan.users) {
+            const auto use = profile_use(input, nr, candidate);
+            const auto block = prospero::join_block(use);
+            if (block == prospero::JoinBlock::unknown) unknown = true;
+            if (block == prospero::JoinBlock::signed_in_elsewhere && !elsewhere) elsewhere = candidate;
+            if (block != prospero::JoinBlock::none) continue;
+            if (use.signed_in == prospero::Answer::no) {
+                const int rc = ps_profile_sign_in(candidate);
+                note_credential_restore();
+                if (rc) {
+                    BOOST_LOG(error) << "PS5 virtual pad "sv << nr << ": signing a profile of its device in failed: "sv << rc;
+                    if (!full) full = candidate;
+                    continue;
+                }
+                BOOST_LOG(info) << "PS5 virtual pad "sv << nr << ": its profile was signed in"sv;
+                input.host_signed_in.push_back(candidate);
+            }
+            user = candidate;
+            break;
+        }
+        if (!user) {
+            if (full)
+                tell("a profile of its device couldn't be signed in"sv,
+                     who + "'s controller can't join: " + profile_name(full) +
+                         " couldn't be signed in (the console takes four at most). Press a button to try again");
+            else if (elsewhere)
+                tell("its device's profile is signed in on the console by someone else"sv,
+                     who + " can't play as " + profile_name(elsewhere) +
+                         " while it is signed in on the console. Sign it out there, then press a button");
+            else if (unknown)
+                tell("the console didn't say whether its device's profiles are signed in"sv,
+                     who + "'s controller can't join: the console didn't answer. Press a button to try again");
+            else
+                tell("every profile of its device is taken"sv, who + " has no profile left for another controller");
+            return pad_open::watching;
+        }
+        settle_bus();
+        if (const int rc = ps_pad_open(user, &pad); rc) {
+            BOOST_LOG(error) << "PS5 virtual pad "sv << nr << " failed: "sv << rc;
+            pad = nullptr;
+            release_profile(input, user);
+            return pad_open::failed;
+        }
+        // At once: the console decides whether to ask about a new pad a few milliseconds after it is added.
+        const auto bind_start = std::chrono::steady_clock::now();
+        const int bind_rc = ps_profile_bind(ps_pad_device_id(pad), user);
+        const auto bind_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - bind_start).count();
+        if (bind_rc) {
+            // Left open, the pad would get the console's question, which a limited device must not: it goes again.
+            BOOST_LOG(warning) << "PS5 virtual pad "sv << nr << ": seating it in its profile failed ("sv << bind_rc << " after "sv
+                               << bind_ms << " ms), so it was not added"sv;
+            ps_pad_close(pad);
+            removed_device();
+            pad = nullptr;
+            release_profile(input, user);
+            // It watches until a press tries again (at most once a second), and hears why at most once every
+            // switch_cooldown: right after the host restarts, every try fails until libSceMbus is up.
+            if (const auto now = std::chrono::steady_clock::now(); now - input.watch_told[nr] >= prospero::switch_cooldown) {
+                input.watch_told[nr] = now;
+                ps_notify((who + "'s controller couldn't join as " + profile_name(user) + ". Press a button to try again").c_str());
+            }
+            return pad_open::watching;
+        }
+        input.seat[nr] = user;
+        BOOST_LOG(info) << "PS5 virtual pad "sv << nr << " attached in its device's profile"sv << (host ? " as the host's controller"sv : ""sv)
+                        << " (bound after "sv << bind_ms << " ms)"sv;
+        // With more profiles to switch to, the notification tells how, so nobody has to have read the web page's help.
+        const auto set = profiles_of(device.uuid);
+        const bool can_switch = set && set->users.size() > 1;
+        ps_notify((profile_name(user) + " joined the party" +
+                   (can_switch ? ". To switch profile: Ctrl+Backspace, or hold L1+L2+R1+R2" : ""))
+                      .c_str());
+        return pad_open::opened;
+    }
+    const int rc = ps_pad_open(host && plan.kind == seat_plan_t::ask ? input.user : PS_PAD_NO_USER, &pad);
     if (rc) {
         BOOST_LOG(error) << "PS5 virtual pad "sv << nr << " failed: "sv << rc;
         pad = nullptr;
-        return false;
+        return pad_open::failed;
     }
     BOOST_LOG(info) << "PS5 virtual pad "sv << nr << " attached"sv
                     << (host ? " as the host's controller"sv
                              : input.roles.host_away() ? ", the console asks who uses it; the host is away and keeps the role"sv
                                                        : ", the console asks who uses it"sv);
+    return pad_open::opened;
+}
+
+// Moves a seated pad to its device's next free profile, signing it in when needed: the pad is added anew in it, which a
+// game sees as one player's controller leaving and the next one's coming. One notification says both. The choice is
+// kept for this controller of the device (DeviceSeats). Returns whether it switched; round is how many profiles the device
+// switches between. Caller holds input.mutex.
+static bool switch_seat(input_raw_t &input, int nr, std::size_t &round) {
+    const uint32_t current = input.seat[nr];
+    const auto device = paired_device(input.owner[nr]);
+    const std::string who = device.name.empty() ? "This device"s : device.name;
+    const auto set = profiles_of(device.uuid);
+    if (!input.pads[nr] || !current || !set || set->free) {
+        BOOST_LOG(info) << "PS5 virtual pad "sv << nr << ": a profile switch was held, but its device's profiles aren't set"sv;
+        ps_notify((who + " has no profiles to switch between: set them on the web page").c_str());
+        return false;
+    }
+    round = set->users.size();
+    // Only to a profile it may join: not one another pad holds, nor one someone else signed in (prospero::join_block).
+    const uint32_t next = prospero::next_seat(
+        *set, current, [&](uint32_t user) { return prospero::join_block(profile_use(input, nr, user)) != prospero::JoinBlock::none; });
+    if (!next) {
+        BOOST_LOG(info) << "PS5 virtual pad "sv << nr << ": a profile switch was held, but no other profile is free"sv;
+        ps_notify((set->users.size() > 1 ? "No other profile of " + who + " is free" : who + " has only one profile").c_str());
+        return false;
+    }
+    const int signed_in = ps_profile_signed_in(next);
+    if (signed_in < 0) {
+        BOOST_LOG(warning) << "PS5 virtual pad "sv << nr << ": the console didn't say whether the profile to switch to is signed in"sv;
+        ps_notify(("The console didn't answer: " + who + " stays as " + profile_name(current)).c_str());
+        return false;
+    }
+    if (!signed_in) {
+        const int rc = ps_profile_sign_in(next);
+        note_credential_restore();
+        if (rc) {
+            BOOST_LOG(error) << "PS5 virtual pad "sv << nr << ": signing in the profile to switch to failed: "sv << rc;
+            ps_notify((profile_name(next) + " couldn't be signed in for " + who).c_str());
+            return false;
+        }
+        input.host_signed_in.push_back(next);
+    }
+    ps_pad_close(input.pads[nr]);
+    removed_device();
+    input.pads[nr] = nullptr;
+    input.seat[nr] = 0;
+    input.colors[nr] = {};
+    input.triggers[nr] = {};
+    input.touch[nr].clear();
+    uint32_t seated = next;
+    settle_bus();
+    if (ps_pad_open(next, &input.pads[nr]) != 0 || ps_profile_bind(ps_pad_device_id(input.pads[nr]), next) != 0) {
+        BOOST_LOG(error) << "PS5 virtual pad "sv << nr << ": the switch failed, back to its profile"sv;
+        if (input.pads[nr]) {
+            ps_pad_close(input.pads[nr]);
+            removed_device();
+        }
+        input.pads[nr] = nullptr;
+        seated = current;
+        settle_bus();
+        if (ps_pad_open(current, &input.pads[nr]) != 0 || ps_profile_bind(ps_pad_device_id(input.pads[nr]), current) != 0) {
+            if (input.pads[nr]) {
+                ps_pad_close(input.pads[nr]);
+                removed_device();
+            }
+            input.pads[nr] = nullptr;
+            input.roles.detach(nr);
+            release_profile(input, next);
+            release_profile(input, current);
+            ps_notify((who + "'s controller was lost switching profiles").c_str());
+            return false;
+        }
+    }
+    input.seat[nr] = seated;
+    request_motion(input, nr);
+    if (seated != next) {
+        release_profile(input, next);  // signed in for the switch that didn't happen
+        return false;
+    }
+    seats().remember(device.uuid, input.client_index[nr], next);
+    BOOST_LOG(info) << "PS5 virtual pad "sv << nr << " switched to its device's next profile"sv;
+    ps_notify((profile_name(current) + " passed the controller to " + profile_name(next)).c_str());
+    release_profile(input, current);
     return true;
 }
 
-int alloc_gamepad(input_t &input, const gamepad_id_t &id, const gamepad_arrival_t &, feedback_queue_t feedback) {
+// A switch fires once a pad has held it for switch_hold; it fires again only after letting go. Caller holds input.mutex.
+static void check_seat_switches(input_raw_t &input) {
+    const auto now = std::chrono::steady_clock::now();
+    for (int nr = 0; nr < MAX_GAMEPADS; ++nr) {
+        if (input.switch_done[nr] || input.switch_since[nr].time_since_epoch().count() == 0) continue;
+        if (now - input.switch_since[nr] < prospero::switch_hold) continue;
+        input.switch_done[nr] = true;
+        // While it waits, the player is told how long once; later switches in the same wait are only ignored.
+        if (auto &budget = input.switch_budget[nr]; !budget.allowed(now)) {
+            BOOST_LOG(info) << "PS5 virtual pad "sv << nr << ": a profile switch came while it waits after a round of switches, ignored"sv;
+            if (budget.tell_once())
+                ps_notify(("Wait " + std::to_string(budget.seconds_left(now)) + " s to switch profile again").c_str());
+            continue;
+        }
+        std::size_t round = 0;
+        if (switch_seat(input, nr, round)) input.switch_budget[nr].switched(now, round);
+        else input.switch_budget[nr].refused(now);
+    }
+}
+
+// A paired device's profiles changed: each of its controllers sitting in a profile it no longer has leaves it, and waits
+// as one that only watches until a press joins it as a profile the device still has. The stream goes on. More profiles,
+// or a free choice, take nothing away. A pad the console's question seated (its device could choose freely) leaves too
+// when the device gets a list, as which profile it sits in isn't known.
+void profiles_changed(const std::string &cert, const std::vector<uint32_t> &added) {
+    if (cert.empty()) return;
+    std::lock_guard live(live_input_mutex);
+    if (!live_input) return;
+    auto &input = *live_input;
+    std::lock_guard lock(input.mutex);
+    const auto device = paired_device(cert);
+    const auto set = profiles_of(device.uuid);
+    if (!set || set->free) return;
+    const std::string who = device.name.empty() ? "This device"s : device.name;
+    bool benched = false;
+    for (int nr = 0; nr < MAX_GAMEPADS; ++nr) {
+        if (!input.pads[nr] || input.owner[nr] != cert) continue;
+        const uint32_t seated = input.seat[nr];
+        if (seated && std::find(set->users.begin(), set->users.end(), seated) != set->users.end()) continue;
+        set_motors(input, nr, 0, 0);
+        set_triggers(input, nr, prospero::triggers_off);
+        ps_pad_close(input.pads[nr]);  // sends a neutral state before removal
+        removed_device();
+        input.pads[nr] = nullptr;
+        input.seat[nr] = 0;
+        input.roles.detach(nr);
+        input.colors[nr] = {};
+        input.triggers[nr] = {};
+        input.touch[nr].clear();
+        input.back[nr] = input.ps_held[nr] = false;
+        input.switch_since[nr] = {};
+        input.switch_done[nr] = false;
+        input.waiting[nr] = input.spectating[nr] = true;
+        input.watch_tried[nr] = input.watch_told[nr] = {};
+        const bool other = std::any_of(set->users.begin(), set->users.end(), [&](uint32_t user) { return !seat_taken(input, nr, user); });
+        BOOST_LOG(info) << "PS5 virtual pad "sv << nr << " left the profile its device no longer has; it watches until a press"sv
+                        << (other ? " joins it as another"sv : ""sv);
+        ps_notify(((seated ? who + " can no longer play as " + profile_name(seated) : who + "'s profiles changed") +
+                   (other ? ". Press a button to join as another of its profiles" : ": it watches now"))
+                      .c_str());
+        release_profile(input, seated);
+        benched = true;
+    }
+    // A device streaming now hears at once about profiles it got, not only at its next press: a spectator that it may
+    // join, a player that it may switch. A controller just taken out of a profile was told already. The caller passes
+    // added profiles only while the device streams (a session's input outlives it for a while).
+    if (added.empty() || benched) return;
+    bool playing = false;
+    for (int nr = 0; nr < MAX_GAMEPADS; ++nr) playing = playing || (input.pads[nr] && input.owner[nr] == cert);
+    std::string names;
+    for (const uint32_t user : added) names += (names.empty() ? "" : ", ") + profile_name(user);
+    BOOST_LOG(info) << "PS5 input: a streaming device got "sv << added.size() << " profile(s)"sv << (playing ? ", it plays"sv : ", it watches"sv);
+    ps_notify((playing ? who + " can now also play as " + names + ". To switch profile: Ctrl+Backspace, or hold L1+L2+R1+R2"
+                       : who + " can now play as " + names + ". Press a button to join")
+                  .c_str());
+}
+
+int alloc_gamepad(input_t &input, const gamepad_id_t &id, const gamepad_arrival_t &arrival, feedback_queue_t feedback) {
     if (id.globalIndex < 0 || id.globalIndex >= MAX_GAMEPADS) return -1;
     const std::string owner = gamepad_owner(feedback);
     std::lock_guard lock(input->mutex);
     input->feedback[id.globalIndex] = std::move(feedback);
     input->client_index[id.globalIndex] = id.clientRelativeIndex;
+    input->touch_combo[id.globalIndex] = !prospero::has_touchpad(arrival.capabilities, arrival.supportedButtons);
+    input->combo[id.globalIndex] = {};
+    if (input->touch_combo[id.globalIndex])
+        BOOST_LOG(info) << "PS5 virtual pad "sv << id.globalIndex << ": no touchpad, Select and Start together click it"sv;
     auto *&pad = input->pads[id.globalIndex];
     if (!pad && !input->waiting[id.globalIndex]) {
+        input->owner[id.globalIndex] = owner;
+        input->watch_told[id.globalIndex] = {};  // a new controller here hears why it doesn't join, whoever was told before
         // The host's pad plays as the console's user. Every other one, from another device or a second controller on the
         // host's, is a guest: the system asks who uses it, and they pick a user or a guest (pad_roles.hpp). The role is
         // the device's from the start; a guest's pad only opens on its first use, as the question can only be answered
@@ -731,9 +1330,12 @@ int alloc_gamepad(input_t &input, const gamepad_id_t &id, const gamepad_arrival_
             input->waiting[id.globalIndex] = true;
             BOOST_LOG(info) << "PS5 virtual pad "sv << id.globalIndex << " announced, opens when it is used"sv
                             << (owner.empty() ? " (device unknown)"sv : ""sv);
-        } else if (!open_pad(*input, id.globalIndex, true)) {
+        } else if (const auto opened = open_pad(*input, id.globalIndex, true); opened != pad_open::opened) {
             input->roles.detach(id.globalIndex);
-            return -1;
+            if (opened == pad_open::failed) return -1;
+            // Its device may only watch: the slot stays, so a press joins it once the device has a profile for it.
+            input->waiting[id.globalIndex] = input->spectating[id.globalIndex] = true;
+            input->watch_tried[id.globalIndex] = std::chrono::steady_clock::now();
         }
     }
     request_motion(*input, id.globalIndex);
@@ -752,17 +1354,29 @@ int rebind_gamepad(input_t &input, const gamepad_id_t &id, feedback_queue_t feed
 void free_gamepad(input_t &input, int nr) {
     if (nr < 0 || nr >= MAX_GAMEPADS) return;
     std::lock_guard lock(input->mutex);
+    const uint32_t seated = input->seat[nr];
+    input->seat[nr] = 0;
+    input->switch_since[nr] = {};
+    input->switch_done[nr] = false;
     if (input->waiting[nr]) {
         input->waiting[nr] = false;
         input->roles.detach(nr);
-        BOOST_LOG(info) << "PS5 virtual pad "sv << nr << " gone, never used"sv;
+        input->owner[nr].clear();
+        BOOST_LOG(info) << "PS5 virtual pad "sv << nr << (input->spectating[nr] ? " gone, it only watched"sv : " gone, never used"sv);
+        input->spectating[nr] = false;
         return;
     }
+    const std::string owner = std::exchange(input->owner[nr], std::string());
     if (!input->pads[nr]) return;
     set_motors(*input, nr, 0, 0);
     set_triggers(*input, nr, prospero::triggers_off);
     const int rc = ps_pad_close(input->pads[nr]);  // sends a neutral state before removal
+    removed_device();
     input->pads[nr] = nullptr;
+    // Its device's own keyboard and mouse go with its last controller: from then on they play as a controller of their
+    // own (keyboard_pad), as for any device without one.
+    if (std::none_of(input->owner.begin(), input->owner.end(), [&](const std::string &o) { return o == owner; }))
+        close_own_kbm(*input, owner);
     const bool was_host = input->roles.is_host(nr);
     input->roles.detach(nr);
     input->colors[nr] = {};  // a later pad in this slot reports its colour anew
@@ -770,8 +1384,10 @@ void free_gamepad(input_t &input, int nr) {
     input->touch[nr].clear();
     input->back[nr] = false;
     input->ps_held[nr] = false;
+    input->combo[nr] = {};
     BOOST_LOG(info) << "PS5 virtual pad "sv << nr << " detached ("sv << rc << ')'
                     << (was_host ? (input->roles.host_away() ? ", the host's device keeps the role"sv : ", the host role is free"sv) : ""sv);
+    release_profile(*input, seated);
 }
 
 void gamepad_update(input_t &input, int nr, const gamepad_state_t &state) {
@@ -779,15 +1395,37 @@ void gamepad_update(input_t &input, int nr, const gamepad_state_t &state) {
     std::lock_guard lock(input->mutex);
     if (input->waiting[nr]) {
         if (!prospero::wakes_pad(state.buttonFlags, state.lt, state.rt, state.lsX, state.lsY, state.rsX, state.rsY)) return;
-        // This first use only brings up the console's question for the new pad; the next press answers it.
-        input->waiting[nr] = false;
-        if (!open_pad(*input, nr, false)) {
-            input->roles.detach(nr);
-            return;
+        // A device that may only watch tries again at most once a second while it presses.
+        const auto now = std::chrono::steady_clock::now();
+        if (input->spectating[nr] && now - input->watch_tried[nr] < 1s) return;
+        input->watch_tried[nr] = now;
+        // This first use only brings up the console's question for the new pad (or, for a device with its own
+        // profiles, seats it in the next one); the next press answers it. A watching pad takes a role anew.
+        const bool host = input->spectating[nr] && input->roles.attach(nr, input->owner[nr]);
+        switch (open_pad(*input, nr, host)) {
+            case pad_open::opened:
+                input->waiting[nr] = input->spectating[nr] = false;
+                break;
+            case pad_open::watching:
+                input->spectating[nr] = true;
+                input->roles.detach(nr);
+                return;
+            case pad_open::failed:
+                input->waiting[nr] = input->spectating[nr] = false;
+                input->roles.detach(nr);
+                return;
         }
         request_motion(*input, nr);
     }
     if (!input->pads[nr]) return;
+    // L1+L2+R1+R2 held for switch_hold, or the keyboard pad's Ctrl+Backspace at once: poll_pad_output switches the profile.
+    if (!prospero::holds_switch(state.buttonFlags, state.lt, state.rt)) {
+        input->switch_since[nr] = {};
+        input->switch_done[nr] = false;
+    } else if (input->switch_since[nr].time_since_epoch().count() == 0) {
+        const auto now = std::chrono::steady_clock::now();
+        input->switch_since[nr] = prospero::switch_at_once(state.buttonFlags) ? now - prospero::switch_hold : now;
+    }
     const auto send = [&](uint32_t flags) {
         const auto mapped = prospero::map_gamepad(flags, state.lt, state.rt, state.lsX, state.lsY, state.rsX, state.rsY);
         const ps_pad_state pad{mapped.buttons, mapped.lx, mapped.ly, mapped.rx, mapped.ry, mapped.l2, mapped.r2};
@@ -796,17 +1434,23 @@ void gamepad_update(input_t &input, int nr, const gamepad_state_t &state) {
     // Sunshine turns a held Select into PS (back_button_timeout), but Select is Create here and pressing it
     // first would open the Create menu. So Create only goes out, as a tap, when Select comes up early. The
     // margin keeps Sunshine's own forced release at the timeout from counting as early.
+    const auto now = std::chrono::steady_clock::now();
+    const auto timeout = config::input.back_button_timeout;
+    const int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+    uint32_t pressed = state.buttonFlags;
+    if (input->touch_combo[nr]) pressed = input->combo[nr].apply(pressed, now_ms, timeout.count());
     const auto role = input->roles.is_host(nr) ? prospero::PadRole::host : prospero::PadRole::guest;
-    uint32_t flags = prospero::allowed_buttons(state.buttonFlags, role, input->ps_all_players);
-    if ((state.buttonFlags & ~flags) && !(input->ps_held[nr]))
+    uint32_t flags = prospero::allowed_buttons(pressed, role, input->ps_all_players);
+    if ((pressed & ~flags) && !(input->ps_held[nr]))
         BOOST_LOG(info) << "PS5 virtual pad "sv << nr << ": PS or Create ignored, only the host has them (ps_button_all_players)"sv;
-    input->ps_held[nr] = state.buttonFlags & ~flags;
+    input->ps_held[nr] = pressed & ~flags;
     bool create_tap = false;
-    if (const auto timeout = config::input.back_button_timeout; timeout >= 0ms) {
+    if (timeout >= 0ms) {
         const bool back = flags & BACK;
-        const auto now = std::chrono::steady_clock::now();
         if (back && !input->back[nr]) input->back_since[nr] = now;
-        create_tap = !back && input->back[nr] && now - input->back_since[nr] < timeout - 20ms;
+        // Select that went into the touchpad combination is no tap of Create when it comes up.
+        create_tap = !back && input->back[nr] && now - input->back_since[nr] < timeout - 20ms &&
+                     !(input->touch_combo[nr] && input->combo[nr].busy(now_ms));
         input->back[nr] = back;
         flags &= ~BACK;
     }
@@ -898,40 +1542,130 @@ constexpr auto min_hold = 30ms;
 
 static void hold_from(std::chrono::steady_clock::time_point down) { std::this_thread::sleep_until(down + min_hold); }
 
-static ps_keyboard *keyboard_of(input_raw_t &input) {
-    if (!input.keyboard && !input.keyboard_failed) {
-        if (const int rc = ps_keyboard_open(input.user, &input.keyboard); rc) {
+namespace {
+// Whose input this thread passes on (set_input_owner, patch 0022): the session's feedback queue, or null.
+thread_local const feedback_queue_t *input_owner = nullptr;
+}  // namespace
+
+void set_input_owner(const feedback_queue_t *feedback_queue) { input_owner = feedback_queue; }
+
+// Which keyboard and mouse on the console the input this thread passes on gets: the one rule, asked only by the seven
+// ways in below (they get null and drop the input).
+// - A device that can choose any profile (or not set yet): the shared ones, as the console's own, as before profiles.
+// - A device with its own profiles: its own, seated in the profile its first controller plays as. The console doesn't ask
+//   "Who's using this keyboard?" (or mouse), so nobody picks another profile with them, and the player types into text
+//   fields as that profile. None while it has no controller seated: a spectator, or one whose keyboard and mouse play as a
+//   controller of their own (keyboard_pad, which takes them before they get here).
+// - Input without a stream behind it (Sunshine releasing what a stream held; its nudge of the pointer at a stream's start)
+//   may only release, on the shared ones: a device's own ones release everything when they go. Sunshine's key repeat and
+//   its delayed left button run on its task pool but carry their stream (patch 0022).
+// prospero::kbm_route decides. Its profiles are read at most once a second. Caller holds input.mutex.
+static kbm_t *kbm_for_input(input_raw_t &input, bool release) {
+    const std::string cert = input_owner && *input_owner ? gamepad_owner(*input_owner) : std::string();
+    bool limited = false;
+    if (!cert.empty()) {
+        thread_local std::string cached_cert;
+        thread_local bool cached_limited = false;
+        const auto now = std::chrono::steady_clock::now();
+        thread_local std::chrono::steady_clock::time_point cached_at{};
+        if (cert != cached_cert || now - cached_at > 1s) {
+            const auto set = profiles_of(paired_device(cert).uuid);
+            cached_limited = set && !set->free;
+            cached_cert = cert;
+            cached_at = now;
+        }
+        limited = cached_limited;
+    }
+    uint32_t user = 0;
+    for (int nr = 0; limited && nr < MAX_GAMEPADS && !user; ++nr)
+        if (input.pads[nr] && input.owner[nr] == cert) user = input.seat[nr];
+    const auto route = prospero::kbm_route(!cert.empty(), release, limited, user != 0);
+    if (route == prospero::KbmRoute::shared) return &input.shared;
+    if (!limited) return nullptr;
+    auto it = std::find_if(input.own.begin(), input.own.end(), [&](const auto &kbm) { return kbm->owner == cert; });
+    // Its player switched profile, or it lost the one they were in: the next use adds them anew where it plays now.
+    if (it != input.own.end() && (*it)->user != user) {
+        close_kbm(**it);
+        input.own.erase(it);
+        it = input.own.end();
+    }
+    if (route == prospero::KbmRoute::none) return nullptr;
+    if (it == input.own.end()) {
+        input.own.push_back(std::make_unique<kbm_t>());
+        input.own.back()->owner = cert;
+        input.own.back()->user = user;
+        it = std::prev(input.own.end());
+    }
+    return it->get();
+}
+
+// Seats a keyboard or mouse of a device's own in its profile right after adding it, as open_pad does a pad. The bus
+// knows them by the add handle with the device type above it, type << 48: 3 for a keyboard (0x3000000660100 in the login
+// manager's log), 4 for a mouse (0x4000000670000). The bare handle is the fallback. False leaves it unseated: the
+// caller removes it. Returns the bus id it was seated by, 0 if none.
+static uint64_t seat_kbm_device(uint32_t handle, uint32_t user, const char *what, uint64_t type) {
+    const uint64_t forms[] = {handle | (type << 48), handle};
+    int rc = 0;
+    for (const uint64_t device : forms) {
+        rc = ps_profile_bind(device, user);
+        if (rc == 0) {
+            char text[64];
+            std::snprintf(text, sizeof text, "handle %#x, bound as %#llx", handle, static_cast<unsigned long long>(device));
+            BOOST_LOG(info) << "PS5 virtual "sv << what << " of a device's profile seated ("sv << text << ')';
+            return device;
+        }
+    }
+    BOOST_LOG(warning) << "PS5 virtual "sv << what << " of a device's profile not seated ("sv << rc << "), so it was removed"sv;
+    return 0;
+}
+
+// The keyboard and the mouse of a kbm_t, added on first use. A release gets the one there is, never a new one.
+static ps_keyboard *keyboard_of(input_raw_t &input, kbm_t &kbm, bool release) {
+    if (release) return kbm.keyboard;
+    if (!kbm.keyboard && !kbm.keyboard_failed) {
+        if (kbm.user) settle_bus();
+        if (const int rc = ps_keyboard_open(kbm.user ? kbm.user : input.user, &kbm.keyboard); rc) {
             BOOST_LOG(error) << "PS5 virtual keyboard failed: "sv << rc;
-            input.keyboard_failed = true;
+            kbm.keyboard_failed = true;
+        } else if (kbm.user && !(kbm.keyboard_bus = seat_kbm_device(ps_keyboard_device_id(kbm.keyboard), kbm.user, "keyboard", 3))) {
+            ps_keyboard_close(kbm.keyboard);
+            removed_device();
+            kbm.keyboard = nullptr;
+            kbm.keyboard_failed = true;
         } else {
-            BOOST_LOG(info) << "PS5 virtual keyboard attached"sv;
+            BOOST_LOG(info) << "PS5 virtual keyboard attached"sv << (kbm.user ? " in its device's profile"sv : ""sv);
             std::this_thread::sleep_for(device_settle);
         }
     }
-    return input.keyboard;
+    return kbm.keyboard;
 }
 
-static ps_mouse *mouse_of(input_raw_t &input) {
-    if (!input.mouse && !input.mouse_failed) {
-        if (const int rc = ps_mouse_open(input.user, &input.mouse); rc) {
+static ps_mouse *mouse_of(input_raw_t &input, kbm_t &kbm, bool release) {
+    if (release) return kbm.mouse;
+    if (!kbm.mouse && !kbm.mouse_failed) {
+        if (kbm.user) settle_bus();
+        if (const int rc = ps_mouse_open(kbm.user ? kbm.user : input.user, &kbm.mouse); rc) {
             BOOST_LOG(error) << "PS5 virtual mouse failed: "sv << rc;
-            input.mouse_failed = true;
+            kbm.mouse_failed = true;
+        } else if (kbm.user && !(kbm.mouse_bus = seat_kbm_device(ps_mouse_device_id(kbm.mouse), kbm.user, "mouse", 4))) {
+            ps_mouse_close(kbm.mouse);
+            removed_device();
+            kbm.mouse = nullptr;
+            kbm.mouse_failed = true;
         } else {
-            BOOST_LOG(info) << "PS5 virtual mouse attached"sv;
+            BOOST_LOG(info) << "PS5 virtual mouse attached"sv << (kbm.user ? " in its device's profile"sv : ""sv);
             std::this_thread::sleep_for(device_settle);
         }
     }
-    return input.mouse;
+    return kbm.mouse;
 }
 
-static void send_mouse(input_raw_t &input, int dx, int dy, int8_t wheel = 0, int8_t tilt = 0) {
-    ps_mouse *mouse = mouse_of(input);
-    if (!mouse) return;
+static void send_mouse(kbm_t &kbm, ps_mouse *mouse, int dx, int dy, int8_t wheel = 0, int8_t tilt = 0) {
     // A large jump goes out in several reports rather than wrapping around.
     do {
         const auto x = static_cast<int16_t>(std::clamp(dx, -32767, 32767));
         const auto y = static_cast<int16_t>(std::clamp(dy, -32767, 32767));
-        ps_mouse_send(mouse, x, y, input.mouse_buttons, wheel, tilt);
+        ps_mouse_send(mouse, x, y, kbm.mouse_buttons, wheel, tilt);
         dx -= x;
         dy -= y;
         wheel = tilt = 0;
@@ -940,10 +1674,14 @@ static void send_mouse(input_raw_t &input, int dx, int dy, int8_t wheel = 0, int
 
 void move_mouse(input_t &input, int deltaX, int deltaY) {
     std::lock_guard lock(input->mutex);
-    input->pointer.reset();
+    kbm_t *kbm = kbm_for_input(*input, false);
+    if (!kbm) return;
     // Sunshine nudges the pointer by a pixel and back at every stream start; that alone does not add a mouse.
-    if (!input->mouse && std::abs(deltaX) <= 1 && std::abs(deltaY) <= 1) return;
-    send_mouse(*input, deltaX, deltaY);
+    if (!kbm->mouse && std::abs(deltaX) <= 1 && std::abs(deltaY) <= 1) return;
+    ps_mouse *mouse = mouse_of(*input, *kbm, false);
+    if (!mouse) return;
+    kbm->pointer.reset();
+    send_mouse(*kbm, mouse, deltaX, deltaY);
 }
 
 void move_mouse(input_t &input, const touch_port_t &, int deltaX, int deltaY) { move_mouse(input, deltaX, deltaY); }
@@ -951,50 +1689,73 @@ void move_mouse(input_t &input, const touch_port_t &, int deltaX, int deltaY) { 
 // The console's pointer is relative only, so a client in absolute mode moves it by the difference to its last position.
 void abs_mouse(input_t &input, const touch_port_t &, float x, float y) {
     std::lock_guard lock(input->mutex);
-    const auto last = std::exchange(input->pointer, std::pair{x, y});
+    kbm_t *kbm = kbm_for_input(*input, false);
+    if (!kbm) return;
+    ps_mouse *mouse = mouse_of(*input, *kbm, false);
+    if (!mouse) return;
+    const auto last = std::exchange(kbm->pointer, std::pair{x, y});
     if (!last) return;
-    send_mouse(*input, static_cast<int>(std::lround(x - last->first)), static_cast<int>(std::lround(y - last->second)));
+    send_mouse(*kbm, mouse, static_cast<int>(std::lround(x - last->first)), static_cast<int>(std::lround(y - last->second)));
 }
 
 void button_mouse(input_t &input, int button, bool release) {
     const uint8_t bit = prospero::mouse_button_bit(button);
     if (!bit) return;
     std::lock_guard lock(input->mutex);
-    const uint8_t buttons = release ? input->mouse_buttons & ~bit : input->mouse_buttons | bit;
-    if (buttons == input->mouse_buttons) return;
-    input->mouse_buttons = buttons;
-    if (release) hold_from(input->button_down_at);
-    send_mouse(*input, 0, 0);
-    if (!release) input->button_down_at = std::chrono::steady_clock::now();
+    kbm_t *kbm = kbm_for_input(*input, release);
+    if (!kbm) return;
+    const uint8_t buttons = release ? kbm->mouse_buttons & ~bit : kbm->mouse_buttons | bit;
+    if (buttons == kbm->mouse_buttons) return;
+    ps_mouse *mouse = mouse_of(*input, *kbm, release);
+    if (!mouse) return;
+    kbm->mouse_buttons = buttons;
+    if (release) hold_from(kbm->button_down_at);
+    send_mouse(*kbm, mouse, 0, 0);
+    if (!release) kbm->button_down_at = std::chrono::steady_clock::now();
 }
 
 void scroll(input_t &input, int distance) {
     std::lock_guard lock(input->mutex);
-    if (const int8_t steps = input->wheel.add(distance)) send_mouse(*input, 0, 0, steps, 0);
+    kbm_t *kbm = kbm_for_input(*input, false);
+    if (!kbm) return;
+    ps_mouse *mouse = mouse_of(*input, *kbm, false);
+    if (!mouse) return;
+    if (const int8_t steps = kbm->wheel.add(distance)) send_mouse(*kbm, mouse, 0, 0, steps, 0);
 }
 
 void hscroll(input_t &input, int distance) {
     std::lock_guard lock(input->mutex);
-    if (const int8_t steps = input->tilt.add(distance)) send_mouse(*input, 0, 0, 0, steps);
+    kbm_t *kbm = kbm_for_input(*input, false);
+    if (!kbm) return;
+    ps_mouse *mouse = mouse_of(*input, *kbm, false);
+    if (!mouse) return;
+    if (const int8_t steps = kbm->tilt.add(distance)) send_mouse(*kbm, mouse, 0, 0, 0, steps);
 }
 
 void keyboard_update(input_t &input, uint16_t modcode, bool release, uint8_t, bool) {
     std::lock_guard lock(input->mutex);
-    if (!input->keys.update(modcode, release)) return;
-    ps_keyboard *keyboard = keyboard_of(*input);
+    kbm_t *kbm = kbm_for_input(*input, release);
+    if (!kbm) return;
+    // Only a key that changes what is held asks for the keyboard (an unmapped key or a repeat adds none).
+    auto keys = kbm->keys;
+    if (!keys.update(modcode, release)) return;
+    ps_keyboard *keyboard = keyboard_of(*input, *kbm, release);
     if (!keyboard) return;
-    if (release) hold_from(input->key_down_at);
-    ps_keyboard_send(keyboard, input->keys.modifiers(), input->keys.usages(), input->keys.count());
-    if (!release) input->key_down_at = std::chrono::steady_clock::now();
+    kbm->keys = keys;
+    if (release) hold_from(kbm->key_down_at);
+    ps_keyboard_send(keyboard, kbm->keys.modifiers(), kbm->keys.usages(), kbm->keys.count());
+    if (!release) kbm->key_down_at = std::chrono::steady_clock::now();
 }
 
 // Text from a client's on-screen keyboard: printable ASCII is typed key by key as on a US keyboard, and what the
 // client holds stays held. Other characters have no key and are dropped.
 void unicode(input_t &input, const char *utf8, int size) {
     std::lock_guard lock(input->mutex);
-    ps_keyboard *keyboard = keyboard_of(*input);
+    kbm_t *kbm = kbm_for_input(*input, false);
+    if (!kbm) return;
+    ps_keyboard *keyboard = keyboard_of(*input, *kbm, false);
     if (!keyboard) return;
-    const auto &held = input->keys;
+    const auto &held = kbm->keys;
     int dropped = 0;
     for (int i = 0; i < size; i++) {
         const auto key = prospero::ascii_key(utf8[i]);

@@ -206,7 +206,8 @@ extern const std::size_t prospero_web_asset_count = sizeof prospero_web_assets /
         "${MOONLIGHT_SRC}/src/RtspParser.c"
         src/sunshine/main_ps5.cpp src/sunshine/video_ps5.cpp src/sunshine/process_ps5.cpp
         src/sunshine/platform_ps5.cpp src/sunshine/stubs_ps5.cpp src/sunshine/self_check.cpp src/control/control_server.cpp
-        src/control/autoload_host.cpp app/src/psapp/autoload.cpp src/apps/titles.cpp src/platform/ps5/title_launch.c)
+        src/control/autoload_host.cpp src/control/file_bridge.cpp app/src/psapp/autoload.cpp src/apps/titles.cpp src/platform/ps5/title_launch.c
+        src/platform/ps5/console_users.c src/platform/ps5/profile_seat.c src/platform/ps5/user_service.c)
     # Sunshine includes its own headers as "src/..." and "..."; FFmpeg's internal headers include a
     # "config.h" that must not resolve to Sunshine's, hence -idirafter for the Sunshine tree.
     target_include_directories(prospero_sunshine PRIVATE src "${SUNSHINE_SRC}" "${CMAKE_BINARY_DIR}/third-party")
@@ -224,8 +225,8 @@ extern const std::size_t prospero_web_asset_count = sizeof prospero_web_assets /
         set(PROSPERO_COMMIT "unknown")
     endif()
     target_compile_definitions(prospero_sunshine PRIVATE
-        PROJECT_NAME="ProsperoSunshine" PROJECT_VERSION="0.4.0${PROSPERO_FLAVOR_SUFFIX}" PROJECT_VERSION_MAJOR="0"
-        PROJECT_VERSION_MINOR="4" PROJECT_VERSION_PATCH="0" PROJECT_VERSION_COMMIT="${PROSPERO_COMMIT}"
+        PROJECT_NAME="ProsperoSunshine" PROJECT_VERSION="0.4.2${PROSPERO_FLAVOR_SUFFIX}" PROJECT_VERSION_MAJOR="0"
+        PROJECT_VERSION_MINOR="4" PROJECT_VERSION_PATCH="2" PROJECT_VERSION_COMMIT="${PROSPERO_COMMIT}"
         PROJECT_FQDN="dev.prosperosunshine" SUNSHINE_ASSETS_DIR="/data/prosperosunshine/assets"
         SUNSHINE_PUBLISHER_NAME="ProsperoSunshine" SUNSHINE_PUBLISHER_WEBSITE=""
         SUNSHINE_PUBLISHER_ISSUE_URL="" SUNSHINE_TRAY=0 BOOST_ALL_NO_LIB)

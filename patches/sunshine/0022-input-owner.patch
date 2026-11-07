@@ -1,0 +1,99 @@
+ProsperoSunshine: tell the platform whose input it passes on
+
+The PS5 host gives each paired device the console profiles it may play as, and a device with its own profiles gets its
+own keyboard and mouse, seated in the profile its controller plays as. The console's shared keyboard and mouse belong to
+no profile the host chose: with more than one profile signed in, the console asks who uses them, and whoever answers
+picks any profile. So the platform has to know whose keyboard and mouse input it gets.
+
+passthrough_next_message() tells it through the new platf::set_input_owner, by the session's feedback queue (the one
+platf::set_gamepad_owner was given), and clears it afterwards. Two kinds of input run later from the task pool, where no
+owner would be set: the key repeat (repeat_key) and the delayed release of the left button after absolute mouse input.
+They set the owner of the stream they belong to as well; the repeat holds the stream by a weak pointer and stops once it
+is gone. Input passed on with no owner set is Sunshine releasing what a stream held: the PS5 platform lets it release
+only, never press.
+
+--- a/src/platform/common.h
++++ b/src/platform/common.h
+@@ -1315,6 +1315,15 @@
+    */
+   void set_gamepad_owner(const feedback_queue_t &feedback_queue, std::string_view owner);
+   /**
++   * @brief Tell the platform whose input the calling thread passes on next.
++   *
++   * The PS5 host sends a device's keyboard and mouse input to the keyboard and mouse of the console profiles it plays as.
++   * Input passed on with no owner set (Sunshine releasing what a stream held) may only release.
++   *
++   * @param feedback_queue The session's feedback queue, as set_gamepad_owner was given it; null once done.
++   */
++  void set_input_owner(const feedback_queue_t *feedback_queue);
++  /**
+    * @brief Release gamepad resources.
+    *
+    * @param input Platform input backend that receives the event.
+--- a/src/input.cpp
++++ b/src/input.cpp
+@@ -1222,7 +1222,9 @@
+           // Already released left button
+           return;
+         }
++        platf::set_input_owner(&input->feedback_queue);
+         platf::button_mouse(platf_input, BUTTON_LEFT, release);
++        platf::set_input_owner(nullptr);
+ 
+         mouse_press[BUTTON_LEFT] = false;
+         input->mouse_left_button_timeout = nullptr;
+@@ -1437,21 +1439,25 @@
+   /**
+    * @brief Re-emit a held key until its repeat task is cancelled.
+    *
++   * @param owner The stream the key belongs to; the repeat stops once it is gone.
+    * @param key_code Moonlight keyboard packet key code.
+    * @param flags Bit flags that modify the requested operation.
+    * @param synthetic_modifiers Byte mask of modifiers to press around the repeated key event.
+    */
+-  void repeat_key(uint16_t key_code, uint8_t flags, std::byte synthetic_modifiers) {
++  void repeat_key(std::weak_ptr<input_t> owner, uint16_t key_code, uint8_t flags, std::byte synthetic_modifiers) {
+     // If key no longer pressed, stop repeating
+     const auto state = key_press[make_kpid(key_code, flags)];
+-    if (!state.pressed) {
++    const auto input = owner.lock();
++    if (!state.pressed || !input) {
+       key_press_repeat_id = nullptr;
+       return;
+     }
+ 
++    platf::set_input_owner(&input->feedback_queue);
+     send_key_and_modifiers(key_code, false, flags, synthetic_modifiers, state.extended);
+-
+-    key_press_repeat_id = task_pool.pushDelayed(repeat_key, config::input.key_repeat_period, key_code, flags, synthetic_modifiers).task_id;
++    platf::set_input_owner(nullptr);
++
++    key_press_repeat_id = task_pool.pushDelayed(repeat_key, config::input.key_repeat_period, owner, key_code, flags, synthetic_modifiers).task_id;
+   }
+ 
+   /**
+@@ -1528,7 +1534,7 @@
+         }
+ 
+         if (config::input.key_repeat_delay.count() > 0) {
+-          key_press_repeat_id = task_pool.pushDelayed(repeat_key, config::input.key_repeat_delay, keyCode, packet->flags, synthetic_modifiers).task_id;
++          key_press_repeat_id = task_pool.pushDelayed(repeat_key, config::input.key_repeat_delay, std::weak_ptr<input_t> {input}, keyCode, packet->flags, synthetic_modifiers).task_id;
+         }
+       } else {
+         // Already released
+@@ -2548,6 +2554,7 @@
+ #endif
+ 
+     // Send the batched input to the OS
++    platf::set_input_owner(&input->feedback_queue);
+     switch (util::endian::little(payload->magic)) {
+       case MOUSE_MOVE_REL_MAGIC_GEN5:
+         passthrough(input, (PNV_REL_MOUSE_MOVE_PACKET) payload);
+@@ -2594,6 +2601,7 @@
+         passthrough(input, (PSS_CONTROLLER_BATTERY_PACKET) payload);
+         break;
+     }
++    platf::set_input_owner(nullptr);
+     return true;
+   }
+ 

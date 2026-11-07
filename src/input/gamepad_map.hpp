@@ -2,8 +2,12 @@
 // Moonlight gamepad state (Xbox layout, platf::gamepad_state_t) → PS5 virtual DualSense state.
 // Portable so it can be unit-tested on the build host; docs/input-mapping.md lists the table.
 #pragma once
+#include <algorithm>
 #include <array>
+#include <chrono>
+#include <cstddef>
 #include <cstdint>
+#include <utility>
 
 namespace prospero {
 
@@ -14,6 +18,55 @@ inline constexpr uint32_t start = 0x0010, back = 0x0020, left_stick = 0x0040, ri
 inline constexpr uint32_t left_button = 0x0100, right_button = 0x0200, home = 0x0400;
 inline constexpr uint32_t a = 0x1000, b = 0x2000, x = 0x4000, y = 0x8000;
 inline constexpr uint32_t touchpad = 0x100000;
+// The button below the Xbox button on an Xbox Series controller (Share), sent as Sunshine's MISC_BUTTON.
+inline constexpr uint32_t misc = 0x200000;
+// Not Moonlight's (it uses bits up to 0x200000): the keyboard pad sets it for Ctrl+Backspace (keyboard_pad.hpp), which
+// switches the pad to its device's next profile at once; map_gamepad never passes it on to the console.
+inline constexpr uint32_t switch_seat = 0x40000000;
+// L1+L2+R1+R2 held together for switch_hold does the same on a controller (device_profiles.hpp): the buttons here and
+// both triggers pulled to switch_trigger. Moonlight's on-screen controller has all four but no L3 or R3. It has to be
+// held, as a game may have all four down for a moment.
+inline constexpr uint32_t switch_chord = left_button | right_button;
+}
+// Nearly all the way: a trigger half pulled in a racing game doesn't count. The on-screen controller sends 255.
+inline constexpr uint8_t switch_trigger = 200;
+inline constexpr std::chrono::seconds switch_hold{2};
+// Every switch puts a notification on the screen of everyone streaming, and Ctrl+Backspace could fill it. So a controller
+// switches freely once round its device's profiles, and then, or after a refused switch (no other profile free, only
+// one profile), waits switch_cooldown, ignoring its switches meanwhile. One per controller.
+inline constexpr std::chrono::seconds switch_cooldown{20};
+class SwitchBudget {
+public:
+    using clock = std::chrono::steady_clock;
+    bool allowed(clock::time_point now) const { return now >= until_; }
+    // While it waits: whole seconds left, rounded up.
+    long long seconds_left(clock::time_point now) const {
+        if (now >= until_) return 0;
+        return std::chrono::ceil<std::chrono::seconds>(until_ - now).count();
+    }
+    // The player is told once per wait (the first switch that comes during it), so the wait's own notice can't fill the
+    // screen either.
+    bool tell_once() { return !std::exchange(told_, true); }
+    // round: how many profiles the device switches between; that many switches make a round.
+    void switched(clock::time_point now, std::size_t round) {
+        if (++count_ >= std::max<std::size_t>(round, 1)) rest(now);
+    }
+    void refused(clock::time_point now) { rest(now); }
+
+private:
+    void rest(clock::time_point now) {
+        until_ = now + switch_cooldown;
+        count_ = 0;
+        told_ = false;
+    }
+    clock::time_point until_{};
+    std::size_t count_ = 0;
+    bool told_ = false;
+};
+constexpr bool switch_at_once(uint32_t flags) { return flags & moonlight::switch_seat; }
+constexpr bool holds_switch(uint32_t flags, uint8_t lt, uint8_t rt) {
+    return switch_at_once(flags) ||
+           ((flags & moonlight::switch_chord) == moonlight::switch_chord && lt >= switch_trigger && rt >= switch_trigger);
 }
 
 // ScePadButton bits (src/platform/ps5/pad.h).
@@ -38,6 +91,41 @@ enum class PadRole { host, guest };
 constexpr uint32_t allowed_buttons(uint32_t flags, PadRole role, bool all_players) {
     return role == PadRole::host || all_players ? flags : flags & ~(moonlight::home | moonlight::back);
 }
+
+// Moonlight's controller capabilities in the arrival message (LI_CCAP_TOUCHPAD).
+inline constexpr uint16_t capability_touchpad = 0x08;
+constexpr bool has_touchpad(uint16_t capabilities, uint32_t supported_buttons) {
+    return (capabilities & capability_touchpad) || (supported_buttons & moonlight::touchpad);
+}
+
+// A controller without a touchpad (an Xbox one, mostly; its Share button seldom reaches Moonlight, as Windows keeps it)
+// clicks the touchpad with Select and Start together, the buttons in the places of Create and Options. Pressed together,
+// Start is the touchpad until it comes up, and neither Create nor Options goes out. Sunshine turns Select held for
+// back_button_timeout into PS (and forces Select up first): that PS is dropped for a while after the combination starts,
+// as the timer ran from the Select press, which came before. Times are in milliseconds of any steady clock.
+struct TouchpadCombo {
+    bool active = false;
+    int64_t quiet_until = 0;  // Sunshine's PS from the held Select is dropped until then
+
+    // ps_hold_ms: back_button_timeout, negative when Sunshine makes no PS from Select.
+    constexpr uint32_t apply(uint32_t flags, int64_t now, int64_t ps_hold_ms) {
+        constexpr uint32_t pair = moonlight::back | moonlight::start;
+        if (!active && (flags & pair) == pair) {
+            active = true;
+            quiet_until = now + (ps_hold_ms > 0 ? ps_hold_ms : 0) + 300;
+        }
+        if (active && !(flags & pair)) active = false;
+        if (active) {
+            const bool click = flags & moonlight::start;
+            flags &= ~pair;
+            if (click) flags |= moonlight::touchpad;
+        }
+        if (now < quiet_until) flags &= ~moonlight::home;
+        return flags;
+    }
+    // While true, a Select coming up is not a tap of Create.
+    constexpr bool busy(int64_t now) const { return active || now < quiet_until; }
+};
 
 // A trigger counts as pressed (the digital L2/R2 bit) above this analog value.
 inline constexpr uint8_t trigger_threshold = 8;
@@ -71,6 +159,8 @@ constexpr PadState map_gamepad(uint32_t flags, uint8_t lt, uint8_t rt, int16_t l
         {moonlight::left_stick, dualsense::l3},   {moonlight::right_stick, dualsense::r3},
         {moonlight::start, dualsense::options},   {moonlight::back, dualsense::create},
         {moonlight::home, dualsense::ps},         {moonlight::touchpad, dualsense::touchpad},
+        // An Xbox controller has no touchpad; its Share button stands in for the touchpad click.
+        {moonlight::misc, dualsense::touchpad},
     };
     uint32_t buttons = 0;
     for (const auto &p : table)
