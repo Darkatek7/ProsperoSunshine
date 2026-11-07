@@ -647,6 +647,20 @@ alle H.264 1080p60 auf „PS5 Screen“ mit `--no-script`; B, C und A beim zweit
 Nicht geprüft: echtes Moonlight, ein echter DualSense an der Konsole, und ob der Dialog „Wer benutzt diesen Controller?“
 einem Gast den Nutzer des Hosts anbietet.
 
+### Touchpad ohne Touchpad und „Restart host“ im Stream (2026-11-07, 13.00)
+
+Moonlight für Windows meldet einen Xbox-Controller mit `type 01`, `capabilities 0043` und `supportedButtonFlags 0000F7FF`
+(Debug-Log der Ankunft): kein Touchpad, keine Share-Taste (`0x200000`), auch wenn sie gedrückt wird. View und Menu zusammen
+sind seit `8e1467b` der Touchpad-Klick für solche Controller; vom Besitzer mit diesem Xbox-Controller in einem Spiel
+bestätigt, View allein, Menu allein und die Xbox-Taste wie zuvor.
+
+„Restart host“ während eines Streams (Bericht aus Issue 30: auf 9.60 ging die Konsole dabei aus, mit dem Haptik-Kanal des
+Forks offen) wie die App nachgestellt: Testclient streamt, vorne ein Spiel, `QUIT` an den Steuerport, dann das 0.4.1-ELF an
+den Loader. Der Host beendet sich in unter 2 s sauber (Aufnahme und Ton gestoppt und geschlossen, Pad abgemeldet,
+`exit_value=0`), die Konsole bleibt an, der neue Host kommt normal hoch. Der Client hatte bis dahin 1018 Bilder fehlerfrei
+dekodiert; ein neuer Stream danach 20 s mit 1196 Bildern, fehlerfrei dekodiert, ohne Tonfehler. Auf 13.00 ohne Haptik-Kanal
+also nicht nachstellbar; mit Moonlight am PC statt Testclient und auf 9.60 ungeprüft.
+
 ### Release 0.4.1 auf der Konsole (2026-11-07, 13.00)
 
 App aus `build/app` kopiert und neu registriert, sie zeigt `v01.000.022`; nach „Restart host“ meldet das Kernel-Log
