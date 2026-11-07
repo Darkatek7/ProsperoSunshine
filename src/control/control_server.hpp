@@ -25,6 +25,10 @@
 //   APPS                        -> "OK <title id> <hidden|shown> <name>" per installed title, then the hidden ids of titles
 //                                  no longer installed ("OK <id> hidden"), then "END" (app_access.hpp)
 //   SETAPPS <title id> <hidden|shown> -> hides an app from devices that aren't trusted, or shows it again ("OK saved")
+//   MENUS                       -> "OK <profiles|unset>": the profiles that reach the console's menus (menu_access.hpp:
+//                                  none, or ids separated by commas), "unset" while they aren't chosen
+//   SETMENUS <profiles|unset>   -> chooses them ("OK saved" / "ERR ..."); "unset" goes back to the host's role deciding.
+//                                  Every id must be a profile on the console. The host reads them within a second.
 //   REPORT                      -> "OK port=<n>": for some seconds, <appdata>/diagnostics.txt is on that port
 //   AUTOLOAD [ON|OFF]           -> the Payload Manager's autoload list, for the app (autoload_host.hpp)
 //   WEBLOGIN                    -> "OK user=<name> enabled=<0|1>": the stored login, also while the page is off; the
