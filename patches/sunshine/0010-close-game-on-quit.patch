@@ -5,7 +5,8 @@ progress. With close_game_on_quit = enabled, /cancel (Moonlight's Terminate App)
 in front, through the system as from the home screen. Only /cancel calls it: a session's end and the host's shutdown leave
 the game running. The game then also stays listed as running after the stream while it is in front (serverinfo, resume), as
 upstream keeps its app, so Moonlight offers Resume and Quit for it. running() itself still turns 0 when the stream ends, so the
-virtual pads go as before.
+virtual pads go as before. /serverinfo first finishes the sessions still stopping, so that right after a stream "PS5 Screen"
+isn't listed as running for the moment its capture takes to close: Moonlight offered Quit for it then, which never finished.
 
 --- a/src/config.h
 +++ b/src/config.h
@@ -90,9 +91,16 @@ virtual pads go as before.
  }  // namespace proc
 --- a/src/nvhttp.cpp
 +++ b/src/nvhttp.cpp
-@@ -1313,6 +1313,12 @@
+@@ -1313,6 +1313,19 @@
      }
  
++#ifdef __SCE__
++    // A stream that just ended stays listed, with its app, until its capture has closed (100 to 400 ms). Moonlight asks
++    // right after its stream ends: it would offer Resume and Quit for "PS5 Screen", and its Quit then waits for good, as
++    // it sends nothing once the app is gone and waits for a change that doesn't come. Finishing those sessions first
++    // answers with what is left.
++    rtsp_stream::session_count();
++#endif
      auto current_appid = proc::proc.running();
 +#ifdef __SCE__
 +    // With close_game_on_quit, the game stays listed as running after the stream, so Moonlight offers Resume and Quit.
@@ -103,7 +111,7 @@ virtual pads go as before.
      tree.put("root.PairStatus", pair_status);
      tree.put("root.currentgame", current_appid);
      tree.put("root.state", current_appid > 0 ? "SUNSHINE_SERVER_BUSY" : "SUNSHINE_SERVER_FREE");
-@@ -1516,6 +1522,11 @@
+@@ -1516,6 +1529,11 @@
      });
  
      auto current_appid = proc::proc.running();
@@ -115,7 +123,7 @@ virtual pads go as before.
      if (current_appid == 0) {
        tree.put("root.resume", 0);
        tree.put("root.<xmlattr>.status_code", 503);
-@@ -1588,6 +1599,10 @@
+@@ -1588,6 +1606,10 @@
      );
      tree.put("root.resume", 1);
  
@@ -126,7 +134,7 @@ virtual pads go as before.
      rtsp_stream::launch_session_raise(launch_session);
    }
  
-@@ -1617,6 +1632,10 @@
+@@ -1617,6 +1639,10 @@
      if (proc::proc.running() > 0) {
        proc::proc.terminate();
      }
