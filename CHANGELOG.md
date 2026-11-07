@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- The host's process is called `ProsperoSunshine` instead of `payload.elf`, so the Payload Manager's list of running
+  payloads shows which one it is (#32, thanks to @natkokrasevac).
+
 ## 0.4.0 (2026-11-06)
 
 ### Added
