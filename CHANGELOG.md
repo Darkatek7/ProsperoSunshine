@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- The web page answers `http://` with a redirect to `https://` on the same address and port. Before, the host closed the
+  connection, and browsers showed an empty response (`ERR_EMPTY_RESPONSE`, #31, thanks to @natkokrasevac).
 - The host's process is called `ProsperoSunshine` instead of `payload.elf`, so the Payload Manager's list of running
   payloads shows which one it is (#32, thanks to @natkokrasevac).
 
