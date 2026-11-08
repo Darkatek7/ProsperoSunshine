@@ -1,6 +1,6 @@
 # Avcap2: Frame-Descriptor von `sceAvcap2ReadVideo` (FW 13.00)
 
-Stand: 28. Oktober 2026. Gemessen mit `src/capture_soak.cpp` (fünf 5-s-Zyklen und ein 10-min-Lauf im Home-Menü, 1080p H.264). Der Descriptor ist 0x70 Bytes groß; Wort 0 ist die Größe, die der Aufrufer vorbelegt. Die Tabelle nennt 64-Bit-Wörter in Little-Endian.
+Stand: 28. Oktober 2026. Gemessen mit `src/probes/capture_soak.cpp` (fünf 5-s-Zyklen und ein 10-min-Lauf im Home-Menü, 1080p H.264). Der Descriptor ist 0x70 Bytes groß; Wort 0 ist die Größe, die der Aufrufer vorbelegt. Die Tabelle nennt 64-Bit-Wörter in Little-Endian.
 
 | Wort | Offset | Beobachtung | Deutung | Sicherheit |
 | --- | --- | --- | --- | --- |

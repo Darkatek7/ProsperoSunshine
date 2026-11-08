@@ -1,7 +1,7 @@
 # Ausgabe eines virtuellen Pads: Rumble (FW 13.00)
 
 Stand: 31. Oktober 2026. Statische Analyse der entschlüsselten `libScePad` und `SceRemotePlay` (Werkzeuge in
-`tools/re/`, kein Sony-Code im Repository), dazu Live-Messung mit `src/pad_output_probe.cpp` und dem Host.
+`tools/re/`, kein Sony-Code im Repository), dazu Live-Messung mit `src/probes/pad_output_probe.cpp` und dem Host.
 
 ## Woher die Werte kommen
 

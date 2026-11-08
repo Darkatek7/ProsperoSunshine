@@ -567,8 +567,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1
 ```
 
 The first run builds the dependencies into `out/deps` (around 30 minutes, mostly Boost). The host is
-`out/prospero_sunshine.elf`; the other ELFs are hardware probes. `app/build.ps1` then builds the app, and
-`bash scripts/package.sh` the release archive. The [debug build](#debug-build) is `scripts/build.ps1 -Debug` (into
+`out/prospero_sunshine.elf`; `firmware_probe.elf` and `host_restart.elf` go into the release archive too and
+`relaunch_helper.elf` into the host (all three from `src/payloads/`), the other ELFs are hardware probes (`src/probes/`).
+`app/build.ps1` then builds the app, and `bash scripts/package.sh` the release archive. The [debug build](#debug-build) is `scripts/build.ps1 -Debug` (into
 `out/debug`, with `prospero_sunshine.debug.elf` and `prospero_sunshine.map` next to the host), `app/build.ps1 -Debug`
 (`build/app-debug/PPSA47989-debug.zip`) and `PROSPERO_DEBUG=1 bash scripts/package.sh`; CMake's switch is
 `-DPROSPERO_DEBUG=ON`. The host names its commit in `host_diag.log` and the diagnostics report.

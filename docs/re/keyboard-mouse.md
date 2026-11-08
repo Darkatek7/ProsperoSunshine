@@ -1,7 +1,7 @@
 # Virtuelle Tastatur und Maus (FW 13.00)
 
 Stand: 3. November 2026. Statische Analyse der entschlüsselten `libSceKeyboard` und `libSceMouse` (Werkzeuge in
-`tools/re/`, kein Sony-Code im Repository), dazu Messungen mit `src/kbm_probe.cpp` und dem Host über den Testclient
+`tools/re/`, kein Sony-Code im Repository), dazu Messungen mit `src/probes/kbm_probe.cpp` und dem Host über den Testclient
 (`STATUS.md`, „Tastatur und Maus“). Adressen sind Modul-Offsets. Der Kernel (`/dev/hid`) liegt nicht vor.
 
 ## Exporte

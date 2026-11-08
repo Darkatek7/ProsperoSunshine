@@ -21,18 +21,18 @@ Echte Moonlight-Clients (Moonlight Web, Moonlight PC, Moonlight auf dem iPhone i
 | Paket | Ergebnis | Beleg |
 | --- | --- | --- |
 | P0.1 | Alle Quellen mit SHA256 in `deps.lock`, Patches unter `patches/<name>/`, modulare `scripts/deps.sh` + `scripts/deps/*.sh` mit Stempeln | — |
-| P0.2/0.3 | Boost 1.92.0 (Sunshines Pin), Simple-Web-Server, nlohmann_json gebaut; Live: Asio-TLS 1.3, Boost.Log, property_tree | `src/boost_probe.cpp` |
-| P0.4 | FFmpeg 9.0.2 minimal (avcodec/avutil/swscale, CBS, kein Codec); Sunshines `cbs.cpp` läuft unverändert auf der Konsole | `src/cbs_probe.cpp` |
+| P0.2/0.3 | Boost 1.92.0 (Sunshines Pin), Simple-Web-Server, nlohmann_json gebaut; Live: Asio-TLS 1.3, Boost.Log, property_tree | `boost_probe` (entfernt, Git-Historie) |
+| P0.4 | FFmpeg 9.0.2 minimal (avcodec/avutil/swscale, CBS, kein Codec); Sunshines `cbs.cpp` läuft unverändert auf der Konsole | `cbs_probe` (entfernt, Git-Historie) |
 | P0.5 | Ein CMake-Projekt baut Host, Probes und Bibliotheken | `CMakeLists.txt`, `scripts/build.sh` |
 | P0.6 | `out/prospero_sunshine.elf` (12,4 MB) startet, beantwortet `/serverinfo`, fährt per `QUIT` sauber herunter | — |
 | P0.7 | ADR-001 festgeschrieben | `docs/adr/001-sunshine-port.md` |
-| R1 | `sceAvcap2RequestKeyFrame`: IDR nach 2–3 Frames (8/8); im Stream nach ~50 ms | `src/avcap_spike.cpp` |
-| R2 | Spielton über `sceAvcap2OpenAudio` (cfg+0x1C = RA-Id 180): PCM float32 Stereo 48 kHz, 1024 Frames/Paket; auch Opus 10/20 ms möglich | `src/audio_spike.cpp`, `docs/re/avcap2-exports.md` |
-| R3 | `sceAvcap2SetVideoBitrate` wirkt live; bis 15 Mbit/s (Spitze ×1,12) stabil, ab 16 Mbit/s stoppt der Encoder. Überholt: Seit dem HEVC-Einbau öffnet der Host mit der Bitrate in der Konfiguration und klemmt auf 50 Mbit/s (siehe „HEVC im Host“) | `src/bitrate_spike.cpp` |
+| R1 | `sceAvcap2RequestKeyFrame`: IDR nach 2–3 Frames (8/8); im Stream nach ~50 ms | `src/probes/avcap_spike.cpp` |
+| R2 | Spielton über `sceAvcap2OpenAudio` (cfg+0x1C = RA-Id 180): PCM float32 Stereo 48 kHz, 1024 Frames/Paket; auch Opus 10/20 ms möglich | `src/probes/audio_spike.cpp`, `docs/re/avcap2-exports.md` |
+| R3 | `sceAvcap2SetVideoBitrate` wirkt live; bis 15 Mbit/s (Spitze ×1,12) stabil, ab 16 Mbit/s stoppt der Encoder. Überholt: Seit dem HEVC-Einbau öffnet der Host mit der Bitrate in der Konfiguration und klemmt auf 50 Mbit/s (siehe „HEVC im Host“) | `bitrate_spike` (entfernt, Git-Historie) |
 | R4 | Host läuft als Payload-Daemon, Daten unter `/data/prosperosunshine/`, Neustart per Steuer-Socket + ELF-Loader | — |
-| R5 | Natives virtuelles Pad ohne Mono; neues Pad löst „Wer benutzt diesen Controller?“ aus (im Stream sichtbar und beantwortbar) | `src/pad_probe.cpp` |
+| R5 | Natives virtuelles Pad ohne Mono; neues Pad löst „Wer benutzt diesen Controller?“ aus (im Stream sichtbar und beantwortbar) | `src/probes/pad_probe.cpp` |
 | R6 | Ports 47984/47989/48010 TCP und 47998–48000 UDP frei; Discovery (mDNS) nicht untersucht | — |
-| P1.1–P1.4 | `CaptureSession` mit Tests; 10 min Home-Menü: 35 966 Frames, 59,94 fps, 600 IDR, fehlerfrei decodierbar; 5 saubere Zyklen; RSS konstant 12,8 MB; Descriptor-Felder entschlüsselt (u. a. TSC-Zeitstempel) | `src/capture_soak.cpp`, `docs/avcap2-descriptor.md` |
+| P1.1–P1.4 | `CaptureSession` mit Tests; 10 min Home-Menü: 35 966 Frames, 59,94 fps, 600 IDR, fehlerfrei decodierbar; 5 saubere Zyklen; RSS konstant 12,8 MB; Descriptor-Felder entschlüsselt (u. a. TSC-Zeitstempel) | `src/probes/capture_soak.cpp`, `docs/avcap2-descriptor.md` |
 | P2.1–P2.4 | Identität bleibt über Neustart; Pairing per PIN über Steuer-Socket; ungepairter Client wird abgewiesen (401); Launch/Resume/Cancel; zweite Sitzung abgelehnt | `tools/moonlight/` |
 | P3.1–P3.3 | Video über unveränderten `stream.cpp`-Pfad inkl. FEC; 0 Frame-Lücken; IDR-Anforderung des Clients bedient | `tools/moonlight/run_smoke.sh` |
 | P3.4 | Nicht nötig: der PS5-Encoder schreibt bereits VUI mit `max_num_reorder_frames=0`, `max_dec_frame_buffering=1` | `cbs_probe` |
@@ -83,7 +83,7 @@ Live auf der Konsole geprüft mit dem aktuellen Host (Testclient vom PC):
 
 **Lichtleiste (P9.10, 2026-10-31):** Der Host schickt Farbänderungen des virtuellen Pads an den Client. Gemessen mit Homebrew UI Lab im Vordergrund und `stream_test`: 2 s nach Stream-Start meldet das Client-Log `led pad=0 rgb=0,0,255` (Systemblau), 50 ms später `127,240,216` (die Farbe des Titels). Rumble lief im selben Stream weiter (6 von 6 Pulsen), 0 Frame-Lücken. Ob ein echter Moonlight-Client die Farbe am Controller zeigt, ist nicht geprüft.
 
-**HEVC-Spike (P9.7, 2026-10-31):** Avcap2 liefert HEVC (`docs/re/hevc.md`). Gemessen mit `src/hevc_spike.cpp` auf dem Home-Bildschirm, je 180 Frames in 1080p60, frischer Kanal je Stufe: Bei 6, 15, 30, 50, 80 und 100 Mbit/s kein Fehler. `ffprobe` meldet HEVC Main, Level 5.0, yuv420p, BT.709; die Streams zu 6, 50 und 100 Mbit/s decodiert `ffmpeg` mit 180 Frames und ohne Fehlermeldung, sobald das VPS vor SPS und PPS steht. Das decodierte Bild zeigt den Home-Bildschirm korrekt. 30 → 10 → 30 Mbit/s im laufenden Kanal geht, 20 → 40 Mbit/s bricht nach dem Wechsel mit `0x80c78000` ab. 1440p und 4K scheitern bei der Speicher-Reservierung (`0x81950003`). Der Code nach dem Aufräumen ergab dieselben Ergebnisse, seine Streams wurden nicht erneut decodiert. Nicht gemessen: Spielszenen mit viel Bewegung, längere Läufe, echte Moonlight-Clients.
+**HEVC-Spike (P9.7, 2026-10-31):** Avcap2 liefert HEVC (`docs/re/hevc.md`). Gemessen mit `src/probes/hevc_spike.cpp` auf dem Home-Bildschirm, je 180 Frames in 1080p60, frischer Kanal je Stufe: Bei 6, 15, 30, 50, 80 und 100 Mbit/s kein Fehler. `ffprobe` meldet HEVC Main, Level 5.0, yuv420p, BT.709; die Streams zu 6, 50 und 100 Mbit/s decodiert `ffmpeg` mit 180 Frames und ohne Fehlermeldung, sobald das VPS vor SPS und PPS steht. Das decodierte Bild zeigt den Home-Bildschirm korrekt. 30 → 10 → 30 Mbit/s im laufenden Kanal geht, 20 → 40 Mbit/s bricht nach dem Wechsel mit `0x80c78000` ab. 1440p und 4K scheitern bei der Speicher-Reservierung (`0x81950003`). Der Code nach dem Aufräumen ergab dieselben Ergebnisse, seine Streams wurden nicht erneut decodiert. Nicht gemessen: Spielszenen mit viel Bewegung, längere Läufe, echte Moonlight-Clients.
 
 **Schlüsselbilder alle 10 s statt jede Sekunde (2026-10-31, noch in keinem Release):** Der HEVC-Encoder ließ nach jedem Schlüsselbild Bilder aus (bei 15 und 20 Mbit/s eines, bei 5 Mbit/s fünf, also 100 ms Pause je Sekunde und 54 fps), die Bildnummern verrieten das nicht. Der Host setzt den Abstand jetzt auf 10 s (`docs/re/hevc.md`). Alle Werte mit dem Windows-Client (`NATIVE=1`):
 
@@ -144,7 +144,7 @@ Live auf der Konsole geprüft mit dem aktuellen Host (Testclient vom PC):
 - **Bitrate über 50 Mbit/s (2026-11-01, 13.00, Testclient am Kabel, kein echtes Moonlight, kein Spiel):** 4K, Rauschseite im Browser, je 15 s, Encoder-Vorgabe → geliefert. Volles Rauschen: HEVC 51 → 73, 102 → 102, 154 → 151 Mbit/s; HDR 102 → 99; H.264 51 → 135, 102 → 142. Rauschen auf einem Viertel: HEVC 51 → 45, 81 → 57, 102 → 63, 154 → 67; HDR 102 → 36; H.264 102 → 75. Jeweils 870–893 Bilder, keine fehlenden, längste Lücke höchstens 34 ms, ffmpeg fehlerfrei. Dauerlauf HEVC 154, volles Rauschen, 120 s: 7177 Bilder, längste Lücke 32 ms, ffmpeg fehlerfrei; rund 150 Mbit/s, aus der Paketzahl geschätzt. Danach Deckel auf 150 Mbit/s nur für 13.00 (`ps_capture_high_bitrate_verified`). Home-Bildschirm je 8 s, Log `bitrate 150000 kbit/s`: HEVC 4K (angefordert 239 Mbit/s), 1440p, 1080p, HDR 1080p, H.264 1080p und 4K: 461–478 Bilder, keine fehlenden, längste Lücke höchstens 54 ms (HEVC 1440p), sonst höchstens 26 ms, ffmpeg fehlerfrei.
 - **Experimental-Schalter, nur auf 13.00 geprüft (2026-11-01, Testclient):** Die App zeigt alle vier als „Not needed: verified here“, der Bericht und `host_diag.log` nennen den Commit. Mit Schaltern aus und mit allen vier in `sunshine.conf` an (je 10 s, H.264 und HEVC 1080p, HEVC und HDR 4K, Mario 64 15 s): 571–595 Bilder (Mario 869), keine fehlenden, ffmpeg fehlerfrei, längste Lücke höchstens 85 ms (einmal, H.264 als erster Lauf nach dem Host-Start), sonst höchstens 54 ms. Log gleich: 13.00 öffnet wie vorher. Auf anderer Firmware ist nichts davon gelaufen: Die Varianten, der Rückfall und die Schalter-Kacheln sind dort nicht geprüft, nur per Unit-Test mit nachgebautem Avcap2.
 - **13.60, nur Berichte von Nutzern (2026-11-01, Issue 1):** Zwei Nutzer melden, dass der Stream dort läuft, ohne Versionsangabe, Messung oder Angaben zu Controller und Ton. Einer nennt dabei H.265, obwohl der Host dort nur H.264 anbietet; das ist nicht geklärt.
-- **1440p und 4K, H.264 (2026-10-31):** Die RA-Profile 177 und 182 (`vcn[70] scanin[4K] prio[1]`) öffnen Modus 5 und 6 (`src/uhd_spike.cpp`); der Host nimmt 182, wenn der Client mehr als 1080p verlangt. Gemessen mit dem lokalen Client (ohne Fenster), ffmpeg decodiert jeweils fehlerfrei in der verlangten Größe:
+- **1440p und 4K, H.264 (2026-10-31):** Die RA-Profile 177 und 182 (`vcn[70] scanin[4K] prio[1]`) öffnen Modus 5 und 6 (`uhd_spike`, entfernt, Git-Historie); der Host nimmt 182, wenn der Client mehr als 1080p verlangt. Gemessen mit dem lokalen Client (ohne Fenster), ffmpeg decodiert jeweils fehlerfrei in der verlangten Größe:
   - Home-Bildschirm, je 15 s: 1080p 893, 1440p 895, 4K 892 Frames, jeweils 59,94 fps und 0 Lücken.
   - GTA III (ruhige Szene, rund 4 Mbit/s), je 20 s: 4K 1166, 1440p 1177 Frames, 59,94 fps, 0 Lücken, 0 Audiofehler. Das Spiel lief danach weiter.
   - Moonlight 6.2 für PC, Home-Bildschirm: 1440p 60,3 und 60,5 fps, 4K 60,2 fps, 0 % Netzverlust. Ein erster 1440p-Lauf zeigte kein Bild: Im Log von Moonlight fehlen `Recreating renderer`, `Test decode successful` und `Renderer ... chosen`, dafür steht dort eine Qt-Warnung zum Pixelverhältnis des Fensters. Pakete und angeforderte IDRs kamen an, nur der Decoder wurde nie eingerichtet (Warteschlange lief dreimal je Sekunde über). Das spricht für eine Ursache im Client. Nach einem Neustart von PC und Konsole trat es in zwei Wiederholungen nicht mehr auf; die genaue Ursache ist nicht geklärt.
@@ -262,7 +262,7 @@ Gemessen auf einer PS5 Pro mit 10.20 (Datensatz von 10.x, `record_shift`). Eine 
 ### Modi unter 1080p auf Firmware 10.20 (2026-11-02, nicht veröffentlicht)
 
 Gemessen auf der PS5 Pro mit 10.20, Ausgabe der Konsole in 1080p (`video out mode 0x13c`), Startbildschirm, kein Titel vorn,
-Host ohne Stream. Sonde `src/small_mode_probe.cpp`, je Modus ein neuer Kanal mit dem Datensatz des Hosts, 3 s, alle 500 ms ein
+Host ohne Stream. Sonde `small_mode_probe` (entfernt, Git-Historie; auf anderer Firmware misst das die Phase `modes` der Firmware-Sonde), je Modus ein neuer Kanal mit dem Datensatz des Hosts, 3 s, alle 500 ms ein
 IDR angefordert, 16 Mbit/s verlangt. Auf 10.x setzt der Host dabei den Quantisierer 24/28 (`encoder_qp.h`).
 
 - **Alle 24 Kombinationen laufen:** 640x360, 960x540, 1280x720 und 1920x1080, je H.264, HEVC 8 und HEVC 10 Bit, je 30 und 60
@@ -444,7 +444,7 @@ schrieb alle 5 s Mittelwert, stärkste Sekunde und größtes Bild nach `host_dia
 
 Die Messungen „Im Host“ bis „Mit Deckel“ liefen auf einer eigenen Variante vor dem Merge von PR 9 (#9, Modi unter 1080p auf 10.20): Sie wählte den größten Modus, der die Anfrage nicht übersteigt, prüfte unter 1080p immer das erste Bild und brauchte keinen Schalter. HEVC-Budgets, Bitrate-Deckel und die fünf Wiederholungen von `OpenVideo` unter 1080p sind dieselben wie im gemergten Stand, der den nächstgelegenen Modus wählt und 13.00 mit 10.20 als verifiziert führt.
 
-Remote Play ordnet 640x360, 960x540 und 1280x720 die Modi 1, 2 und 3 zu (`SceRemotePlay 0x6f8d5`). Gemessen mit `src/mode_spike.cpp` auf dem Home-Bildschirm ohne HDMI-Kabel (`video out mode 0x13c`), RA-Profil 180, 60 fps, 3 Mbit/s, je 3 s: Alle drei Modi starten mit H.264 und HEVC, 179 oder 180 Bilder, `ffprobe` nennt die verlangte Größe, ffmpeg dekodierte die geprüften Aufnahmen fehlerfrei (H.264 alle drei, HEVC je Modus den höchsten startenden Wert, bei 360p auch `0x4000`).
+Remote Play ordnet 640x360, 960x540 und 1280x720 die Modi 1, 2 und 3 zu (`SceRemotePlay 0x6f8d5`). Gemessen mit `mode_spike` (entfernt, Git-Historie) auf dem Home-Bildschirm ohne HDMI-Kabel (`video out mode 0x13c`), RA-Profil 180, 60 fps, 3 Mbit/s, je 3 s: Alle drei Modi starten mit H.264 und HEVC, 179 oder 180 Bilder, `ffprobe` nennt die verlangte Größe, ffmpeg dekodierte die geprüften Aufnahmen fehlerfrei (H.264 alle drei, HEVC je Modus den höchsten startenden Wert, bei 360p auch `0x4000`).
 
 Die frühere Aussage „unter 1080p startet Avcap2 nicht“ gilt damit auf 13.00 nicht mehr. Warum der alte Spike scheiterte, ist nicht geklärt; der Datensatz ist seitdem gewachsen.
 
@@ -1196,7 +1196,7 @@ also in unter 500 ms. Nicht geprüft: eine wirklich langsame Zuteilung, sie lie�
 ### Wecken aus Moonlight (2026-11-03, 13.00, GitHub-Issue 10)
 
 Frage: Läuft ein Payload im Ruhemodus weiter, sodass der Host Moonlights Wake-on-LAN-Paket empfangen und die Konsole wecken
-könnte? Gemessen mit `src/rest_probe.cpp` (lauscht auf UDP 9 und 7, schreibt alle 10 s eine Zeile, meldet Sprünge der Uhr).
+könnte? Gemessen mit `src/probes/rest_probe.cpp` (lauscht auf UDP 9 und 7, schreibt alle 10 s eine Zeile, meldet Sprünge der Uhr).
 
 - **Wach:** Magic Packets vom PC an die Adresse der Konsole, an die Broadcast-Adresse des Netzes und an 255.255.255.255, je auf Port 9 und 7, kamen
   alle an und wurden als Magic Packet für die MAC der Konsole erkannt.
@@ -1217,7 +1217,7 @@ Aufnahme und gibt jedes Bild an alle Streams weiter, das Mikrofon, das den Audio
 Stream muss denselben Codec und denselben Dynamikumfang verlangen. Ab dem zweiten Pad öffnet der Host das Pad ohne Nutzer
 (`PS_PAD_NO_USER`), und die Konsole fragt, wer es benutzt (GitHub-Issue 11).
 
-- **Probe `src/pad_user_probe.cpp`:** Ein Pad für Nutzer 0xFFFFFFFF meldet das System als DualSense ohne Nutzer und öffnet
+- **Probe `src/probes/pad_user_probe.cpp`:** Ein Pad für Nutzer 0xFFFFFFFF meldet das System als DualSense ohne Nutzer und öffnet
   die Nutzerauswahl nur für dieses Gerät (Systemlog `SpecificDevice`; Screenshot: „Who's using this controller?“ mit „Add
   User“ und dem angemeldeten Nutzer).
 - **Zwei Testclients** mit zwei gekoppelten Identitäten (`CLIENT_DIR=out/moonlight-client2 OUT_TAG=2` für `run_smoke.sh`),
@@ -1287,7 +1287,7 @@ dem Proxy immer beim zweiten Versuch durchkommt.
 ### Tastatur und Maus (2026-11-03, 13.00, Release 0.2.1)
 
 Moonlight-Tastatur und -Maus gehen auf eine virtuelle Tastatur und Maus der Konsole (`docs/re/keyboard-mouse.md`). Gemessen
-mit `src/kbm_probe.cpp` und mit dem Host über `stream_test.exe --kbm-seq`, der Tasten als Windows-Tastencodes schickt wie
+mit `src/probes/kbm_probe.cpp` und mit dem Host über `stream_test.exe --kbm-seq`, der Tasten als Windows-Tastencodes schickt wie
 Moonlight für PC.
 
 - **Probe:** Anlegen von Tastatur und Maus liefert 0, das System meldet „Keyboard connected“ und „Mouse connected“ und

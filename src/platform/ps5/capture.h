@@ -76,7 +76,7 @@ ptrdiff_t ps_capture_record_shift(void);
 // Research: raw result of the last sceAvcap2OpenVideo, and sceAvcap2ChangeScanInResolution at runtime.
 int ps_capture_last_open_rc(void);
 int ps_capture_change_scan_in(ps_capture *session, uint32_t resolution);
-// Research, for src/firmware_probe.cpp; the host sets none of these. The record hook runs last in configure() and may
+// Research, for src/payloads/firmware_probe.cpp; the host sets none of these. The record hook runs last in configure() and may
 // rewrite the whole record (capacity PS_CAPTURE_RECORD_CAPACITY; shift is record_shift() on this firmware). With open
 // only, ps_capture_open closes after OpenVideo succeeds instead of starting, and fails at the step "open only" with rc 0.
 // Open attempts sets how often OpenVideo is tried while it answers 0x81950008 (0 = the host's choice).
