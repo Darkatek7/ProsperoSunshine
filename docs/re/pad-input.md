@@ -2,7 +2,7 @@
 
 Stand: 1. November 2026. Statische Analyse der entschlüsselten `libScePad` und `SceRemotePlay` (Werkzeuge in
 `tools/re/`, kein Sony-Code im Repository). **Live bestätigt sind Lage und Einheiten von Touch, Drehrate und Beschleunigung
-samt Ruhewert (`STATUS.md`, Testschritt 3 unten); Motion kommt also auch ohne weitere Bedingung beim Lesen an.** Alles Übrige
+samt Ruhewert (`docs/status-archive.md`, „Touch und Bewegung im Pad“; Testschritt 3 unten); Motion kommt also auch ohne weitere Bedingung beim Lesen an.** Alles Übrige
 ist weiter nur gelesen. Adressen sind Modul-Offsets. Der Kernel
 (`/dev/hid`) liegt nicht vor; was er zwischen Einfügen und Lesen tut, ist nur von außen erschlossen.
 
