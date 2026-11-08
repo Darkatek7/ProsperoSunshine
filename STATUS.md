@@ -647,6 +647,30 @@ alle H.264 1080p60 auf „PS5 Screen“ mit `--no-script`; B, C und A beim zweit
 Nicht geprüft: echtes Moonlight, ein echter DualSense an der Konsole, und ob der Dialog „Wer benutzt diesen Controller?“
 einem Gast den Nutzer des Hosts anbietet.
 
+### Konsolenmenüs, PR 38 (2026-11-08, 13.00)
+
+Testhost mit PR 38, zwei Konsolenprofile, ein Testclient auf das zweite Profil beschränkt (`SETPROFILES`), die Menüs nur für
+das erste (`SETMENUS`). Abfragen mit dem Zertifikat des Testclients:
+- Stand `a4c38d16`: In `/applist` fehlte „PS5 Screen“, `/launch` von App 1 gab 403 „This app is hidden on this device“; ein
+  Gerät mit freier Wahl sah es weiter. Mit den Menüs auch für das zweite Profil war es wieder da. `SETMENUS` lehnte ein
+  unbekanntes Profil, eine doppelte ID und ein fehlendes Argument ab. Menüs mitten im Stream von „PS5 Screen“ entzogen: Das
+  Pad wartete nach weniger als 0,4 s („its input waits“), der Stream lief weiter und endete sauber.
+- Stand `959b67a` (das Flag `SceShellCoreUtilAppFocus` für die App mit dem Bildschirm): Es ließ sich auf 13.00 öffnen, die
+  Warnung für den Rückfall kam nicht. GTA III vom beschränkten Gerät gestartet, 200 s, `--no-script` mit Steuerkreuz-Ticks:
+  Mit dem Spiel vorne ging die Eingabe durch. PS lang auf einem zweiten Controller (über ps5-mcp): Home-
+  Bildschirm, GTA lief weiter als großes Programm, das Pad wartete. ✕ auf der Kachel: Spiel wieder vorne, Eingabe ging
+  durch. PS kurz (Kontrollzentrum über dem Spiel): Das Spiel blieb vorne, nichts geloggt. Stream fehlerfrei dekodiert.
+- Nicht geprüft: echtes Moonlight, Tastatur und Maus eines beschränkten Geräts.
+
+### Issue 39 auf 13.00 (2026-11-08, Testclient, nicht veröffentlicht)
+
+Die Änderungen für 10.x (größere Modi bleiben nach einer Ablehnung am Ausgang auf Probe, der Rückfall auf 1080p bekommt den
+Anteil der Bitrate, ein laufender Stream behält seine Größe) auf 13.00 nachgeprüft, wo 1440p und 4K ohne Schalter gehen:
+- Stand `f98f318`: H.264 in 4K vom Home-Bildschirm, 3840x2160, fehlerfrei dekodiert, wie vor der Änderung.
+- Stand `d1d70f8`: 4K vom Home-Bildschirm, 120 s, GTA III mitten im Stream gestartet und wieder geschlossen. Auf 13.00 nimmt
+  das der Aufnahme nichts: kein `capture lost`, kein Wiederöffnen, 7183 Bilder in 3840x2160, fehlerfrei dekodiert. Der Weg,
+  der den Stream beendet, statt die Größe zu wechseln, ist hier also nicht erreichbar; auf 10.20 prüft ihn ein Mitwirkender.
+
 ### Release 0.5.0 auf der Konsole (2026-11-07, 13.00)
 
 App nach `/data/homebrew/PPSA47989` kopiert (`contentVersion` `01.000.024`) und neu registriert, Host-ELF nach
