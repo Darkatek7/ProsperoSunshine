@@ -114,10 +114,10 @@ constexpr KbmMenus kbm_menus(MenuAccess access, bool game_in_front, bool release
     return !release && menu_key ? KbmMenus::drop : KbmMenus::pass;
 }
 
-// Whether a device gets "PS5 Screen": the menus not chosen, a device that can choose freely or isn't set, or one of its
-// profiles reaches the menus.
+// Whether a device gets "PS5 Screen": the menus not chosen, a device that can choose freely or isn't set, a spectator
+// (it has no input to reach the menus with), or one of its profiles reaches the menus.
 inline bool screen_offered(const std::optional<MenuProfiles> &menus, const std::optional<ProfileSet> &device) {
-    if (!menus || !device || device->free) return true;
+    if (!menus || !device || device->free || device->none()) return true;
     return std::any_of(device->users.begin(), device->users.end(), [&](uint32_t user) { return menus->has(user); });
 }
 

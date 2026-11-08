@@ -213,8 +213,9 @@ On a device with profiles of its own:
   profile has neither, even the host's. The device's own keyboard plays as the profile of its first controller, and for a
   profile without the menus its two keys into them do nothing: Print Screen (the Create menu) and Pause (the control
   center).
-- Only a device with at least one chosen profile gets **"PS5 Screen"** in its app list, and the host refuses to start it for
-  any other device, as a client can ask for an app by its id without seeing it. Any device can start a game from its list,
+- Only a device with at least one chosen profile, or a [spectator](#profiles-per-device), gets **"PS5 Screen"** in its app
+  list, and the host refuses to start it for any other device, as a client can ask for an app by its id without seeing it.
+  A spectator only watches: it has no input to reach the menus with. Any device can start a game from its list,
   and leave it with Quit when **Quit closes the game** is on.
 - While no game is running (the home screen with no game open, an app of the console's, a media app or homebrew), the
   controllers, keyboard and mouse of other profiles do nothing, and a press says why: "<profile> can't use the console's

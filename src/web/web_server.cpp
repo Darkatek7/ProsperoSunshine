@@ -581,7 +581,7 @@ void routes(Server &server, State &state, ControlServer &control, const std::sha
                                  {"trusted", uuid_list("web_trusted.txt")},
                                  {"risk_ack", uuid_list("web_risk_ack.txt")},
                                  {"menus", menus},
-                                 {"streams",records(ok_lines(control.handle("STREAMS", Caller::web)), stream_record)}});
+                                 {"streams", records(ok_lines(control.handle("STREAMS", Caller::web)), stream_record)}});
     });
     // The console's profiles, for choosing which ones a device may play as. Names are shown only here, signed in.
     get("^/api/users$", [&control](const Response &response, const Request &) {

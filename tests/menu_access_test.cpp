@@ -75,7 +75,8 @@ int main() {
     assert(screen_offered(two, any) && screen_offered(two, std::nullopt));
     assert(screen_offered(two, mine));                    // one of its profiles reaches the menus
     assert(!screen_offered(two, parse_profiles("1b1d9383")));
-    assert(!screen_offered(two, spectator));
+    assert(screen_offered(two, spectator));               // a spectator only watches
+    assert(screen_offered(MenuProfiles{}, spectator));
     assert(!screen_offered(two, parse_profiles("guest")));
     assert(!screen_offered(MenuProfiles{}, mine));
     return 0;
