@@ -92,6 +92,14 @@ Issue 36“) und ein Debug-Build in jedem Release („Debug-Build (PR 29) zusamm
 
 ## Neuere Nachweise
 
+### Browser als Client über moonlight-web-stream (2026-11-08, 13.00, Host 0.5.0)
+
+moonlight-web-stream v2.10.0 in Docker auf einem Linux-Rechner im LAN, als Moonlight-Client per PIN über `PIN` gepairt,
+„PS5 Screen“ in headless Chrome geöffnet und `getStats()` der WebRTC-Verbindung alle 5 s gelesen: 30 s H.264 in
+1920x1080 mit 59 bis 60 fps im Browser, 1913 Bilder dekodiert, 0 verworfen, 0 Pakete verloren, Opus-Ton dabei. Der Host
+sah einen normalen Client (`STREAMS`: H.264, 1080p60, 7308 kbit/s). Nach dem Schließen des Tabs beendete moonlight-web den
+Stream nach rund 25 s selbst. Am Host ist dafür nichts nötig. Nicht geprüft: ein TV-Browser, Eingabe, HEVC.
+
 ### UPnP, PR 43 (2026-11-08, 13.00)
 
 Testhost mit PR 43 am Router des Besitzers (UPnP dafür kurz eingeschaltet), Mappings vom PC aus per SSDP und
