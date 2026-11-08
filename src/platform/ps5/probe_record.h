@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The video record as configure() in capture.c builds it, with every choice that depends on the firmware made a
-// parameter, so that src/firmware_probe.cpp can try layouts the host doesn't know yet. With the host's choices for a
+// parameter, so that src/payloads/firmware_probe.cpp can try layouts the host doesn't know yet. With the host's choices for a
 // firmware (ps_probe_host_layout) it gives configure()'s record byte for byte: tests/probe_record_test.c holds the two
 // together, so a change to configure() that the probe doesn't follow fails there. Portable.
 #ifndef PROSPERO_PROBE_RECORD_H

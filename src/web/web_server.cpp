@@ -46,7 +46,7 @@ struct prospero_web_asset {
 };
 extern const prospero_web_asset prospero_web_assets[];
 extern const std::size_t prospero_web_asset_count;
-// src/relaunch_helper.cpp, built as a payload and embedded by CMakeLists.txt.
+// src/payloads/relaunch_helper.cpp, built as a payload and embedded by CMakeLists.txt.
 extern const unsigned char prospero_relaunch_helper[];
 extern const std::size_t prospero_relaunch_helper_size;
 

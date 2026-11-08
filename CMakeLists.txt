@@ -76,12 +76,30 @@ target_include_directories(prospero_mdns PUBLIC src)
 target_link_libraries(prospero_mdns PUBLIC prospero_ra)  # the debug build's "->" line before the bind
 target_compile_options(prospero_mdns PRIVATE ${PROSPERO_WARNINGS})
 
-# Probes: each is a standalone payload that logs its result to klog.
-function(prospero_probe name)
-    add_executable(${name} src/${name}.cpp)
+# Standalone payloads, one source file each: src/<dir>/<name>.cpp -> <name>.elf, with src/ on the include path.
+function(prospero_payload_from dir name)
+    add_executable(${name} src/${dir}/${name}.cpp)
+    target_include_directories(${name} PRIVATE src)
     target_compile_options(${name} PRIVATE ${PROSPERO_WARNINGS})
     target_link_libraries(${name} PRIVATE ${ARGN})
 endfunction()
+# Probes and spikes (src/probes): research and test payloads that log their result to klog or a file. Not shipped.
+function(prospero_probe name)
+    prospero_payload_from(probes ${name} ${ARGN})
+endfunction()
+# Payloads that are part of the product (src/payloads): shipped in the release archive or embedded into the host.
+function(prospero_payload name)
+    prospero_payload_from(payloads ${name} ${ARGN})
+endfunction()
+
+# The firmware probe for unmeasured firmware, in the release archive (docs/firmware-probe.md).
+prospero_payload(firmware_probe prospero_capture SceSystemService)
+target_compile_definitions(firmware_probe PRIVATE FIRMWARE_PROBE_COMMIT="$ENV{PROSPERO_COMMIT}")
+# Restarts the host from outside, in the release archive.
+prospero_payload(host_restart)
+# The host embeds it and hands it to the loader for "Restart host" on the web page.
+prospero_payload(relaunch_helper)
+
 prospero_probe(runtime_probe)
 prospero_probe(jthread_probe)
 prospero_probe(capture_probe prospero_core)
@@ -91,8 +109,6 @@ prospero_probe(pad_output_probe)
 prospero_probe(kbm_probe prospero_pad)
 prospero_probe(pad_user_probe prospero_pad SceUserService)
 prospero_probe(relisten_probe)
-# Not a probe: the host embeds it and hands it to the loader for "Restart host" on the web page.
-prospero_probe(relaunch_helper)
 prospero_probe(port_hold_probe)
 prospero_probe(rest_probe)
 prospero_probe(mdns_probe prospero_mdns)
@@ -108,9 +124,6 @@ prospero_probe(surround_probe prospero_capture)
 prospero_probe(channel_map_probe prospero_capture SceAudioOut SceUserService)
 prospero_probe(hevc_spike prospero_capture)
 prospero_probe(close_probe prospero_ra SceSystemService SceUserService)
-prospero_probe(firmware_probe prospero_capture SceSystemService)
-target_compile_definitions(firmware_probe PRIVATE FIRMWARE_PROBE_COMMIT="$ENV{PROSPERO_COMMIT}")
-prospero_probe(host_restart)
 prospero_probe(udp_burst_spike)
 prospero_probe(audio_spike prospero_capture prospero_pad)
 prospero_probe(bitrate_spike prospero_capture)
@@ -134,11 +147,11 @@ if(EXISTS "${PROSPERO_DEPS}/lib/libavcodec.a")
     set(CBS_COPY "${CMAKE_BINARY_DIR}/cbs_probe/cbs.cpp")
     configure_file("${CMAKE_SOURCE_DIR}/.cache/deps/src/sunshine/src/cbs.cpp" "${CBS_COPY}" COPYONLY)
     set_source_files_properties("${CBS_COPY}" PROPERTIES COMPILE_OPTIONS "-w")
-    add_executable(cbs_probe src/cbs_probe.cpp "${CBS_COPY}")
-    target_include_directories(cbs_probe PRIVATE src/probe_stubs)
+    add_executable(cbs_probe src/probes/cbs_probe.cpp "${CBS_COPY}")
+    target_include_directories(cbs_probe PRIVATE src/probes/stubs)
     target_include_directories(cbs_probe SYSTEM PRIVATE "${PROSPERO_DEPS}/include")
     target_compile_options(cbs_probe PRIVATE "SHELL:-idirafter ${CMAKE_SOURCE_DIR}/.cache/deps/src/sunshine/src")
-    set_source_files_properties(src/cbs_probe.cpp PROPERTIES COMPILE_OPTIONS "${PROSPERO_WARNINGS}")
+    set_source_files_properties(src/probes/cbs_probe.cpp PROPERTIES COMPILE_OPTIONS "${PROSPERO_WARNINGS}")
     target_link_libraries(cbs_probe PRIVATE "${PROSPERO_DEPS}/lib/libavcodec.a" "${PROSPERO_DEPS}/lib/libavutil.a" pthread)
 endif()
 
@@ -191,7 +204,7 @@ struct prospero_web_asset {
 @WEB_TABLE@};
 extern const std::size_t prospero_web_asset_count = sizeof prospero_web_assets / sizeof prospero_web_assets[0];
 ")
-    # The relaunch helper payload, embedded for "Restart host" on the web page (src/relaunch_helper.cpp).
+    # The relaunch helper payload, embedded for "Restart host" on the web page (src/payloads/relaunch_helper.cpp).
     add_custom_command(OUTPUT "${CMAKE_BINARY_DIR}/generated/relaunch_helper_elf.cpp"
         COMMAND "${CMAKE_COMMAND}" "-DINPUT=$<TARGET_FILE:relaunch_helper>"
             "-DOUTPUT=${CMAKE_BINARY_DIR}/generated/relaunch_helper_elf.cpp" -DSYMBOL=prospero_relaunch_helper

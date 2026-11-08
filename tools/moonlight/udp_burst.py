@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-"""Counts what arrives of src/udp_burst_spike.cpp's frame-sized bursts, to tell network loss from host problems.
+"""Counts what arrives of src/probes/udp_burst_spike.cpp's frame-sized bursts, to tell network loss from host problems.
 
 usage: udp_burst.py <console> [packets per burst ...]
 """
