@@ -50,8 +50,8 @@ std::optional<std::string> validate(const OptionSpec &spec, std::string_view val
 
 class Config;
 
-// The option's value in the file, as the app shows and saves it. close_game_on_quit goes through Sunshine's own reading of a
-// boolean, so a hand-written `enabled` counts as on; the app writes 1.
+// The option's value in the file, as the app shows and saves it. close_game_on_quit and upnp go through Sunshine's own reading
+// of a boolean, so a hand-written `enabled` (Sunshine's own word for upnp) counts as on; the app writes 1.
 std::optional<std::string> option_value(const Config &config, const OptionSpec &spec);
 
 class Config

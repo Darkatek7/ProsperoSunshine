@@ -79,6 +79,14 @@ static void conf_tests()
         CHECK(option_value(Config::parse(std::string("close_game_on_quit = ") + on + "\n"), *quit) == std::optional<std::string>("1"));
     for (const char *off : {"0", "disabled", "false", "no", "off", "Enabled"})
         CHECK(option_value(Config::parse(std::string("close_game_on_quit = ") + off + "\n"), *quit) == std::optional<std::string>("0"));
+    // upnp: Sunshine's key, off by default and read the same way, so a sunshine.conf copied from a PC shows as on.
+    const OptionSpec *upnp = find_option("upnp");
+    CHECK(upnp != nullptr);
+    CHECK(upnp->kind == OptionKind::toggle);
+    CHECK(std::string_view(upnp->default_label) == "Off");
+    CHECK(!option_value(Config::parse("port = 48000\n"), *upnp));
+    CHECK(option_value(Config::parse("upnp = enabled\n"), *upnp) == std::optional<std::string>("1"));
+    CHECK(option_value(Config::parse("upnp = disabled\n"), *upnp) == std::optional<std::string>("0"));
     // Other options stay as they are in the file.
     CHECK(option_value(Config::parse("experimental_hevc = on\n"), *find_option("experimental_hevc")) == std::optional<std::string>("on"));
 }

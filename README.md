@@ -321,13 +321,14 @@ reads them when it starts.
 ## Playing over the internet
 
 A friend in another house can join like a device on the LAN. A contributor played that way with two of four players over the
-internet (forwarded ports, a phone on 4G and one on another Wi-Fi). It isn't tested here. There are two ways in: forwarded
-ports, below, or [Tailscale on the console](#without-port-forwarding-tailscale), which also works where you can't forward
-ports.
+internet (forwarded ports, a phone on 4G and one on another Wi-Fi). It isn't tested here. There are three ways in: forwarded
+ports, below, [UPnP](#forwarding-the-ports-by-upnp), where the host asks the router to forward them, or
+[Tailscale on the console](#without-port-forwarding-tailscale), which also works where you can't forward ports.
 
 1. **Pair the device at home first**, on the same network as the console, or pair over the internet once the ports are open;
    either way the PIN goes into the app on the console.
-2. **Forward these ports** on your router to the console (the defaults; they move with **Base port** in the app's Settings):
+2. **Forward these ports** on your router to the console, or let the host do it by [UPnP](#forwarding-the-ports-by-upnp)
+   (the defaults; they move with **Base port** in the app's Settings):
    TCP 47984, 47989 and 48010, UDP 47998, 47999 and 48000. Nothing else needs to be open. Don't forward the
    [web page](#web-page) (TCP 47990), which answers only the LAN and Tailscale, or the control socket (TCP 47995), which only
    listens on the console itself anyway.
@@ -341,6 +342,23 @@ Tips:
   their own, with their own bitrate. Asking for the same mode as you shares your stream, at your bitrate.
 - **Encryption over the internet** in the app's Settings is on ("Optional") by default, so a client outside your
   network gets an encrypted stream when it supports it.
+
+### Forwarding the ports by UPnP
+
+With **UPnP port forwarding** on (the app's or the web page's **Settings**, `upnp = 1` in `sunshine.conf`, off by default),
+the host asks the router to forward the six ports above to the console when it starts, renews them every 2 minutes and
+removes them when it stops. UPnP has to be on in the router. The web page's **Status** shows
+the result: the router, its internet side, and each port that couldn't be forwarded. When that internet side is a public
+address, Status also shows it as **Internet address**, with **Copy**: that's the address a friend adds in Moonlight.
+
+- **Only the six stream ports**, never the web page or the control socket.
+- **Ports forwarded to another device stay as they are.** If a PC on your network runs Sunshine with UPnP on the default
+  ports, the router already sends them there; the host says so instead of taking them away. Turn UPnP off on the PC, or
+  give the console another **Base port**. A rule you made by hand for the console counts as forwarded and isn't touched.
+- **Behind two routers** (your own router behind the provider's), the host asks the router the console is attached to,
+  and when the one in front answers UPnP from your network too, it forwards the same ports there to your router. If the
+  one in front doesn't answer, the web page says its internet side is private: forward the ports on the router in front
+  by hand, or use Tailscale. Behind the provider's NAT (carrier-grade NAT) there is nobody to ask: use Tailscale.
 
 ### Without port forwarding: Tailscale
 
