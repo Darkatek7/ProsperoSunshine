@@ -8,6 +8,11 @@
   Settings, the host asks the router to forward the six stream ports to the console, renews them every 2 minutes and
   removes them when it stops. Behind two routers it forwards through both. The web page's Status shows the router, its
   internet side and every port that couldn't be forwarded. See "Forwarding the ports by UPnP" in the README.
+- **Console menus per profile** (PR 38): Devices → Console menus on the web page chooses which console profiles reach the
+  console's own menus from Moonlight (Settings, system update, PSN sign-in). Controllers of the other profiles lose PS and
+  Create and wait while no game is in front, and only a device with a chosen profile, or a spectator, gets "PS5 Screen".
+  Until you choose, everything stays as before. The control socket gets `MENUS` and `SETMENUS`. See "Console menus" in
+  the README.
 
 ### Fixed
 
