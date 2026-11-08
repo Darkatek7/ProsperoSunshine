@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-only
+# shellcheck disable=SC2154  # sdk, prefix, work, src_* and the rest come from scripts/deps.sh
 # MiniUPnPc: the static library only, for the optional UPnP port mapping (src/net/upnp_client.cpp).
 set -euo pipefail
 b="$work/miniupnpc-build"
