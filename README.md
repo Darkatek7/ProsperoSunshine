@@ -558,22 +558,34 @@ access for development. Do this only on trusted networks.
 
 ## Building from source
 
-Requires Docker. The image contains LLVM 18 and the
+Requires Docker; development happens on Linux. The image contains LLVM 18 and the
 [PS5 Payload SDK](https://github.com/ps5-payload-dev/sdk) v0.45 (hash-checked); all third-party sources are pinned
-with SHA256 in `deps.lock`.
+with SHA256 in `deps.lock`. From the repository root:
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1
+```sh
+docker build -t prosperosunshine-sdk:v0.45 -f scripts/Dockerfile .
+docker run --rm -e PROSPERO_COMMIT=$(git rev-parse --short=8 HEAD) --mount type=bind,source="$PWD",target=/repo prosperosunshine-sdk:v0.45 bash scripts/build.sh
 ```
 
+On Windows, `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1` builds the image if it is missing and
+runs the same. On a machine with little RAM, add `--memory=6g --memory-swap=6g` to the `docker run`, so that a memory spike
+stops the build container rather than the machine.
+
 The first run builds the dependencies into `out/deps` (around 30 minutes, mostly Boost). The host is
-`out/prospero_sunshine.elf`; the other ELFs are hardware probes. `app/build.ps1` then builds the app, and
-`bash scripts/package.sh` the release archive. The [debug build](#debug-build) is `scripts/build.ps1 -Debug` (into
-`out/debug`, with `prospero_sunshine.debug.elf` and `prospero_sunshine.map` next to the host), `app/build.ps1 -Debug`
-(`build/app-debug/PPSA47989-debug.zip`) and `PROSPERO_DEBUG=1 bash scripts/package.sh`; CMake's switch is
-`-DPROSPERO_DEBUG=ON`. The host names its commit in `host_diag.log` and the diagnostics report.
-`scripts/build.ps1` and CI pass it in. If you run `scripts/build.sh` in the container yourself from a git worktree, git can't find it
-there and the host says `unknown`, unless you add `-e PROSPERO_COMMIT=<hash>`. Portable unit tests:
+`out/prospero_sunshine.elf`; the other ELFs are hardware probes. The app builds in its own image, with a Docker volume
+that needs the ps5-opengl SDK once (`app/README.md`, "Building"; on Windows `app/build.ps1` does all of it):
+
+```sh
+docker build -t prosperosunshine-app:2 -f app/Dockerfile app
+docker run --rm --mount type=bind,source="$PWD",target=/repo --mount type=volume,source=prosperosunshine-app-cache,target=/cache prosperosunshine-app:2 bash app/build.sh
+```
+
+`bash scripts/package.sh` packs the release archive. The [debug build](#debug-build) is `-e PROSPERO_DEBUG=1` (`scripts/build.ps1 -Debug`; into `out/debug`, with
+`prospero_sunshine.debug.elf` and `prospero_sunshine.map` next to the host), `-e APP_FLAVOR=debug` for the app
+(`app/build.ps1 -Debug`; `build/app-debug/PPSA47989-debug.zip`) and `PROSPERO_DEBUG=1 bash scripts/package.sh`; CMake's
+switch is `-DPROSPERO_DEBUG=ON`. The host names its commit in `host_diag.log` and the diagnostics report. The command above,
+`scripts/build.ps1` and CI pass it in with `PROSPERO_COMMIT`; without it, git in the container can't see the repository of a
+git worktree, and the host says `unknown`. Portable unit tests:
 
 ```sh
 docker run --rm --mount type=bind,source="$PWD",target=/repo prosperosunshine-sdk:v0.45 bash scripts/test.sh

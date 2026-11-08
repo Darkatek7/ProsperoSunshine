@@ -18,21 +18,30 @@ verified state with evidence: `STATUS.md` (both German).
 
 ## Build and test
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1   # host + probes -> out/
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -Debug   # the debug flavor -> out/debug/
-```
+Development runs on Linux with Docker, from the repository root. Build the SDK image once with
+`docker build -t prosperosunshine-sdk:v0.45 -f scripts/Dockerfile .`, then:
 
 ```sh
+docker run --rm -e PROSPERO_COMMIT=$(git rev-parse --short=8 HEAD) --mount type=bind,source="$PWD",target=/repo prosperosunshine-sdk:v0.45 bash scripts/build.sh   # host + probes -> out/
+docker run --rm -e PROSPERO_COMMIT=$(git rev-parse --short=8 HEAD) -e PROSPERO_DEBUG=1 --mount type=bind,source="$PWD",target=/repo prosperosunshine-sdk:v0.45 bash scripts/build.sh   # the debug flavor -> out/debug/
 docker run --rm --mount type=bind,source="$PWD",target=/repo prosperosunshine-sdk:v0.45 bash scripts/test.sh
 ```
 
-The app and its tests (the app bundles `out/prospero_sunshine.elf`, so build the host first):
+`PROSPERO_COMMIT` names the commit the host reports; in a git worktree the container can't find it itself. On a machine with
+little RAM, add `--memory=6g --memory-swap=6g` to the build so that a memory spike stops the container, not the machine. On
+Windows, `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 [-Debug]` does the same.
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File app/build.ps1   # -> build/app/PPSA47989 and .zip
-powershell -NoProfile -ExecutionPolicy Bypass -File app/build.ps1 -Debug   # -> build/app-debug/PPSA47989-debug.zip
+The app and its tests (the app bundles `out/prospero_sunshine.elf`, so build the host first). Build its image once with
+`docker build -t prosperosunshine-app:2 -f app/Dockerfile app`; the volume `prosperosunshine-app-cache` needs the ps5-opengl
+SDK once at `/cache/ps5-opengl-sdk` (`app/README.md`, "Building"; CI keeps it in `.cache/app`):
+
+```sh
+docker run --rm --mount type=bind,source="$PWD",target=/repo --mount type=volume,source=prosperosunshine-app-cache,target=/cache prosperosunshine-app:2 bash app/build.sh   # -> build/app/PPSA47989 and .zip
+docker run --rm -e APP_FLAVOR=debug --mount type=bind,source="$PWD",target=/repo --mount type=volume,source=prosperosunshine-app-cache,target=/cache prosperosunshine-app:2 bash app/build.sh   # -> build/app-debug/PPSA47989-debug.zip
 ```
+
+On Windows, `powershell -NoProfile -ExecutionPolicy Bypass -File app/build.ps1 [-Debug]` builds the image, copies the SDK into
+the volume and runs the same.
 
 The debug flavor (`-DPROSPERO_DEBUG=ON`, README "Debug build") is the same code with the `->` trace (`ps_diag_trace`), the
 self-check (`src/sunshine/self_check.cpp`), `debug` as the default log level, masked addresses, held-back floods, the remote
@@ -43,11 +52,20 @@ issue are debug builds.
 docker run --rm --mount type=bind,source="$PWD",target=/repo prosperosunshine-app:2 bash app/tests/run.sh
 ```
 
-Stream test against the console, from Git Bash: build the local client once with `bash tools/moonlight/build_windows.sh`, then
-`STREAM_ARGS="--no-script" [VIDEO_FORMAT=hevc] bash tools/moonlight/run_smoke.sh <console> <seconds>`. `--no-script`
-presses nothing; without it the client presses buttons on the console. Test locally, not in Docker: Docker's network drops
-large bursts and falsifies results. Only `loss_test.sh` needs the container client (`tools/moonlight/build.sh`). The home
-screen is too quiet to load the encoder; the Mario 64 demo moves without input.
+Stream test against the console. On Linux, build the client once with `bash tools/moonlight/build.sh` and run it in the SDK
+container on the host's network:
+
+```sh
+DOCKER_ARGS="--network host" STREAM_ARGS="--no-script" bash tools/moonlight/run_smoke.sh <console> <seconds>
+DOCKER_ARGS="--network host" STREAM_ARGS="--no-script --hevc" VIDEO_FORMAT=hevc bash tools/moonlight/run_smoke.sh <console> <seconds>
+```
+
+HEVC needs both `--hevc` and `VIDEO_FORMAT=hevc`; without `--hevc` the client asks for H.264. On Windows, from Git Bash, build the native client once with `bash tools/moonlight/build_windows.sh`; `run_smoke.sh`
+uses it as long as `DOCKER_ARGS` and `PRE_CMD` are unset. `--no-script` presses nothing; without it the client presses
+buttons on the console. Docker Desktop's network on Windows drops large bursts and falsifies loss and high-bitrate results.
+With `--network host` on Linux there is no NAT in between, but whether large bursts arrive complete there is not measured
+yet; `tools/moonlight/udp_burst.py` against `udp_burst_spike.elf` checks it (`tools/moonlight/README.md`). `loss_test.sh`
+always uses the container client. The home screen is too quiet to load the encoder; the Mario 64 demo moves without input.
 
 Release archive from an existing build: `bash scripts/package.sh [version]` (on the host) -> `dist/`.
 
