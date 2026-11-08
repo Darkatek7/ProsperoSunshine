@@ -347,14 +347,17 @@ Tips:
 
 With **UPnP port forwarding** on (the app's or the web page's **Settings**, `upnp = 1` in `sunshine.conf`, off by default),
 the host asks the router to forward the six ports above to the console when it starts, renews them every 2 minutes and
-removes them when it stops. UPnP has to be on in the router. The web page's **Status** shows
-the result: the router, its internet side, and each port that couldn't be forwarded. When that internet side is a public
-address, Status also shows it as **Internet address**, with **Copy**: that's the address a friend adds in Moonlight.
+removes them when it stops, waiting at most 3 seconds for the router (what it can't remove then lapses within the hour).
+UPnP has to be on in the router. The web page's **Status** shows the result: the router, its internet side, and each port
+that couldn't be forwarded. When that internet side is a public address, Status also shows it as **Internet address**,
+with **Copy**: that's the address a friend adds in Moonlight.
 
 - **Only the six stream ports**, never the web page or the control socket.
 - **Ports forwarded to another device stay as they are.** If a PC on your network runs Sunshine with UPnP on the default
   ports, the router already sends them there; the host says so instead of taking them away. Turn UPnP off on the PC, or
   give the console another **Base port**. A rule you made by hand for the console counts as forwarded and isn't touched.
+- **A router that only takes permanent mappings** gets them without a lease: they stay on the router until the host
+  removes them. If the console loses power or the host is stopped some other way, remove them in the router.
 - **Behind two routers** (your own router behind the provider's), the host asks the router the console is attached to,
   and when the one in front answers UPnP from your network too, it forwards the same ports there to your router. If the
   one in front doesn't answer, the web page says its internet side is private: forward the ports on the router in front

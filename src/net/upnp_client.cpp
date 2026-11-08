@@ -6,8 +6,11 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
+#include <future>
+#include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 
 #include <miniupnpc/miniupnpc.h>
 #include <miniupnpc/upnpcommands.h>
@@ -24,6 +27,11 @@ constexpr auto refresh_interval = 120s;
 // here misses one every few passes), and one lost answer must not drop working mappings.
 constexpr int misses_before_gone = 3;
 constexpr const char *lease_seconds = "3600";  // renewed every 2 minutes; gone within the hour if the host dies
+// How long the host waits at stop for the routers to remove the mappings. Each miniupnpc call can take up to 3 s to connect
+// and 5 s per read, so a router that accepts connections but doesn't answer would otherwise hold up "Restart host" and the
+// restart of the services after rest mode.
+constexpr auto removal_budget = 3s;
+constexpr int upnp_error_only_permanent_leases = 725;  // OnlyPermanentLeasesSupported
 
 std::mutex status_mutex;
 Status current;
@@ -47,11 +55,11 @@ struct Router {
 };
 
 // Every router that answered discovery and describes a WAN connection service.
-std::vector<Router> find_routers() {
+std::vector<Router> find_routers(const std::stop_token &stop) {
     std::vector<Router> routers;
     int error = 0;
     UPNPDev *devices = upnpDiscover(2000, nullptr, nullptr, 0, 0, 2, &error);
-    for (UPNPDev *device = devices; device; device = device->pNext) {
+    for (UPNPDev *device = devices; device && !stop.stop_requested(); device = device->pNext) {
         UPNPUrls urls{};
         IGDdatas data{};
         char lan[64]{};
@@ -86,10 +94,12 @@ std::string external_address(const Router &router) {
 
 // One pass over the ports on one router, forwarding them to `client`: the console on the inner router, the inner router's
 // address on the outer one.
-void map_ports(const Router &router, const std::string &client, std::vector<PortStatus> &ports) {
+// Returns early when the host stops: between ports, and between the lookup and the add.
+void map_ports(const Router &router, const std::string &client, std::vector<PortStatus> &ports, const std::stop_token &stop) {
     const char *control = router.control_url.c_str();
     const char *service = router.service_type.c_str();
     for (auto &port : ports) {
+        if (stop.stop_requested()) return;
         const std::string number = std::to_string(port.mapping.port);
         const char *proto = port.mapping.udp ? "UDP" : "TCP";
         char other[64]{}, internal_port[8]{}, description[80]{}, enabled[8]{}, lease[16]{};
@@ -113,6 +123,7 @@ void map_ports(const Router &router, const std::string &client, std::vector<Port
         case Existing::unknown:
             break;
         }
+        if (stop.stop_requested()) return;
         const std::string label = std::string(label_prefix) + port.mapping.name;
         int added = UPNP_AddPortMapping(control, service, number.c_str(), number.c_str(), client.c_str(), label.c_str(),
                                         proto, nullptr, lease_seconds);
@@ -132,8 +143,9 @@ void map_ports(const Router &router, const std::string &client, std::vector<Port
                 continue;
             }
         }
-        // 725 OnlyPermanentLeasesSupported, and old routers that refuse any lease: a permanent one, removed at stop.
-        if (added != UPNPCOMMAND_SUCCESS)
+        // A router that only takes permanent mappings: one without a lease. It stays on the router until the host removes
+        // it, so only for that answer, not for any failure (README, "Forwarding the ports by UPnP").
+        if (added == upnp_error_only_permanent_leases && !stop.stop_requested())
             added = UPNP_AddPortMapping(control, service, number.c_str(), number.c_str(), client.c_str(), label.c_str(),
                                         proto, nullptr, "0");
         if (added == UPNPCOMMAND_SUCCESS) {
@@ -147,7 +159,10 @@ void map_ports(const Router &router, const std::string &client, std::vector<Port
     }
 }
 
-void unmap(const Router &router, const std::vector<PortStatus> &ports) {
+// Removes the mappings the host added; returns a line for each the router refused. No logging here: it also runs on the
+// removal thread, which may outlive the wait at stop.
+std::vector<std::string> unmap(const Router &router, const std::vector<PortStatus> &ports) {
+    std::vector<std::string> refused;
     for (const auto &port : ports) {
         if (!port.added) continue;  // also after a later pass failed: the mapping may still be there
         const std::string number = std::to_string(port.mapping.port);
@@ -155,9 +170,54 @@ void unmap(const Router &router, const std::vector<PortStatus> &ports) {
         const int removed =
             UPNP_DeletePortMapping(router.control_url.c_str(), router.service_type.c_str(), number.c_str(), proto, nullptr);
         if (removed != UPNPCOMMAND_SUCCESS && removed != 714)
-            BOOST_LOG(warning) << "UPnP: "sv << router.host << ' ' << proto << ' ' << number << " not removed: "sv
-                               << error_text(removed);
+            refused.push_back(router.host + ' ' + proto + ' ' + number + " not removed: " + error_text(removed));
     }
+    return refused;
+}
+
+void unmap_now(const Router &router, const std::vector<PortStatus> &ports) {
+    for (const auto &line : unmap(router, ports)) BOOST_LOG(warning) << "UPnP: "sv << line;
+}
+
+// The removal at stop runs on a thread of its own, and the host waits for it at most removal_budget. A run() that starts
+// before it ends (the services start anew after rest mode) waits for it before its first pass, so the old removal never
+// takes away what the new run maps.
+// Never freed: a removal thread may still run while the process exits, after static objects are destroyed.
+struct Removals {
+    std::mutex mutex;
+    std::condition_variable_any done;
+    int running = 0;
+};
+Removals &removals() {
+    static Removals *instance = new Removals;
+    return *instance;
+}
+
+void remove_at_stop(const Router &inner, const Hop &inner_hop, const Router &outer, const Hop &outer_hop) {
+    {
+        std::lock_guard lock(removals().mutex);
+        ++removals().running;
+    }
+    auto refused = std::make_shared<std::promise<std::vector<std::string>>>();
+    auto result = refused->get_future();
+    std::thread([inner, inner_ports = inner_hop.ports, outer, outer_ports = outer_hop.ports,
+                 has_inner = !inner_hop.router.empty(), has_outer = !outer_hop.router.empty(), refused] {
+        std::vector<std::string> lines;
+        if (has_outer) lines = unmap(outer, outer_ports);
+        if (has_inner) {
+            auto more = unmap(inner, inner_ports);
+            lines.insert(lines.end(), more.begin(), more.end());
+        }
+        refused->set_value(std::move(lines));
+        std::lock_guard lock(removals().mutex);
+        --removals().running;
+        removals().done.notify_all();
+    }).detach();
+    if (result.wait_for(removal_budget) != std::future_status::ready) {
+        BOOST_LOG(warning) << "UPnP: the router is slow to remove the mappings; the host goes on, and they lapse within the hour"sv;
+        return;
+    }
+    for (const auto &line : result.get()) BOOST_LOG(warning) << "UPnP: "sv << line;
 }
 
 // Log lines for what changed since the last pass.
@@ -205,6 +265,10 @@ void run(std::stop_token stop, std::vector<Mapping> mappings) {
     Status status;
     status.state = State::searching;
     publish(status);
+    {
+        std::unique_lock lock(removals().mutex);
+        if (!removals().done.wait(lock, stop, [] { return removals().running == 0; })) return;
+    }
     BOOST_LOG(info) << "UPnP: looking for the router to forward Moonlight's ports (upnp in sunshine.conf)"sv;
 
     Router inner, outer;
@@ -213,7 +277,8 @@ void run(std::stop_token stop, std::vector<Mapping> mappings) {
     std::condition_variable_any wake;
     for (;;) {
         const Status before = status;
-        const auto routers = find_routers();
+        const auto routers = find_routers(stop);
+        if (stop.stop_requested()) break;
         const int i = inner_router(routers);
         if (i < 0) {
             if (status.inner.router.empty() || ++inner_misses >= misses_before_gone) {
@@ -224,13 +289,14 @@ void run(std::stop_token stop, std::vector<Mapping> mappings) {
         } else {
             inner_misses = 0;
             status.state = State::ready;
-            if (!status.inner.router.empty() && status.inner.router != routers[i].host) unmap(inner, status.inner.ports);
+            if (!status.inner.router.empty() && status.inner.router != routers[i].host) unmap_now(inner, status.inner.ports);
             inner = routers[i];
             keep_or_reset(status.inner, inner.host, mappings);
             status.inner.external = external_address(inner);
             status.inner.external_private = private_ipv4(status.inner.external).value_or(false);
-            map_ports(inner, inner.lan_address, status.inner.ports);
+            map_ports(inner, inner.lan_address, status.inner.ports, stop);
             log_hop("console's", status.inner, before.inner);
+            if (stop.stop_requested()) break;
 
             // Behind two routers: the one in front, if it answered too, forwards the same ports to the inner router.
             std::vector<std::string> hosts;
@@ -238,15 +304,15 @@ void run(std::stop_token stop, std::vector<Mapping> mappings) {
             const int o = status.inner.external_private ? outer_router(status.inner.external, inner.host, hosts) : -1;
             if (o >= 0) {
                 outer_misses = 0;
-                if (!status.outer.router.empty() && status.outer.router != routers[o].host) unmap(outer, status.outer.ports);
+                if (!status.outer.router.empty() && status.outer.router != routers[o].host) unmap_now(outer, status.outer.ports);
                 outer = routers[o];
                 keep_or_reset(status.outer, outer.host, mappings);
                 status.outer.external = external_address(outer);
                 status.outer.external_private = private_ipv4(status.outer.external).value_or(false);
-                map_ports(outer, status.inner.external, status.outer.ports);
+                map_ports(outer, status.inner.external, status.outer.ports, stop);
             } else if (!status.inner.external_private) {
                 // The console's router is on the internet now: nothing in front to forward through.
-                if (!status.outer.router.empty()) unmap(outer, status.outer.ports);
+                if (!status.outer.router.empty()) unmap_now(outer, status.outer.ports);
                 status.outer = Hop{};
             } else if (!status.outer.router.empty() && ++outer_misses >= misses_before_gone) {
                 status.outer = Hop{};  // gone: what it still forwards lapses within the hour
@@ -258,10 +324,10 @@ void run(std::stop_token stop, std::vector<Mapping> mappings) {
         std::unique_lock lock(wait_mutex);
         if (wake.wait_for(lock, stop, refresh_interval, [] { return false; }) || stop.stop_requested()) break;
     }
-    if (status.state == State::ready) {
+    // Whatever the last pass found: also after the routers stopped answering, the mappings the host added are worth a try.
+    if (!status.inner.router.empty() || !status.outer.router.empty()) {
         BOOST_LOG(info) << "UPnP: removing the port mappings"sv;
-        if (!status.outer.router.empty()) unmap(outer, status.outer.ports);
-        unmap(inner, status.inner.ports);
+        remove_at_stop(inner, status.inner, outer, status.outer);
     }
     publish(Status{});
 }

@@ -356,12 +356,13 @@ int main(int argc, char *argv[]) {
         proc::proc.terminate();
         ps_diag_trace("wait for the service threads to end\n");
         mdns_thread.join();
-        if (upnp_thread.joinable()) upnp_thread.join();
         http_thread.join();
         rtsp_thread.join();
         control_thread.join();
         report_thread.join();
         web_thread.join();
+        // Last, so a router slow to answer never holds up the other services (src/net/upnp_client.cpp bounds its wait).
+        if (upnp_thread.joinable()) upnp_thread.join();
         if (again) {
             shutdown_event->reset();
             while (!std::all_of(ports.begin(), ports.end(), prospero::port_free)) std::this_thread::sleep_for(2s);
