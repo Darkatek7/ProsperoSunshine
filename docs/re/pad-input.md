@@ -86,6 +86,26 @@ Remote Play füttert alles. Die Kette für einen Eintrag im Netz bis zum Block:
 Alle drei Bewegungsgrößen schickt der Remote-Play-Client fertig; Remote Play selbst rechnet sie nicht aus. Auch die
 Orientierung muss also von der Gegenseite kommen.
 
+### Wie Remote Play sein Pad anlegt (Issue 41, 2026-11-08, statisch)
+
+`libScePad` hat zwei gleiche Exporte zum Anlegen, `0MB5x-ieRGI` (`0xd780`) und `N7tpsjWQ87s` (`0xd8a0`). Beide nehmen
+`{ u32 kennung; u8 typ @4 }` und den Zeiger für das Handle. Erlaubt sind die Typen 1 bis 12 außer 4 (Maske `0xff7`, sonst
+`0x803b0001`). Zwei Tabellen (`0x1fab0`, `0x1fabc`) machen daraus Klasse (Byte `0x00` des Datensatzes) und Subtyp (`0x20`).
+Die Kennung kommt unverändert nach `0x1C`, das Feld, das `pad.c` als Nutzer setzt. Dann folgt das ioctl `0xC018482A`, op 3.
+
+| Typ | 1 | 2 | 3 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Klasse, Subtyp | 3, 1 | 2, 4 | 2, 5 | 2, 7 | 2, 8 | 2, 9 | 2, 12 | 2, 13 | 3, 14 | 3, 15 | 3, 16 |
+
+Der Host legt Typ 1 an (Klasse 3, Subtyp 1) und setzt als Kennung den Nutzer oder `0xFFFFFFFF`. Remote Play ruft
+`N7tpsjWQ87s` in `0x40600` (Vtable-Eintrag `0x553700`, den Aufrufer nicht verfolgt) mit **Kennung
+`0x0B000000 | b0 << 8 | b1`** und Typ `b1`, wobei `b0` und `b1` die ersten beiden Bytes seines Arguments sind (vermutlich Platz
+und Gerätetyp des Clients). Es gibt also keinen Nutzer an. **Vermutung:** Das Präfix `0x0B` kennzeichnet ein Pad von Remote
+Play, und das System behandelt es anders als einen eingeschalteten Controller, etwa ohne One-Touch Play über HDMI-CEC
+(Issue 41: Mit dem Pad des Hosts schaltet der Fernseher auf die Konsole um). Prüfen lässt sich das mit `pad_user_probe`
+(`pad_user_probe.user` = `0b000101`), einmal neben einem Pad mit Nutzer, am Fernseher. Offen bliebe dann, wie ein solches Pad
+einem Profil zugeordnet wird.
+
 ## Sunshine-Seite
 
 In `.cache/deps/src/sunshine/src` und `moonlight-common-c`. `docs/input-mapping.md` gibt es noch nicht, nur als Eintrag in
@@ -125,7 +145,7 @@ Der Touchpad-Klick bleibt die Taste `0x100000`; Remote Play setzt ihn ebenso üb
 - Ob der Kernel den Kopf `0x00` stempelt. Remote Play lässt ihn 0; Titel, die die Drehrate über den Zeitstempel integrieren,
   hängen davon ab.
 - Bedeutung von `0x18` (die Leseseite gibt es ab Titel-SDK 3.5 als `+0x38` weiter), Vorzeichen der Achsen, Bedeutung der
-  Client-Typen, welchen Gerätetyp Remote Play selbst anlegt.
+  Client-Typen, welchen Typ `b1` Remote Play für einen DualSense übergibt (oben, „Wie Remote Play sein Pad anlegt“).
 - Die drei Zusatzbytes des Analogsatzes (`0x249300`, an `7exHuVMAMQM`) hängen nicht an Touch oder Bewegung; ihr Zweck ist unbekannt.
 
 ## Minimaler Live-Test
