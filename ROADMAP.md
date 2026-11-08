@@ -34,8 +34,11 @@ nur ein erfolgreicher Build.
 6. **10.x:** 10.20 ist geprüft, 10.40 streamt HEVC laut Nutzerbericht (Issue #2). Offen: H.264 kommt dort in 34 Slices je
    Bild, und die Hardware-Decoder unter Windows nehmen höchstens 32 (weißes Bild). Seit 0.3.1 setzt der Host dort die
    Slice-Felder von Remote Play (`cfg+0x40/0x44/0x48`, Offsets aus SceRemotePlay von 13.00); 10.20 nimmt sie an und
-   schneidet trotzdem 34 Slices. Nächster Schritt: das Feld finden, das auf 10.x die Slice-Zahl setzt (eine Sonde eines
-   Mitwirkenden, die freie Wörter im Encoder-Block durchprobiert, oder SceRemotePlay von 10.20). Bis dahin HEVC empfehlen.
+   schneidet trotzdem 34 Slices. Ein Mitwirkender hat dafür einen Patch an FFmpeg und an moonlight-qt-deps geschickt
+   (November 2026, Discord), damit Moonlight für Windows solche Bilder dekodiert. Sobald er in einem Moonlight-Release ist:
+   H.264 auf 10.x mit Moonlight für Windows nachprüfen und README und `STATUS.md` anpassen. Das Feld, das auf 10.x die
+   Slice-Zahl setzt, bleibt eine Alternative (eine Sonde, die freie Wörter im Encoder-Block durchprobiert, oder
+   SceRemotePlay von 10.20). Bis dahin HEVC empfehlen.
 7. **Ruhemodus** mit offenem Spiel und laufendem Stream: Der Neustart der Dienste endet dort nicht in `host ready`
    (`docs/status-archive.md`, „Stand 30. Oktober 2026“). Das ist zu klären. Offen sind außerdem das Aufwecken per Controller
    und der einmalige Hänger im ersten Test. Wecken aus Moonlight geht nicht (`docs/status-archive.md`, „Wecken aus
