@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "net/upnp_client.hpp"
 
+#include "platform/ps5/diag.h"
 #include "src/logging.h"
 
 #include <chrono>
@@ -27,6 +28,11 @@ constexpr auto refresh_interval = 120s;
 // Passes in a row without an answer before a router counts as gone. Discovery answers get lost now and then (the ISP router
 // here misses one every few passes), and one lost answer must not drop working mappings.
 constexpr int misses_before_gone = 3;
+// After a pass that found no router, during the run's first minute: the next pass comes sooner. After rest mode the
+// services start anew before the network is back, and the first pass finds nothing (seen on 13.00); without this the ports
+// stayed closed until the next pass, two minutes later. "No router answered" is logged only once that minute is over.
+constexpr auto quick_retry = 15s;
+constexpr auto quick_period = 60s;
 constexpr const char *lease_seconds = "3600";  // renewed every 2 minutes; gone within the hour if the host dies
 // How long the host waits at stop for the routers to remove the mappings. Each miniupnpc call can take up to 3 s to connect
 // and 5 s per read, so a router that accepts connections but doesn't answer would otherwise hold up "Restart host" and the
@@ -222,11 +228,15 @@ void remove_at_stop(const Router &inner, const Hop &inner_hop, const Router &out
         --removals().running;
         removals().done.notify_all();
     }).detach();
+    // Also in host_diag.log, which is written at once: around rest mode the other logs can miss these lines.
     if (result.wait_for(removal_budget) != std::future_status::ready) {
+        ps_diag_log("ProsperoSunshine: host UPnP removal not done within %lld s\n", static_cast<long long>(removal_budget.count()));
         BOOST_LOG(warning) << "UPnP: the router is slow to remove the mappings; the host goes on, and they lapse within the hour"sv;
         return;
     }
-    for (const auto &line : result.get()) BOOST_LOG(warning) << "UPnP: "sv << line;
+    const auto refused_lines = result.get();
+    ps_diag_log("ProsperoSunshine: host UPnP removal done, %zu refused\n", refused_lines.size());
+    for (const auto &line : refused_lines) BOOST_LOG(warning) << "UPnP: "sv << line;
 }
 
 // Log lines for what changed since the last pass.
@@ -282,6 +292,8 @@ void run(std::stop_token stop, std::vector<Mapping> mappings) {
 
     Router inner, outer;
     int inner_misses = 0, outer_misses = 0;
+    const auto started = std::chrono::steady_clock::now();
+    const auto early = [&] { return std::chrono::steady_clock::now() - started < quick_period; };
     std::mutex wait_mutex;
     std::condition_variable_any wake;
     for (;;) {
@@ -290,7 +302,7 @@ void run(std::stop_token stop, std::vector<Mapping> mappings) {
         if (stop.stop_requested()) break;
         const int i = inner_router(routers);
         if (i < 0) {
-            if (status.inner.router.empty() || ++inner_misses >= misses_before_gone) {
+            if (status.inner.router.empty() ? !early() : ++inner_misses >= misses_before_gone) {
                 if (before.state != State::no_router)
                     BOOST_LOG(warning) << "UPnP: no router answered; forward the ports by hand or turn UPnP on in the router"sv;
                 status.state = State::no_router;
@@ -331,7 +343,8 @@ void run(std::stop_token stop, std::vector<Mapping> mappings) {
         }
         publish(status);
         std::unique_lock lock(wait_mutex);
-        if (wake.wait_for(lock, stop, refresh_interval, [] { return false; }) || stop.stop_requested()) break;
+        const auto next = i < 0 && early() ? std::min<std::chrono::seconds>(quick_retry, refresh_interval) : refresh_interval;
+        if (wake.wait_for(lock, stop, next, [] { return false; }) || stop.stop_requested()) break;
     }
     // Whatever the last pass found: also after the routers stopped answering, the mappings the host added are worth a try.
     if (!status.inner.router.empty() || !status.outer.router.empty()) {

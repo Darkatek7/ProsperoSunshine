@@ -356,6 +356,8 @@ with **Copy**: that's the address a friend adds in Moonlight.
 - **Ports forwarded to another device stay as they are.** If a PC on your network runs Sunshine with UPnP on the default
   ports, the router already sends them there; the host says so instead of taking them away. Turn UPnP off on the PC, or
   give the console another **Base port**. A rule you made by hand for the console counts as forwarded and isn't touched.
+- **A port the router keeps for itself** is refused with 729 (ConflictWithOtherMechanisms), even with nothing mapped
+  on it. Status shows it as failed: give the console another **Base port**.
 - **A router that only takes permanent mappings** gets them without a lease: they stay on the router until the host
   removes them. If the console loses power or the host is stopped some other way, remove them in the router.
 - **Behind two routers** (your own router behind the provider's), the host asks the router the console is attached to,

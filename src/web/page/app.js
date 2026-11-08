@@ -186,7 +186,9 @@ function upnpText(upnp) {
       if (p.outcome === 'taken') {
         return `${p.proto} ${list} ${g.length > 1 ? 'go' : 'goes'} to ${p.detail}, another device: turn UPnP off there or change Base port`;
       }
-      return `${p.proto} ${list} ${p.outcome}${p.detail ? `: ${p.detail}` : ''}`;
+      // 729 ConflictWithOtherMechanisms: the router keeps the port for itself, with nothing mapped on it.
+      const hint = /\(729\)/.test(p.detail || '') ? ', the router keeps it for itself: change Base port' : '';
+      return `${p.proto} ${list} ${p.outcome}${p.detail ? `: ${p.detail}` : ''}${hint}`;
     });
     let text = `${open} of ${ports.length} ports forwarded by ${h.router}${h.external ? ` (internet side ${h.external})` : ''}`;
     if (problems.length) text += `; ${problems.join('; ')}`;
