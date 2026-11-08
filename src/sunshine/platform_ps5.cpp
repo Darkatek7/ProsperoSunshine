@@ -641,10 +641,13 @@ static void set_triggers(input_raw_t &input, int nr, const prospero::TriggerBloc
 static void check_seat_switches(input_raw_t &input);
 
 // Whether a game is in front, for pads whose profile doesn't reach the console's menus (control/menu_access.hpp): the
-// console's running big app is a title the app list shows as a game (titles.cpp). The home screen, an app of the
-// console's, a media app or homebrew such as the settings app or a store count as menus. The running big app is
-// sceLncUtilGetAppIdOfRunningBigApp's, the one the keyboard pad's profile goes by (patch 0018). A title's kind is read
-// once, when it comes to the front.
+// console's running big app is a title the app list shows as a game (titles.cpp), and it has the screen. The home screen,
+// an app of the console's, a media app or homebrew such as the settings app or a store count as menus, and so does the
+// home screen over a game left running (PS held on another controller). The control center that a short PS opens over a
+// game leaves the game the screen (measured on 10.20), so it counts as in front. The running big app is
+// sceLncUtilGetAppIdOfRunningBigApp's, the one the keyboard pad's profile goes by (patch 0018); who has the screen,
+// ps_title_focused's. A title's kind is read once, when it comes to the front. Should the system not tell who has the
+// screen, the running game counts, as before, and the log says so once.
 static bool game_in_front() {
     static std::mutex mutex;
     static std::string title;
@@ -657,7 +660,11 @@ static bool game_in_front() {
         const auto meta = prospero::read_title_meta("/user", title);
         game = meta && meta->game;
     }
-    return game;
+    if (!game) return false;
+    const int focused = ps_title_focused();
+    static std::once_flag unknown;
+    if (focused < 0) std::call_once(unknown, [] { BOOST_LOG(warning) << "PS5 menus: the system doesn't say which app has the screen; a game left open behind the home screen counts as in front"sv; });
+    return focused != 0;
 }
 
 // Reads what the system wants from each pad at the cadence of Remote Play's own reader and passes on

@@ -21,12 +21,35 @@ int sceSystemServiceLaunchApp(const char *, char **, launch_context *);
 int sceLncUtilGetAppIdOfRunningBigApp(void);
 int sceLncUtilGetAppTitleId(uint32_t, char *);
 int sceSystemServiceKillApp(int app_id, int how, int reason, int core_dump);
+int sceKernelOpenEventFlag(int *, const char *);
+int sceKernelPollEventFlag(int, uint64_t, uint32_t, uint64_t *);
 
 int ps_title_running(char title_id[16])
 {
     memset(title_id, 0, 16);
     const int app = sceLncUtilGetAppIdOfRunningBigApp();
     return app > 0 && sceLncUtilGetAppTitleId((uint32_t)app, title_id) == 0;
+}
+
+int ps_title_focused(void)
+{
+    // Opened once and kept: the flag belongs to the system and outlives the host.
+    static int flag = -1, failed = 0;
+    if (flag < 0) {
+        if (failed) return -1;
+        if (sceKernelOpenEventFlag(&flag, "SceShellCoreUtilAppFocus") != 0 || flag < 0) {
+            failed = 1;
+            flag = -1;
+            return -1;
+        }
+    }
+    const int app = sceLncUtilGetAppIdOfRunningBigApp();
+    if (app <= 0) return 0;
+    // Any bit, as a poll: the pattern comes back whether or not one matched.
+    uint64_t focused = 0;
+    sceKernelPollEventFlag(flag, ~(uint64_t)0, 0x02 /* SCE_KERNEL_EVF_WAITMODE_OR */, &focused);
+    if (!focused) return -1;
+    return (uint32_t)focused == (uint32_t)app;
 }
 
 int ps_title_close(const char *title_id)

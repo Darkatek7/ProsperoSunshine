@@ -217,10 +217,11 @@ On a device with profiles of its own:
   list, and the host refuses to start it for any other device, as a client can ask for an app by its id without seeing it.
   A spectator only watches: it has no input to reach the menus with. Any device can start a game from its list,
   and leave it with Quit when **Quit closes the game** is on.
-- While no game is running (the home screen with no game open, an app of the console's, a media app or homebrew), the
+- While no game is in front (the home screen, an app of the console's, a media app or homebrew), the
   controllers, keyboard and mouse of other profiles do nothing, and a press says why: "<profile> can't use the console's
-  menus. Start a game from Moonlight". They play again once a game runs. The host goes by the console's running big app,
-  so a game left open behind the home screen still counts as running.
+  menus. Start a game from Moonlight". They play again once a game is back in front. A game left open behind the home
+  screen doesn't count: PS held on a controller of a chosen profile opens the home screen, and the others wait until the
+  game has the screen again. The control center that a short PS opens over a game leaves it in front.
 
 Until you choose (the default), everything goes as before: the host's controller has PS and Create (every controller with
 **PS for all players**), and every device gets "PS5 Screen". Choosing no profile closes the menus to all of them. Devices
