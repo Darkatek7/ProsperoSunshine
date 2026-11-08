@@ -92,6 +92,20 @@ Issue 36“) und ein Debug-Build in jedem Release („Debug-Build (PR 29) zusamm
 
 ## Neuere Nachweise
 
+### UPnP, PR 43 (2026-11-08, 13.00)
+
+Testhost mit PR 43 am Router des Besitzers (UPnP dafür kurz eingeschaltet), Mappings vom PC aus per SSDP und
+`GetSpecificPortMappingEntry` abgefragt:
+- Stand `d2c2778`: 5 von 6 Ports weitergeleitet, UDP 48000 lehnte der Router mit 729 (`ConflictWithOtherMechanisms`) ab.
+  QUIT entfernte alle Mappings, der Host war nach rund 1 s beendet. Nach Ruhemodus fand der erste Durchlauf keinen Router
+  („no router answered“), der nächste zwei Minuten später leitete wieder weiter.
+- Stand `51b0082` (Entfernen mit 3 s Obergrenze, schnelle Wiederholung in der ersten Minute), Router-UPnP wieder aus:
+  UPnP aus im Host: 20 s H.264 in 1080p60 fehlerfrei dekodiert, keine UPnP-Zeilen, QUIT rund 1 s. `upnp = 1`: QUIT 3 s
+  und 85 s nach dem Start, beide Male `host stopped` in `host_diag.log` nach 0,5 s. Durchläufe etwa alle 17 s, „no router
+  answered“ nach 70 s, im ersten Durchlauf nach der ersten Minute.
+- Nicht geprüft: Mappings und Ruhemodus mit Stand `51b0082` (vom Mitwirkenden gegen einen nachgebauten Router und auf 10.20
+  gemessen), zwei Router hintereinander.
+
 ### Konsolenmenüs, PR 38 (2026-11-08, 13.00)
 
 Testhost mit PR 38, zwei Konsolenprofile, ein Testclient auf das zweite Profil beschränkt (`SETPROFILES`), die Menüs nur für

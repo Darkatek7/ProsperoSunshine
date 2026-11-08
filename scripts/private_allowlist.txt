@@ -11,6 +11,11 @@ app/tests/*.cpp         ^192\.168\.1\.[0-9]{1,3}$
 src/log/remote_log.hpp  ^192\.168\.1\.10$
 tests/*.cpp             ^10\.0\.0\.[0-9]$
 
+# UPnP (PR 43): routers and consoles on made-up networks, in the tests and in comments that show a log line's format.
+tests/upnp_test.cpp     ^(10\.0\.0\.86|192\.168\.249\.88|192\.168\.63\.12)$
+src/net/upnp.hpp        ^192\.168\.1\.(20|100)$
+src/web/page/app.js     ^192\.168\.1\.20$
+
 # The app connects a UDP socket to this address only to learn its own one from the route; nothing is sent.
 app/src/psapp/io.cpp    ^10\.0\.0\.1$
 

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+
+- **UPnP port forwarding** (PR 43, off by default): with `upnp = 1`, or the switch in the app's and the web page's
+  Settings, the host asks the router to forward the six stream ports to the console, renews them every 2 minutes and
+  removes them when it stops. Behind two routers it forwards through both. The web page's Status shows the router, its
+  internet side and every port that couldn't be forwarded. See "Forwarding the ports by UPnP" in the README.
+
 ### Fixed
 
 - **10.x: a title with a 1080p output no longer turns 1440p and 4K off until the host restarts** (issue 39). With the
