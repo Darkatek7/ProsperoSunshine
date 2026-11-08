@@ -97,9 +97,11 @@ int ps_capture_open(ps_capture **out);
 // ps_capture_open, then ps_capture_fall_back_mode and once more, and with a switch on the variants and the first frame
 // too. Each attempt goes to host_diag.log. After a failure ps_capture_hevc_allowed and the others may say no.
 int ps_capture_open_or_fall_back(ps_capture **out);
-// Whether the next opens reopen a running stream's capture. Then a refusal of a mode below 1080p while the output had no
-// mode or changed it, as while a title starts or closes, fails instead of falling back to 1080p.
+// Whether the next opens reopen a running stream's capture. Then a refused mode fails instead of falling back to 1080p, as
+// the stream keeps its size. While the output had no mode or changed it, as while a title starts or closes, the next
+// reopen may get it; once the output is settled, ps_capture_size_refused says so and the stream has to end.
 void ps_capture_set_reopening(int on);
+int ps_capture_size_refused(void);
 // Whether the session was opened with the mode set now for its slot. NULL counts as not current.
 int ps_capture_mode_current(const ps_capture *session);
 
@@ -117,6 +119,7 @@ uint32_t ps_capture_slot_opening_average(int slot);
 uint32_t ps_capture_slot_video_resolution(int slot);
 int ps_capture_slot_fall_back_mode(int slot);
 void ps_capture_slot_set_reopening(int slot, int on);
+int ps_capture_slot_size_refused(int slot);
 int ps_capture_slot_open(int slot, ps_capture **out);
 int ps_capture_slot_open_or_fall_back(int slot, ps_capture **out);
 // Annex-B parameter sets, for HEVC in the order VPS, SPS, PPS; returns bytes written or a negative error.

@@ -74,6 +74,13 @@ static int large_fails(const char *step, const uint8_t *record)
     memcpy(&resolution, record + 0x18, sizeof resolution);
     return !strcmp(step, "OpenVideo") && resolution >= 5 ? INVALID : 0;
 }
+// The output in front can't hold a larger mode (issue 39): OpenVideo answers RESOURCE_NOT_ACTIVE.
+static int large_refused(const char *step, const uint8_t *record)
+{
+    uint32_t resolution;
+    memcpy(&resolution, record + 0x18, sizeof resolution);
+    return !strcmp(step, "OpenVideo") && resolution >= 5 ? RESOURCE_NOT_ACTIVE : 0;
+}
 // A rate above 50 Mbit/s fails to start, whatever else the record holds.
 static int high_rate_fails(const char *step, const uint8_t *record)
 {
@@ -249,8 +256,24 @@ int main(void)
     fake_decide = large_fails;
     assert(open_and_close() == 0);
     assert(fake_opens == 3 && ps_capture_video_resolution() == 4);
-    assert(logged("mode=1920x1080 fps=60 kbit=20000 variant=minimal error=0") && logged("feature=large") && !logged("feature=hevc"));
+    assert(logged("mode=1920x1080 fps=60 kbit=5000 variant=minimal error=0") && logged("feature=large") && !logged("feature=hevc"));
+    assert(logged("fallback to 1080p at 5000 kbit/s, 20000 asked for the larger mode"));
     assert(ps_capture_hevc_allowed() && !ps_capture_large_modes_allowed());
+
+    // The output in front refuses 1440p (issue 39): 1080p for this stream at 1080p's share of the rate, the switch stays on
+    // trial, and the next stream asks for 1440p again.
+    setup(0x13600000u, 0, 0, 1, 0, 0, 5);
+    fake_decide = large_refused;
+    assert(open_and_close() == 0);
+    assert(ps_capture_video_resolution() == 4 && ps_capture_opening_average() == 11250000u);
+    assert(logged("trial=large codec=h264 bits=8 mode=2560x1440") && !logged("disabled"));
+    assert(ps_capture_large_modes_allowed());
+    ps_capture_set_video_mode(5, 1);
+    ps_capture_set_opening_bitrate(20000000u, 22400000u);
+    fake_log[0] = 0;
+    fake_decide = NULL;
+    assert(open_and_close() == 0);
+    assert(ps_capture_video_resolution() == 5 && logged("trial=large") && logged("result=ok"));
 
     // A smaller mode that fails gives 1080p in the same stream, and stays off. 10.40 has them unverified.
     setup_small(0x10400000u, 1, 0, 2);
@@ -297,24 +320,43 @@ int main(void)
     fake_opens = 0;
     assert(open_and_close() == 0);
     assert(fake_opens == 1 && record_u32(0x18) == 2);
-    // The first open of a stream falls back as before, and so does a reopen whose output is settled.
+    // The first open of a stream falls back as before.
     setup_small(0x10200006u, 0, 0, 2);
     fake_output = 0;
     fake_decide = refused_without_output;
     assert(open_and_close() != 0);
-    assert(ps_capture_video_resolution() == 4 && !logged("output not settled"));
+    assert(ps_capture_video_resolution() == 4 && !logged("output not settled") && !ps_capture_size_refused());
+    // A reopen keeps the stream's size (issue 39): refused by a settled output, it fails and says the stream can't go on.
     setup_small(0x10200006u, 0, 0, 2);
     fake_decide = small_fails;
     ps_capture_set_reopening(1);
-    assert(open_and_close() == 0);
-    assert(fake_opens == 3 && ps_capture_video_resolution() == 4 && !logged("output not settled"));
-    // From 1080p up a reopen falls back as before.
+    assert(open_and_close() != 0);
+    assert(ps_capture_video_resolution() == 2 && logged("output refuses resolution 2 now") && ps_capture_size_refused());
+    // Above 1080p alike: while the output has no mode the next reopen may get it, ...
     setup(0x13000040u, 1, 0, 0, 1, 0, 6);
     fake_output = 0;
     fake_decide = refused_without_output;
     ps_capture_set_reopening(1);
     assert(open_and_close() != 0);
-    assert(ps_capture_video_resolution() == 4 && !logged("output not settled"));
+    assert(ps_capture_video_resolution() == 6 && logged("output not settled") && !ps_capture_size_refused());
+    fake_output = 0x44;
+    fake_log[0] = 0;
+    assert(open_and_close() == 0);
+    assert(ps_capture_video_resolution() == 6 && !ps_capture_size_refused());
+    // ... and an output that can't hold it, as with a 1080p video app in front, ends the stream instead of a picture
+    // the client can't decode.
+    setup(0x13000040u, 0, 0, 0, 0, 0, 6);
+    fake_decide = large_refused;
+    ps_capture_set_reopening(1);
+    assert(open_and_close() != 0);
+    assert(ps_capture_video_resolution() == 6 && logged("output refuses resolution 6 now") && ps_capture_size_refused());
+    // At 1080p there is nothing to fall back to: the reopen fails and is tried again, as before.
+    setup(0x13000040u, 0, 0, 0, 0, 0, 4);
+    fake_output = 0;
+    fake_decide = refused_without_output;
+    ps_capture_set_reopening(1);
+    assert(open_and_close() != 0);
+    assert(ps_capture_video_resolution() == 4 && !ps_capture_size_refused());
     // 13.00 has them verified too, with the same fallback.
     setup_small(0x13000040u, 0, 0, 3);
     assert(ps_capture_small_modes_allowed());

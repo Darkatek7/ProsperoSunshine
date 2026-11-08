@@ -69,8 +69,9 @@ static atomic_int granted[PS_CAPTURE_SLOTS];
 static atomic_int revoked[PS_CAPTURE_SLOTS];
 static atomic_int refused[PS_CAPTURE_SLOTS];
 static atomic_int refused_value[PS_CAPTURE_SLOTS];  // data[0] of the answer that refused
-// The last open was refused while the output had no mode or changed it; the next opens reopen a running stream's capture.
-static atomic_int unsettled[PS_CAPTURE_SLOTS], reopening[PS_CAPTURE_SLOTS];
+// The last open was refused while the output had no mode or changed it; the next opens reopen a running stream's capture;
+// the last reopen was refused by a settled output, so the stream can't go on at its size.
+static atomic_int unsettled[PS_CAPTURE_SLOTS], reopening[PS_CAPTURE_SLOTS], size_refused[PS_CAPTURE_SLOTS];
 static int resource_event(int id, int event, const uint8_t *data)
 {
     for (int slot = 0; slot < PS_CAPTURE_SLOTS; slot++) {
@@ -916,6 +917,7 @@ void ps_capture_set_experimental(const int switches[PS_EXP_SWITCH_COUNT], const 
 // One attempt at a time, for the marker file. Caller holds attempt_lock.
 static int open_or_fall_back(int slot, ps_capture **out)
 {
+    atomic_store(&size_refused[slot], 0);
     for (;;) {
         const uint32_t codec = atomic_load(&video_codec[slot]), ten_bit = atomic_load(&video_ten_bit[slot]);
         const uint32_t resolution = atomic_load(&video_resolution[slot]), timing = atomic_load(&video_timing[slot]);
@@ -947,6 +949,9 @@ static int open_or_fall_back(int slot, ps_capture **out)
             const int attributable = rc == PS_CAPTURE_ERROR && atomic_load(&reached_encoder[slot]);
             next = ps_exp_failed(&experiment, codec, ten_bit, resolution, average, attributable,
                                  atomic_load(&refused[slot]) && ps_exp_mode_may_fall_back(resolution));
+            const char *const step = atomic_load(&failure_step[slot]);
+            if (next == PS_EXP_FALL_BACK && atomic_load(&failure_rc[slot]) == RESOURCE_NOT_ACTIVE && step && strcmp(step, "OpenVideo") == 0)
+                ps_exp_output_refused(&experiment, resolution);
         } else {
             ps_exp_succeeded(&experiment, codec, ten_bit, resolution, average);
         }
@@ -962,14 +967,31 @@ static int open_or_fall_back(int slot, ps_capture **out)
             atomic_store(&opening_average[slot], PS_EXP_SAFE_AVERAGE);
             continue;
         }
-        // A title starting or closing leaves the output without a mode for up to about 2 s (10.20), longer than the opens
-        // above wait. A refusal then says nothing about a mode below 1080p, which the client may need: a reopen in a
-        // running stream fails instead of falling back, and its loop tries the same mode again.
-        if (next == PS_EXP_FALL_BACK && atomic_load(&reopening[slot]) && atomic_load(&unsettled[slot]) && resolution < 4) {
-            SLOG(slot, "output not settled: resolution %u kept for the next reopen\n", resolution);
+        // A running stream keeps its size: the client set up its decoder for it, and Moonlight for Windows doesn't set it
+        // up anew when the size changes, so the picture breaks (issue 39). A title starting or closing leaves the output
+        // without a mode for up to about 2 s (10.20), longer than the opens above wait, so a refusal then says nothing:
+        // the reopen fails and its loop tries the same mode again. A settled output that refuses the mode ends the stream,
+        // and the client's next one starts at what the output takes.
+        if (next == PS_EXP_FALL_BACK && atomic_load(&reopening[slot])) {
+            if (atomic_load(&unsettled[slot])) {
+                SLOG(slot, "output not settled: resolution %u kept for the next reopen\n", resolution);
+            } else {
+                SLOG(slot, "output refuses resolution %u now; a running stream keeps its size\n", resolution);
+                atomic_store(&size_refused[slot], 1);
+            }
             return rc;
         }
-        if (next == PS_EXP_FALL_BACK && ps_capture_slot_fall_back_mode(slot)) continue;
+        if (next == PS_EXP_FALL_BACK && ps_capture_slot_fall_back_mode(slot)) {
+            // A rate chosen for a larger picture, scaled to 1080p's; the reopens of this stream keep it.
+            const uint32_t scaled = ps_exp_fall_back_rate(average, resolution);
+            if (scaled != average && average) {
+                const uint64_t peak = atomic_load(&opening_peak[slot]);
+                atomic_store(&opening_peak[slot], (uint32_t)(peak * scaled / average));
+                atomic_store(&opening_average[slot], scaled);
+                SLOG(slot, "fallback to 1080p at %u kbit/s, %u asked for the larger mode\n", scaled / 1000, average / 1000);
+            }
+            continue;
+        }
         // Audio may open next, for the stream that is about to end: not with what just failed.
         if (after.failed[PS_EXP_HEVC] != before.failed[PS_EXP_HEVC] || after.failed[PS_EXP_HDR] != before.failed[PS_EXP_HDR]) {
             atomic_store(&video_ten_bit[slot], 0);
@@ -1000,6 +1022,10 @@ void ps_capture_slot_set_reopening(int slot, int on)
 }
 
 void ps_capture_set_reopening(int on) { ps_capture_slot_set_reopening(0, on); }
+
+int ps_capture_slot_size_refused(int slot) { return valid_slot(slot) && atomic_load(&size_refused[slot]); }
+
+int ps_capture_size_refused(void) { return ps_capture_slot_size_refused(0); }
 
 int ps_capture_change_scan_in(ps_capture *s, uint32_t resolution)
 {

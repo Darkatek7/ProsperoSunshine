@@ -485,22 +485,28 @@ void capture(safe::mail_t mail, config_t config, stream::session_t *channel_data
                 // instead of ending the stream. The first frame after a reopen is an IDR.
                 BOOST_LOG(warning) << "PS5 capture lost ("sv << static_cast<int>(status) << "), reopening"sv;
                 const auto lost_at = std::chrono::steady_clock::now();
-                bool recovered = false;
-                // Below 1080p the client may not decode more (a PS Vita), and the title that took the capture leaves the
-                // output without a mode for up to about 2 s (10.20). So each reopen asks for the client's mode again, also
-                // after a fall back, and for 6 s doesn't fall back while the output isn't settled; not once a switch on
-                // trial went off for it. From 1080p up nothing changes: there a fall back stays for the stream, as before.
+                bool recovered = false, size_refused = false;
+                // The stream keeps the size it delivers: the client set up its decoder for it (issue 39). The title that
+                // took the capture leaves the output without a mode for up to about 2 s (10.20), and the reopens wait for
+                // it. An output that no longer takes the mode ends the stream, so the client starts anew at what it takes.
+                ps_capture_slot_set_reopening(slot, 1);
                 while (!shutdown_event->peek() && std::chrono::steady_clock::now() - lost_at < 20s) {
                     std::this_thread::sleep_for(250ms);
-                    const bool small = mode.resolution < 4 && ps_capture_small_modes_allowed();
-                    if (small) ps_capture_slot_set_video_mode(slot, mode.resolution, low_rate ? 0 : 1);
-                    ps_capture_slot_set_reopening(slot, small && std::chrono::steady_clock::now() - lost_at < 6s);
                     if (session->start() == 0) {
                         recovered = true;
                         break;
                     }
+                    if ((size_refused = ps_capture_slot_size_refused(slot))) break;
                 }
                 ps_capture_slot_set_reopening(slot, 0);
+                if (size_refused) {
+                    const auto delivered = prospero::capture_mode_of(ps_capture_slot_video_resolution(slot));
+                    BOOST_LOG(error) << "PS5 capture: the console's output no longer takes "sv << delivered.width << 'x'
+                                     << delivered.height << ", ending the session; the next one starts at what it takes"sv;
+                    shutdown_event->raise(true);
+                    lost = true;
+                    break;
+                }
                 if (!recovered) {
                     BOOST_LOG(error) << "PS5 capture could not be reopened; ending the session"sv;
                     shutdown_event->raise(true);

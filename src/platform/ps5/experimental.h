@@ -5,7 +5,8 @@
 // A switch counts only where the function isn't verified, and the bitrate's not on 10.x, where the record has no rate
 // fields. Each codec and bit depth tries its variants in order until one delivers a frame, and that one stays. When all
 // fail, a rate above 50 Mbit/s falls back to 50, then a mode above or below 1080p to 1080p, each in the same stream and with
-// the variants starting over. What was shown to be at fault is off until the host restarts. When nothing is left to try, the
+// the variants starting over. What was shown to be at fault is off until the host restarts; a larger mode the output in
+// front refused is not (ps_exp_output_refused). When nothing is left to try, the
 // client's stream ends, because it set up its decoder for this codec, and its next stream gets what the host offers then.
 #ifndef PROSPERO_EXPERIMENTAL_H
 #define PROSPERO_EXPERIMENTAL_H
@@ -151,6 +152,25 @@ static inline enum ps_exp_next ps_exp_failed(ps_experiment *e, uint32_t codec, u
     }
     e->pending[PS_EXP_LARGE] = e->pending[PS_EXP_SMALL] = 0;
     return PS_EXP_GIVE_UP;
+}
+
+// A larger mode the system refused at OpenVideo with 0x81950008 (RESOURCE_NOT_ACTIVE). It answers so when the output in
+// front can't hold the mode, as a title with a 1080p video output (GitHub issue 39: VLC for PS5, video out mode 0x44, on
+// 10.20), which says nothing about the firmware. The stream falls back to 1080p as before, but the switch stays on trial:
+// the next stream asks for the mode again. Called after ps_exp_failed() returned PS_EXP_FALL_BACK.
+static inline void ps_exp_output_refused(ps_experiment *e, uint32_t resolution)
+{
+    if (ps_exp_mode_switch(resolution) == PS_EXP_LARGE) e->pending[PS_EXP_LARGE] = 0;
+}
+
+// The rate for 1080p when a larger mode falls back to it. The client chose its bitrate for the larger picture, and on 10.x
+// the QP follows it (encoder_qp.h): scaled by the pixels, the fallback costs it what a 1080p stream would (issue 39).
+// Other modes keep their rate: a smaller one falling back to 1080p must not ask for more than the client chose.
+static inline uint32_t ps_exp_fall_back_rate(uint32_t rate, uint32_t from_resolution)
+{
+    if (from_resolution == 5) return (uint32_t)((uint64_t)rate * 9 / 16);  // 2560x1440: 1920x1080 is 9/16 of it
+    if (from_resolution == 6) return rate / 4;                             // 3840x2160
+    return rate;
 }
 
 #endif
