@@ -4,7 +4,8 @@
 # OpenSSL and Opus hashes match the upstream-published checksums; Boost matches Sunshine's
 # package-lock.cmake, nlohmann-json the MD5 Sunshine checks. FFmpeg 9.0.2 is the release of the commit
 # LizardByte/build-deps d0ac5ef4 pins; its tarball was verified against the FFmpeg release signing key
-# FCF986EA15E6E293A5644F10B4322F04D67658D8.
+# FCF986EA15E6E293A5644F10B4322F04D67658D8. miniupnpc's release tarball was verified against the miniupnp signing key
+# 751E9FF6944A3B36A5432216DB511043A31ACAAF.
 # moonlight-common-c, simple-web-server and libdisplaydevice are the submodule commits of Sunshine;
 # enet and nanors are in turn the submodule commits of that moonlight-common-c commit.
 sunshine  a679b059096bcdd502e2192ce4f6a3c3732fbaae  917b5de6502236ec17c23c353fb45c995a1f475d44de164835b74a13165adf6a  https://github.com/LizardByte/Sunshine/archive/a679b059096bcdd502e2192ce4f6a3c3732fbaae.tar.gz
@@ -18,3 +19,4 @@ openssl  3.5.9  603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a
 opus  1.6.1  6ffcb593207be92584df15b32466ed64bbec99109f007c82205f0194572411a1  https://downloads.xiph.org/releases/opus/opus-1.6.1.tar.gz
 boost  1.92.0  9bed76128d4e46755dbe818487788c6fceb6f72b378f4daa49b7e1e600d9088d  https://github.com/boostorg/boost/releases/download/boost-1.92.0/boost-1.92.0-cmake.tar.xz
 ffmpeg  9.0.2  8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e  https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz
+miniupnpc  2.3.3  d52a0afa614ad6c088cc9ddff1ae7d29c8c595ac5fdd321170a05f41e634bd1a  https://github.com/miniupnp/miniupnp/releases/download/miniupnpc_2_3_3/miniupnpc-2.3.3.tar.gz

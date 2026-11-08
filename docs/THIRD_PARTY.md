@@ -16,7 +16,7 @@ THIRD_PARTY.md               the notice, repository file licenses/THIRD_PARTY.md
 licenses/
   prosperosunshine.txt       copy of LICENSE
   sunshine.txt  moonlight-common-c.txt  enet.txt  nanors.txt  simple-web-server.txt
-  nlohmann-json.txt  libdisplaydevice.txt  boost.txt  openssl.txt  opus.txt  ffmpeg.txt
+  nlohmann-json.txt  libdisplaydevice.txt  boost.txt  openssl.txt  opus.txt  miniupnpc.txt  ffmpeg.txt
                              all produced by scripts/deps.sh into out/deps/licenses/
   ps5-payload-sdk-runtime/   from this repository, see below
 ```
