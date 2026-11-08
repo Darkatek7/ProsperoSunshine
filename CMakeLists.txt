@@ -100,8 +100,8 @@ prospero_payload(host_restart)
 # The host embeds it and hands it to the loader for "Restart host" on the web page.
 prospero_payload(relaunch_helper)
 
+# Probes the docs name as a tool: the firmware checklist (docs/firmware-porting.md), the notes in docs/re/, test procedures.
 prospero_probe(runtime_probe)
-prospero_probe(jthread_probe)
 prospero_probe(capture_probe prospero_core)
 prospero_probe(capture_soak prospero_core)
 prospero_probe(pad_probe prospero_pad)
@@ -111,49 +111,15 @@ prospero_probe(pad_user_probe prospero_pad SceUserService)
 prospero_probe(relisten_probe)
 prospero_probe(port_hold_probe)
 prospero_probe(rest_probe)
-prospero_probe(mdns_probe prospero_mdns)
 prospero_probe(avcap_spike prospero_capture)
 prospero_probe(open_probe prospero_capture)
-prospero_probe(uhd_spike prospero_capture)
-prospero_probe(hevc_memory_spike prospero_capture)
 prospero_probe(hdr_spike prospero_capture)
-prospero_probe(mode_spike prospero_capture)
-prospero_probe(small_mode_probe prospero_capture)
 prospero_probe(slice_rate_probe prospero_capture)
-prospero_probe(surround_probe prospero_capture)
-prospero_probe(channel_map_probe prospero_capture SceAudioOut SceUserService)
 prospero_probe(hevc_spike prospero_capture)
-prospero_probe(close_probe prospero_ra SceSystemService SceUserService)
 prospero_probe(udp_burst_spike)
 prospero_probe(audio_spike prospero_capture prospero_pad)
-prospero_probe(bitrate_spike prospero_capture)
-prospero_probe(bitrate_steps_probe prospero_capture)
 prospero_probe(dual_open_probe prospero_capture)
 prospero_probe(ra_nid_probe prospero_ra)
-prospero_probe(deps_probe dep::ssl dep::opus dep::enet dep::nanors)
-
-if(EXISTS "${PROSPERO_DEPS}/lib/libboost_log.a")
-    prospero_probe(boost_probe dep::ssl
-        "${PROSPERO_DEPS}/lib/libboost_log.a" "${PROSPERO_DEPS}/lib/libboost_filesystem.a"
-        "${PROSPERO_DEPS}/lib/libboost_thread.a" "${PROSPERO_DEPS}/lib/libboost_atomic.a")
-    prospero_probe(eh_probe "${PROSPERO_DEPS}/lib/libboost_filesystem.a" "${PROSPERO_DEPS}/lib/libboost_atomic.a")
-    target_include_directories(boost_probe SYSTEM PRIVATE "${PROSPERO_DEPS}/include")
-    target_include_directories(eh_probe SYSTEM PRIVATE "${PROSPERO_DEPS}/include")
-endif()
-
-# cbs_probe links Sunshine's own, unmodified cbs.cpp. It is copied next to the build so that its
-# quoted #include "logging.h" finds the probe stub instead of Sunshine's Boost.Log header.
-if(EXISTS "${PROSPERO_DEPS}/lib/libavcodec.a")
-    set(CBS_COPY "${CMAKE_BINARY_DIR}/cbs_probe/cbs.cpp")
-    configure_file("${CMAKE_SOURCE_DIR}/.cache/deps/src/sunshine/src/cbs.cpp" "${CBS_COPY}" COPYONLY)
-    set_source_files_properties("${CBS_COPY}" PROPERTIES COMPILE_OPTIONS "-w")
-    add_executable(cbs_probe src/probes/cbs_probe.cpp "${CBS_COPY}")
-    target_include_directories(cbs_probe PRIVATE src/probes/stubs)
-    target_include_directories(cbs_probe SYSTEM PRIVATE "${PROSPERO_DEPS}/include")
-    target_compile_options(cbs_probe PRIVATE "SHELL:-idirafter ${CMAKE_SOURCE_DIR}/.cache/deps/src/sunshine/src")
-    set_source_files_properties(src/probes/cbs_probe.cpp PROPERTIES COMPILE_OPTIONS "${PROSPERO_WARNINGS}")
-    target_link_libraries(cbs_probe PRIVATE "${PROSPERO_DEPS}/lib/libavcodec.a" "${PROSPERO_DEPS}/lib/libavutil.a" pthread)
-endif()
 
 # The host: Sunshine's protocol core (pinned, patched sources from .cache/deps/src) with the PS5
 # replacements in src/sunshine. Built once Boost and FFmpeg are present in out/deps.

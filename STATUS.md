@@ -21,14 +21,14 @@ Echte Moonlight-Clients (Moonlight Web, Moonlight PC, Moonlight auf dem iPhone i
 | Paket | Ergebnis | Beleg |
 | --- | --- | --- |
 | P0.1 | Alle Quellen mit SHA256 in `deps.lock`, Patches unter `patches/<name>/`, modulare `scripts/deps.sh` + `scripts/deps/*.sh` mit Stempeln | — |
-| P0.2/0.3 | Boost 1.92.0 (Sunshines Pin), Simple-Web-Server, nlohmann_json gebaut; Live: Asio-TLS 1.3, Boost.Log, property_tree | `src/probes/boost_probe.cpp` |
-| P0.4 | FFmpeg 9.0.2 minimal (avcodec/avutil/swscale, CBS, kein Codec); Sunshines `cbs.cpp` läuft unverändert auf der Konsole | `src/probes/cbs_probe.cpp` |
+| P0.2/0.3 | Boost 1.92.0 (Sunshines Pin), Simple-Web-Server, nlohmann_json gebaut; Live: Asio-TLS 1.3, Boost.Log, property_tree | `boost_probe` (entfernt, Git-Historie) |
+| P0.4 | FFmpeg 9.0.2 minimal (avcodec/avutil/swscale, CBS, kein Codec); Sunshines `cbs.cpp` läuft unverändert auf der Konsole | `cbs_probe` (entfernt, Git-Historie) |
 | P0.5 | Ein CMake-Projekt baut Host, Probes und Bibliotheken | `CMakeLists.txt`, `scripts/build.sh` |
 | P0.6 | `out/prospero_sunshine.elf` (12,4 MB) startet, beantwortet `/serverinfo`, fährt per `QUIT` sauber herunter | — |
 | P0.7 | ADR-001 festgeschrieben | `docs/adr/001-sunshine-port.md` |
 | R1 | `sceAvcap2RequestKeyFrame`: IDR nach 2–3 Frames (8/8); im Stream nach ~50 ms | `src/probes/avcap_spike.cpp` |
 | R2 | Spielton über `sceAvcap2OpenAudio` (cfg+0x1C = RA-Id 180): PCM float32 Stereo 48 kHz, 1024 Frames/Paket; auch Opus 10/20 ms möglich | `src/probes/audio_spike.cpp`, `docs/re/avcap2-exports.md` |
-| R3 | `sceAvcap2SetVideoBitrate` wirkt live; bis 15 Mbit/s (Spitze ×1,12) stabil, ab 16 Mbit/s stoppt der Encoder. Überholt: Seit dem HEVC-Einbau öffnet der Host mit der Bitrate in der Konfiguration und klemmt auf 50 Mbit/s (siehe „HEVC im Host“) | `src/probes/bitrate_spike.cpp` |
+| R3 | `sceAvcap2SetVideoBitrate` wirkt live; bis 15 Mbit/s (Spitze ×1,12) stabil, ab 16 Mbit/s stoppt der Encoder. Überholt: Seit dem HEVC-Einbau öffnet der Host mit der Bitrate in der Konfiguration und klemmt auf 50 Mbit/s (siehe „HEVC im Host“) | `bitrate_spike` (entfernt, Git-Historie) |
 | R4 | Host läuft als Payload-Daemon, Daten unter `/data/prosperosunshine/`, Neustart per Steuer-Socket + ELF-Loader | — |
 | R5 | Natives virtuelles Pad ohne Mono; neues Pad löst „Wer benutzt diesen Controller?“ aus (im Stream sichtbar und beantwortbar) | `src/probes/pad_probe.cpp` |
 | R6 | Ports 47984/47989/48010 TCP und 47998–48000 UDP frei; Discovery (mDNS) nicht untersucht | — |
@@ -144,7 +144,7 @@ Live auf der Konsole geprüft mit dem aktuellen Host (Testclient vom PC):
 - **Bitrate über 50 Mbit/s (2026-11-01, 13.00, Testclient am Kabel, kein echtes Moonlight, kein Spiel):** 4K, Rauschseite im Browser, je 15 s, Encoder-Vorgabe → geliefert. Volles Rauschen: HEVC 51 → 73, 102 → 102, 154 → 151 Mbit/s; HDR 102 → 99; H.264 51 → 135, 102 → 142. Rauschen auf einem Viertel: HEVC 51 → 45, 81 → 57, 102 → 63, 154 → 67; HDR 102 → 36; H.264 102 → 75. Jeweils 870–893 Bilder, keine fehlenden, längste Lücke höchstens 34 ms, ffmpeg fehlerfrei. Dauerlauf HEVC 154, volles Rauschen, 120 s: 7177 Bilder, längste Lücke 32 ms, ffmpeg fehlerfrei; rund 150 Mbit/s, aus der Paketzahl geschätzt. Danach Deckel auf 150 Mbit/s nur für 13.00 (`ps_capture_high_bitrate_verified`). Home-Bildschirm je 8 s, Log `bitrate 150000 kbit/s`: HEVC 4K (angefordert 239 Mbit/s), 1440p, 1080p, HDR 1080p, H.264 1080p und 4K: 461–478 Bilder, keine fehlenden, längste Lücke höchstens 54 ms (HEVC 1440p), sonst höchstens 26 ms, ffmpeg fehlerfrei.
 - **Experimental-Schalter, nur auf 13.00 geprüft (2026-11-01, Testclient):** Die App zeigt alle vier als „Not needed: verified here“, der Bericht und `host_diag.log` nennen den Commit. Mit Schaltern aus und mit allen vier in `sunshine.conf` an (je 10 s, H.264 und HEVC 1080p, HEVC und HDR 4K, Mario 64 15 s): 571–595 Bilder (Mario 869), keine fehlenden, ffmpeg fehlerfrei, längste Lücke höchstens 85 ms (einmal, H.264 als erster Lauf nach dem Host-Start), sonst höchstens 54 ms. Log gleich: 13.00 öffnet wie vorher. Auf anderer Firmware ist nichts davon gelaufen: Die Varianten, der Rückfall und die Schalter-Kacheln sind dort nicht geprüft, nur per Unit-Test mit nachgebautem Avcap2.
 - **13.60, nur Berichte von Nutzern (2026-11-01, Issue 1):** Zwei Nutzer melden, dass der Stream dort läuft, ohne Versionsangabe, Messung oder Angaben zu Controller und Ton. Einer nennt dabei H.265, obwohl der Host dort nur H.264 anbietet; das ist nicht geklärt.
-- **1440p und 4K, H.264 (2026-10-31):** Die RA-Profile 177 und 182 (`vcn[70] scanin[4K] prio[1]`) öffnen Modus 5 und 6 (`src/probes/uhd_spike.cpp`); der Host nimmt 182, wenn der Client mehr als 1080p verlangt. Gemessen mit dem lokalen Client (ohne Fenster), ffmpeg decodiert jeweils fehlerfrei in der verlangten Größe:
+- **1440p und 4K, H.264 (2026-10-31):** Die RA-Profile 177 und 182 (`vcn[70] scanin[4K] prio[1]`) öffnen Modus 5 und 6 (`uhd_spike`, entfernt, Git-Historie); der Host nimmt 182, wenn der Client mehr als 1080p verlangt. Gemessen mit dem lokalen Client (ohne Fenster), ffmpeg decodiert jeweils fehlerfrei in der verlangten Größe:
   - Home-Bildschirm, je 15 s: 1080p 893, 1440p 895, 4K 892 Frames, jeweils 59,94 fps und 0 Lücken.
   - GTA III (ruhige Szene, rund 4 Mbit/s), je 20 s: 4K 1166, 1440p 1177 Frames, 59,94 fps, 0 Lücken, 0 Audiofehler. Das Spiel lief danach weiter.
   - Moonlight 6.2 für PC, Home-Bildschirm: 1440p 60,3 und 60,5 fps, 4K 60,2 fps, 0 % Netzverlust. Ein erster 1440p-Lauf zeigte kein Bild: Im Log von Moonlight fehlen `Recreating renderer`, `Test decode successful` und `Renderer ... chosen`, dafür steht dort eine Qt-Warnung zum Pixelverhältnis des Fensters. Pakete und angeforderte IDRs kamen an, nur der Decoder wurde nie eingerichtet (Warteschlange lief dreimal je Sekunde über). Das spricht für eine Ursache im Client. Nach einem Neustart von PC und Konsole trat es in zwei Wiederholungen nicht mehr auf; die genaue Ursache ist nicht geklärt.
@@ -262,7 +262,7 @@ Gemessen auf einer PS5 Pro mit 10.20 (Datensatz von 10.x, `record_shift`). Eine 
 ### Modi unter 1080p auf Firmware 10.20 (2026-11-02, nicht veröffentlicht)
 
 Gemessen auf der PS5 Pro mit 10.20, Ausgabe der Konsole in 1080p (`video out mode 0x13c`), Startbildschirm, kein Titel vorn,
-Host ohne Stream. Sonde `src/probes/small_mode_probe.cpp`, je Modus ein neuer Kanal mit dem Datensatz des Hosts, 3 s, alle 500 ms ein
+Host ohne Stream. Sonde `small_mode_probe` (entfernt, Git-Historie; auf anderer Firmware misst das die Phase `modes` der Firmware-Sonde), je Modus ein neuer Kanal mit dem Datensatz des Hosts, 3 s, alle 500 ms ein
 IDR angefordert, 16 Mbit/s verlangt. Auf 10.x setzt der Host dabei den Quantisierer 24/28 (`encoder_qp.h`).
 
 - **Alle 24 Kombinationen laufen:** 640x360, 960x540, 1280x720 und 1920x1080, je H.264, HEVC 8 und HEVC 10 Bit, je 30 und 60
@@ -444,7 +444,7 @@ schrieb alle 5 s Mittelwert, stärkste Sekunde und größtes Bild nach `host_dia
 
 Die Messungen „Im Host“ bis „Mit Deckel“ liefen auf einer eigenen Variante vor dem Merge von PR 9 (#9, Modi unter 1080p auf 10.20): Sie wählte den größten Modus, der die Anfrage nicht übersteigt, prüfte unter 1080p immer das erste Bild und brauchte keinen Schalter. HEVC-Budgets, Bitrate-Deckel und die fünf Wiederholungen von `OpenVideo` unter 1080p sind dieselben wie im gemergten Stand, der den nächstgelegenen Modus wählt und 13.00 mit 10.20 als verifiziert führt.
 
-Remote Play ordnet 640x360, 960x540 und 1280x720 die Modi 1, 2 und 3 zu (`SceRemotePlay 0x6f8d5`). Gemessen mit `src/probes/mode_spike.cpp` auf dem Home-Bildschirm ohne HDMI-Kabel (`video out mode 0x13c`), RA-Profil 180, 60 fps, 3 Mbit/s, je 3 s: Alle drei Modi starten mit H.264 und HEVC, 179 oder 180 Bilder, `ffprobe` nennt die verlangte Größe, ffmpeg dekodierte die geprüften Aufnahmen fehlerfrei (H.264 alle drei, HEVC je Modus den höchsten startenden Wert, bei 360p auch `0x4000`).
+Remote Play ordnet 640x360, 960x540 und 1280x720 die Modi 1, 2 und 3 zu (`SceRemotePlay 0x6f8d5`). Gemessen mit `mode_spike` (entfernt, Git-Historie) auf dem Home-Bildschirm ohne HDMI-Kabel (`video out mode 0x13c`), RA-Profil 180, 60 fps, 3 Mbit/s, je 3 s: Alle drei Modi starten mit H.264 und HEVC, 179 oder 180 Bilder, `ffprobe` nennt die verlangte Größe, ffmpeg dekodierte die geprüften Aufnahmen fehlerfrei (H.264 alle drei, HEVC je Modus den höchsten startenden Wert, bei 360p auch `0x4000`).
 
 Die frühere Aussage „unter 1080p startet Avcap2 nicht“ gilt damit auf 13.00 nicht mehr. Warum der alte Spike scheiterte, ist nicht geklärt; der Datensatz ist seitdem gewachsen.
 

@@ -332,7 +332,7 @@ an die Video-Konfiguration (`cfg+0x28`). `SceGameLiveStreaming` macht dasselbe m
 keiner ein Audio-spezifisches Enable/Select auf; es gibt **keinen** separaten Audio-RA-Request: die gleiche Profil-Grant (bei 180:
 `vcn[20] scanin[2K] acp[270]`) deckt Audio ab, solange die Id in der aktiven Liste steht.
 
-Die Profile im RA-Log auf 13.00 (`src/probes/uhd_spike.cpp`): 180, 185 und 175 sind `vcn[20] scanin[2K] acp[270] prio[5]`, 177 und 182 sind
+Die Profile im RA-Log auf 13.00 (`uhd_spike`, entfernt, Git-Historie): 180, 185 und 175 sind `vcn[20] scanin[2K] acp[270] prio[5]`, 177 und 182 sind
 `vcn[70] scanin[4K] acp[270] prio[1] Confirm[forced OK]`. H.264 in Modus 5 und 6 öffnet nur mit 177 und 182, auf den 2K-Profilen kommt
 `0x8195000a` oder bei laufendem Spiel `0x81950008`. Den Wunsch nach `scanin[4K]` kann der RA auch mit laufendem Spiel erfüllen (GTA III), er lehnt
 aber in manchen Lagen ab: Bei Mario 64 meldet er `[ScanIn]Is4KRunnable: 4K NG(4K120)` und schickt `result[false]` an den Callback, obwohl der

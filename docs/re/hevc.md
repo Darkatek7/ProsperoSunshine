@@ -63,7 +63,7 @@ zwei Speicherpools einblendet. Die legt `0xa000` beim Start des Dienstes an (16 
 der Vorgabe `0x5000000000` oder ist der Pool schon belegt (`0xb5c0`), kommt `0x81950003`. Warum die Pools hier fehlen, ist nicht geklärt. Alle anderen Fälle
 reservieren je Anfrage (`0x16c0`, `0xa610`).
 
-Der Host nimmt deshalb für HEVC über 1080p **Zweck 6**. Gemessen mit `src/probes/hevc_memory_spike.cpp` und RA-Profil 182:
+Der Host nimmt deshalb für HEVC über 1080p **Zweck 6**. Gemessen mit `hevc_memory_spike` (entfernt, Git-Historie) und RA-Profil 182:
 
 | Zweck | Öffnen in Modus 5 und 6 | GTA III, 6 s, 30 Mbit/s, Modus 6 |
 | --- | --- | --- |
