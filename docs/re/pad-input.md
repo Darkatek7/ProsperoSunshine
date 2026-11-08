@@ -102,9 +102,24 @@ Der Host legt Typ 1 an (Klasse 3, Subtyp 1) und setzt als Kennung den Nutzer ode
 `0x0B000000 | b0 << 8 | b1`** und Typ `b1`, wobei `b0` und `b1` die ersten beiden Bytes seines Arguments sind (vermutlich Platz
 und Gerätetyp des Clients). Es gibt also keinen Nutzer an. **Vermutung:** Das Präfix `0x0B` kennzeichnet ein Pad von Remote
 Play, und das System behandelt es anders als einen eingeschalteten Controller, etwa ohne One-Touch Play über HDMI-CEC
-(Issue 41: Mit dem Pad des Hosts schaltet der Fernseher auf die Konsole um). Prüfen lässt sich das mit `pad_user_probe`
-(`pad_user_probe.user` = `0b000101`), einmal neben einem Pad mit Nutzer, am Fernseher. Offen bliebe dann, wie ein solches Pad
-einem Profil zugeordnet wird.
+(Issue 41: Mit dem Pad des Hosts schaltet der Fernseher auf die Konsole um).
+
+**Live widerlegt (2026-11-08, 13.00, am Fernseher des Besitzers, HDMI Device Link und One-Touch Play an):** Mit
+`pad_user_probe` (Kennung `0b000101`) und `pad_type_probe` (Klasse und Subtyp frei) schaltete der Fernseher bei jedem Pad um.
+Das Kernel-Log zeigt, warum: Der Login-Manager in SceShellCore prüft jedes neue Gerät mit `[IsRemotePlayDevice]` und schickt
+bei `IsRemotePlay:0` über `sceSystemStateMgrSendCecOneTouchPlayCommand` One-Touch Play. Alle Varianten kamen mit
+`IsRemotePlay:0` an:
+
+| Angelegt (Klasse, Subtyp, Kennung) | Mbus-Ereignis (type, subType) | Bemerkung |
+| --- | --- | --- |
+| 3, 1, Nutzer (wie der Host) | 1, 22 | „DUALSENSE“, Profil des Nutzers |
+| 3, 1, `0x0B000101` (wie Remote Play) | 1, 22 | `userId=0x0` im Ereignis, ohne Nachfrage dem Profil vorne zugewiesen |
+| 3, 14, Nutzer | 8, 22 | die Konsole meldete einen „PS VR2 Sense“-Controller |
+| 3, 15, Nutzer | 1, 23 | |
+| 3, 16, Nutzer | 1, 24 | |
+
+Da Remote Play denselben Export nimmt, hängt `IsRemotePlay` wohl am Prozess, der das Gerät anlegt, nicht an Typ oder Kennung.
+Ein Payload kann das nicht nachstellen. Für Issue 41 bleibt die Einstellung der Konsole: One-Touch Play aus.
 
 ## Sunshine-Seite
 

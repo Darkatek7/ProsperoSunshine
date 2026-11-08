@@ -90,6 +90,7 @@ prospero_probe(pad_probe prospero_pad)
 prospero_probe(pad_output_probe)
 prospero_probe(kbm_probe prospero_pad)
 prospero_probe(pad_user_probe prospero_pad SceUserService)
+prospero_probe(pad_type_probe)
 prospero_probe(relisten_probe)
 # Not a probe: the host embeds it and hands it to the loader for "Restart host" on the web page.
 prospero_probe(relaunch_helper)
