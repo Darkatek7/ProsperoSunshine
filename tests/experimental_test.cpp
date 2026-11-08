@@ -120,6 +120,22 @@ int main() {
     assert(ps_exp_large_offered(&e));
     ps_exp_succeeded(&e, 0, 0, 4, low);
     assert(e.failed[PS_EXP_LARGE] && !ps_exp_large_offered(&e));
+    // The output in front refused the mode (issue 39): 1080p runs for this stream, the next one tries the mode again.
+    e = make(fw1360, 0, 0, 1);
+    assert(ps_exp_failed(&e, 0, 0, 5, low, 1, 1) == PS_EXP_FALL_BACK);
+    ps_exp_output_refused(&e, 5);
+    ps_exp_succeeded(&e, 0, 0, 4, low);
+    assert(ps_exp_large_offered(&e) && ps_exp_unproven_mode(&e, 5) && ps_exp_unproven_mode(&e, 6));
+    // It doesn't touch a smaller mode's trial.
+    e = make(fw1360, 0, 0, 0, 0, 1);
+    assert(ps_exp_failed(&e, 0, 0, 2, low, 1, 1) == PS_EXP_FALL_BACK);
+    ps_exp_output_refused(&e, 2);
+    ps_exp_succeeded(&e, 0, 0, 4, low);
+    assert(e.failed[PS_EXP_SMALL]);
+    // The rate of a larger mode's fallback, by the pixels; a smaller mode keeps its rate.
+    assert(ps_exp_fall_back_rate(80000000u, 6) == 20000000u && ps_exp_fall_back_rate(40000000u, 5) == 22500000u);
+    assert(ps_exp_fall_back_rate(4000000000u, 5) == 2250000000u);
+    assert(ps_exp_fall_back_rate(5000000u, 2) == 5000000u && ps_exp_fall_back_rate(20000000u, 4) == 20000000u);
     // 1080p fails as well: nothing shows that the mode was at fault.
     e = make(fw1360, 0, 0, 1);
     assert(ps_exp_failed(&e, 0, 0, 6, low, 1, 1) == PS_EXP_FALL_BACK);

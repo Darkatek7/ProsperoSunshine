@@ -947,6 +947,9 @@ static int open_or_fall_back(int slot, ps_capture **out)
             const int attributable = rc == PS_CAPTURE_ERROR && atomic_load(&reached_encoder[slot]);
             next = ps_exp_failed(&experiment, codec, ten_bit, resolution, average, attributable,
                                  atomic_load(&refused[slot]) && ps_exp_mode_may_fall_back(resolution));
+            const char *const step = atomic_load(&failure_step[slot]);
+            if (next == PS_EXP_FALL_BACK && atomic_load(&failure_rc[slot]) == RESOURCE_NOT_ACTIVE && step && strcmp(step, "OpenVideo") == 0)
+                ps_exp_output_refused(&experiment, resolution);
         } else {
             ps_exp_succeeded(&experiment, codec, ten_bit, resolution, average);
         }
@@ -969,7 +972,17 @@ static int open_or_fall_back(int slot, ps_capture **out)
             SLOG(slot, "output not settled: resolution %u kept for the next reopen\n", resolution);
             return rc;
         }
-        if (next == PS_EXP_FALL_BACK && ps_capture_slot_fall_back_mode(slot)) continue;
+        if (next == PS_EXP_FALL_BACK && ps_capture_slot_fall_back_mode(slot)) {
+            // A rate chosen for a larger picture, scaled to 1080p's; the reopens of this stream keep it.
+            const uint32_t scaled = ps_exp_fall_back_rate(average, resolution);
+            if (scaled != average && average) {
+                const uint64_t peak = atomic_load(&opening_peak[slot]);
+                atomic_store(&opening_peak[slot], (uint32_t)(peak * scaled / average));
+                atomic_store(&opening_average[slot], scaled);
+                SLOG(slot, "fallback to 1080p at %u kbit/s, %u asked for the larger mode\n", scaled / 1000, average / 1000);
+            }
+            continue;
+        }
         // Audio may open next, for the stream that is about to end: not with what just failed.
         if (after.failed[PS_EXP_HEVC] != before.failed[PS_EXP_HEVC] || after.failed[PS_EXP_HDR] != before.failed[PS_EXP_HDR]) {
             atomic_store(&video_ten_bit[slot], 0);

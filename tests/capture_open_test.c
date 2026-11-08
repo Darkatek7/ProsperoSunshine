@@ -74,6 +74,13 @@ static int large_fails(const char *step, const uint8_t *record)
     memcpy(&resolution, record + 0x18, sizeof resolution);
     return !strcmp(step, "OpenVideo") && resolution >= 5 ? INVALID : 0;
 }
+// The output in front can't hold a larger mode (issue 39): OpenVideo answers RESOURCE_NOT_ACTIVE.
+static int large_refused(const char *step, const uint8_t *record)
+{
+    uint32_t resolution;
+    memcpy(&resolution, record + 0x18, sizeof resolution);
+    return !strcmp(step, "OpenVideo") && resolution >= 5 ? RESOURCE_NOT_ACTIVE : 0;
+}
 // A rate above 50 Mbit/s fails to start, whatever else the record holds.
 static int high_rate_fails(const char *step, const uint8_t *record)
 {
@@ -249,8 +256,24 @@ int main(void)
     fake_decide = large_fails;
     assert(open_and_close() == 0);
     assert(fake_opens == 3 && ps_capture_video_resolution() == 4);
-    assert(logged("mode=1920x1080 fps=60 kbit=20000 variant=minimal error=0") && logged("feature=large") && !logged("feature=hevc"));
+    assert(logged("mode=1920x1080 fps=60 kbit=5000 variant=minimal error=0") && logged("feature=large") && !logged("feature=hevc"));
+    assert(logged("fallback to 1080p at 5000 kbit/s, 20000 asked for the larger mode"));
     assert(ps_capture_hevc_allowed() && !ps_capture_large_modes_allowed());
+
+    // The output in front refuses 1440p (issue 39): 1080p for this stream at 1080p's share of the rate, the switch stays on
+    // trial, and the next stream asks for 1440p again.
+    setup(0x13600000u, 0, 0, 1, 0, 0, 5);
+    fake_decide = large_refused;
+    assert(open_and_close() == 0);
+    assert(ps_capture_video_resolution() == 4 && ps_capture_opening_average() == 11250000u);
+    assert(logged("trial=large codec=h264 bits=8 mode=2560x1440") && !logged("disabled"));
+    assert(ps_capture_large_modes_allowed());
+    ps_capture_set_video_mode(5, 1);
+    ps_capture_set_opening_bitrate(20000000u, 22400000u);
+    fake_log[0] = 0;
+    fake_decide = NULL;
+    assert(open_and_close() == 0);
+    assert(ps_capture_video_resolution() == 5 && logged("trial=large") && logged("result=ok"));
 
     // A smaller mode that fails gives 1080p in the same stream, and stays off. 10.40 has them unverified.
     setup_small(0x10400000u, 1, 0, 2);
