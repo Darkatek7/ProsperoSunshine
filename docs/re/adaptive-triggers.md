@@ -108,7 +108,7 @@ kommen die Effekte also an, und zwar in dieser Form. Dass sie aus diesem Feld st
 
 ## 4. Füllen Spiele das Feld bei unserem Pad?
 
-**Bekannt:** Klassisches Rumble eines Titels kommt am virtuellen Pad an, wenn nur dieses verbunden ist (`STATUS.md`).
+**Bekannt:** Klassisches Rumble eines Titels kommt am virtuellen Pad an, wenn nur dieses verbunden ist (`docs/status-archive.md`, „Rumble“ unter „Stand 30. Oktober 2026“).
 `scePadSetVibration` und `scePadSetTriggerEffect` prüfen in `libScePad` beide denselben Handle-Eintrag und gehen dann per ioctl an
 `/dev/hid`, nur mit anderer Nummer (`0x80184822`, `0x8010485a`).
 

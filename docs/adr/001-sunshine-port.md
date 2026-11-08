@@ -6,7 +6,7 @@ Status: angenommen (28. Oktober 2026). Endgültig bestätigt, sobald der Host-EL
 
 ProsperoSunshine soll für unveränderte Moonlight-Clients wie ein Sunshine-Host wirken. Sunshine (`LizardByte/Sunshine`, GPL-3.0-only) enthält das komplette GameStream-Protokoll: Pairing und Serverinfo (`nvhttp.cpp`), RTSP-Aushandlung (`rtsp.cpp`), Paketierung, FEC, Verschlüsselung und Steuerkanal (`stream.cpp`), Eingabeauswertung (`input.cpp`) und Opus-Audio (`audio.cpp`). Auf der PS5 liefert Avcap2 bereits fertig kodiertes H.264; es gibt keinen Desktop, keine Prozesse zu starten und keine Web-UI-Umgebung.
 
-Nachgewiesen vor dieser Entscheidung (Details in `STATUS.md`):
+Nachgewiesen vor dieser Entscheidung (Details in `docs/status-archive.md`, „Nachweise nach Roadmap“):
 
 - Toolchain: C++23, `std::jthread` mit `-fexperimental-library`, Sockets.
 - Gebaut und live geprüft: OpenSSL 3.5.9, Opus 1.6.1, ENet (Moonlight-Fork), nanors, FFmpeg 9.0.2 minimal mit CBS (Sunshines eigenes `cbs.cpp` läuft unverändert auf der Konsole).

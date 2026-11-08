@@ -1,6 +1,6 @@
 # HDR und 10 Bit über Avcap2 (statisch)
 
-Stand 2026-11-01, Firmware 13.00, Build J03851548. Statische Analyse von `SceAvCapture`, `SceRemotePlay`, `SceGameLiveStreaming`, `libSceAvcap2` und `libSceVenc`. **Live geprüft sind seitdem die Schritte 3 und 9 des Spikes bis zum Testclient, Ergebnisse in `STATUS.md`:** `cfg+0x20 = 1` ergibt ohne weitere Änderung Main 10, `yuv420p10le`, bt2020nc/bt2020/smpte2084, auch in 4K, und der Host bietet es an. Schritt 9 lief auch mit einem echten Moonlight am HDR-Fernseher, Metadaten mit Nullen; das Bild passt laut Besitzer. Alles Übrige hier ist weiter nur gelesen. `libSceAvSetting` und die Encoder-Firmware liegen nicht vor; was dort geschieht, ist offen. „Gelesen“ heißt: steht so im Code, Adresse dabei. „Vermutung“ heißt: nicht belegt.
+Stand 2026-11-01, Firmware 13.00, Build J03851548. Statische Analyse von `SceAvCapture`, `SceRemotePlay`, `SceGameLiveStreaming`, `libSceAvcap2` und `libSceVenc`. **Live geprüft sind seitdem die Schritte 3 und 9 des Spikes bis zum Testclient, Ergebnisse in `docs/status-archive.md`, „HDR“:** `cfg+0x20 = 1` ergibt ohne weitere Änderung Main 10, `yuv420p10le`, bt2020nc/bt2020/smpte2084, auch in 4K, und der Host bietet es an. Schritt 9 lief auch mit einem echten Moonlight am HDR-Fernseher, Metadaten mit Nullen; das Bild passt laut Besitzer. Alles Übrige hier ist weiter nur gelesen. `libSceAvSetting` und die Encoder-Firmware liegen nicht vor; was dort geschieht, ist offen. „Gelesen“ heißt: steht so im Code, Adresse dabei. „Vermutung“ heißt: nicht belegt.
 
 ## Ergebnis
 

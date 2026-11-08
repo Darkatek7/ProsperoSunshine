@@ -1,6 +1,6 @@
 # HEVC über Avcap2 (P9.7)
 
-Stand 2026-11-01, Firmware 13.00; 10.x im Abschnitt „Firmware 10.x“. `src/hevc_spike.cpp` ist der Spike, der Host nutzt den Weg über `video_ps5.cpp`; die Messwerte stehen in `STATUS.md`.
+Stand 2026-11-01, Firmware 13.00; 10.x im Abschnitt „Firmware 10.x“. `src/hevc_spike.cpp` ist der Spike, der Host nutzt den Weg über `video_ps5.cpp`; die Messwerte stehen in `docs/status-archive.md`.
 
 ## Ergebnis
 
@@ -107,7 +107,7 @@ nicht in jedem Modus. Gemessen je Modus mit 5 und 50 Mbit/s, ohne Unterschied zw
 | 5 (1440p) | `0xc0000` | `0x100000` |
 | 6 (4K) | `0x100000` (mehr nicht geprüft) | – |
 
-Unter 1080p, gemessen mit 3 Mbit/s (`mode_spike`, `STATUS.md`). Zwischen den genannten Werten ist nichts geprüft:
+Unter 1080p, gemessen mit 3 Mbit/s (`mode_spike`, `docs/status-archive.md`). Zwischen den genannten Werten ist nichts geprüft:
 
 | Modus | startet bis | `Start` meldet `0x80c78000` ab |
 | --- | --- | --- |
@@ -115,9 +115,9 @@ Unter 1080p, gemessen mit 3 Mbit/s (`mode_spike`, `STATUS.md`). Zwischen den gen
 | 2 (540p) | `0x20000` | `0x30000` |
 | 3 (720p) | `0x40000` | `0x60000` |
 
-Der Host setzt diese Höchstwerte. Die Bitrate hält trotzdem, Messwerte in `STATUS.md`.
+Der Host setzt diese Höchstwerte. Die Bitrate hält trotzdem, Messwerte in `docs/status-archive.md`.
 
-Unter 1080p gibt es zusätzlich eine Grenze für die Bits je Bild, die auch H.264 trifft und nichts mit `cfg+0x10c` zu tun hat: Ab dort meldet `Start` ebenfalls `0x80c78000`. Der Host deckelt die Bitrate je Modus (`max_average_of`, Messwerte in `STATUS.md`).
+Unter 1080p gibt es zusätzlich eine Grenze für die Bits je Bild, die auch H.264 trifft und nichts mit `cfg+0x10c` zu tun hat: Ab dort meldet `Start` ebenfalls `0x80c78000`. Der Host deckelt die Bitrate je Modus (`max_average_of`, Messwerte in `docs/status-archive.md`).
 
 Nicht geprüft: Die öffentlichen Quellen nennen `cfg+0x5c = 4` statt 9 bei 4K, damit H.264 unter Level 6.0 bleibt (ps5-web-stream). Bei uns meldet `ffprobe` in 4K für beide Codecs Level 6.0. Ob Clients daran scheitern, ist nicht gemessen.
 

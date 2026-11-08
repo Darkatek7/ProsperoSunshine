@@ -125,7 +125,7 @@ Toolchain: PS5 Payload SDK v0.45 in the Docker image `prosperosunshine-sdk:v0.45
   against it before a release.
 - Close the app (write `/data/prosperosunshine/app.quit`) before uploading to it or starting another title. Once a title
   started while the app was still alive, and the app was started again later: from then on every title failed with `0x80940033`,
-  ShadowMountPlus logging `launch mount unavailable ... Device busy`, until the console restarted (`STATUS.md`).
+  ShadowMountPlus logging `launch mount unavailable ... Device busy`, until the console restarted (`docs/status-archive.md`, "Titelstarts blockiert").
 - Don't open the real Moonlight on the PC without asking, its window takes the focus and the owner may be playing there.
   `stream_test.exe` has no window.
 - `ps5_launch` and `ps5_open_url` sometimes fail with `0x80960003` while nothing is wrong; try again. A browser card must be
