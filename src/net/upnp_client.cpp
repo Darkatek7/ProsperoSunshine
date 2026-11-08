@@ -9,6 +9,7 @@
 #include <future>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <thread>
 
@@ -56,10 +57,18 @@ struct Router {
 
 // Every router that answered discovery and describes a WAN connection service.
 std::vector<Router> find_routers(const std::stop_token &stop) {
+    // All searches go out together and the answers are awaited once (searchalltypes). upnpDiscover() searches its types
+    // one after the other and waits 2 s for each: 8 s when no router answers, which a stop can't interrupt.
+    static const char *const types[] = {"urn:schemas-upnp-org:device:InternetGatewayDevice:1",
+                                        "urn:schemas-upnp-org:device:InternetGatewayDevice:2",
+                                        "urn:schemas-upnp-org:service:WANIPConnection:1",
+                                        "urn:schemas-upnp-org:service:WANPPPConnection:1", nullptr};
     std::vector<Router> routers;
+    std::set<std::string> asked;  // a router answers for several types: its description is fetched once
     int error = 0;
-    UPNPDev *devices = upnpDiscover(2000, nullptr, nullptr, 0, 0, 2, &error);
+    UPNPDev *devices = upnpDiscoverDevices(types, 2000, nullptr, nullptr, 0, 0, 2, &error, 1);
     for (UPNPDev *device = devices; device && !stop.stop_requested(); device = device->pNext) {
+        if (!asked.insert(device->descURL).second) continue;
         UPNPUrls urls{};
         IGDdatas data{};
         char lan[64]{};
