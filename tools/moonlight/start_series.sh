@@ -5,7 +5,7 @@
 #
 #   tools/moonlight/start_series.sh [host] [runs] [seconds]
 set -uo pipefail
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/../.." || exit 1
 HOST=${1:-${PS5_HOST:?pass the console address or set PS5_HOST}}
 RUNS=${2:-100}
 DUR=${3:-5}

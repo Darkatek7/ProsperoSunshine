@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-only
+# shellcheck disable=SC2154  # sdk, prefix, work, src_* and the rest come from scripts/deps.sh
 # OpenSSL: libcrypto and libssl only. async needs ucontext, which the payload libc does not promise.
 set -euo pipefail
 b="$work/openssl-build"

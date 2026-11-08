@@ -31,6 +31,7 @@ ENET_LIB=$(find "$B/build" -name 'libenet.a' | head -1)
 MLC_LIB=$(find "$B/build" -name 'libmoonlight-common-c.a' | head -1)
 echo "libs: $MLC_LIB $ENET_LIB"
 
+# shellcheck disable=SC2046  # pkg-config prints several flags, each its own word
 $CC -std=gnu11 -O2 -Wall -Wextra -Wno-unused-parameter \
   -I"$B/src/src" $(pkg-config --cflags opus) \
   "$REPO/tools/moonlight/stream_test.c" -o "$OUT/stream_test" \

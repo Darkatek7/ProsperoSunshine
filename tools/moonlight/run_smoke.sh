@@ -13,7 +13,7 @@
 #   The client is the Windows program from build_windows.sh if it is built, so that Docker's network doesn't falsify the
 #   result, and the one in the container with DOCKER_ARGS or PRE_CMD, or with NATIVE=0.
 set -uo pipefail
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/../.." || exit 1
 HOST=${1:-${PS5_HOST:?pass the console address or set PS5_HOST}}
 DUR=${2:-20}
 shift 2 2>/dev/null || true
@@ -26,7 +26,6 @@ TAG=${OUT_TAG:-}
 ID_ARGS=()
 [ -n "${CLIENT_DIR:-}" ] && ID_ARGS=(--dir "$CLIENT_DIR")
 mkdir -p "$OUTDIR" out/moonlight-client
-KEEP_TLS=""
 dock() { MSYS_NO_PATHCONV=1 docker run --rm ${DOCKER_ARGS:-} --mount "type=bind,source=$REPO_WIN,target=/repo" "$IMAGE" bash -c "$1"; }
 
 if [ -z "${NATIVE:-}" ]; then
@@ -60,7 +59,7 @@ RC=${PIPESTATUS[0]}
 echo "stream_test exit code: $RC"
 # NO_CANCEL=1 leaves the session app running, for a second client that resumes it.
 [ -n "${NO_CANCEL:-}" ] || "${PY[@]}" tools/moonlight/pair.py --host "$HOST" "${ID_ARGS[@]}" cancel
-if [ -s out/moonlight-test$TAG.h264 ]; then
+if [ -s "out/moonlight-test$TAG.h264" ]; then
   dock "cd /repo && ffprobe -v error -count_frames -select_streams v:0 -show_entries stream=codec_name,profile,width,height,avg_frame_rate,r_frame_rate,nb_read_frames -of default=nw=1 -f ${VIDEO_FORMAT:-h264} out/moonlight-test$TAG.h264; echo '--- ffmpeg full decode (-xerror):'; ffmpeg -v error -xerror -f ${VIDEO_FORMAT:-h264} -i out/moonlight-test$TAG.h264 -f null - && echo DECODE_OK"
 fi
 exit $RC

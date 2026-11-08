@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-only
+# shellcheck disable=SC2154  # sdk, prefix, work, src_* and the rest come from scripts/deps.sh
 # Only the platform-neutral "common" part: Sunshine's display_device.h and logging.cpp need its
 # types and logger. Display configuration itself does not exist on the PS5.
 set -euo pipefail

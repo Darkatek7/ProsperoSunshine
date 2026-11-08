@@ -8,7 +8,8 @@ root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 export sdk=${PS5_PAYLOAD_SDK:-/opt/ps5-payload-sdk}
 export prefix="$root/out/deps"
 export work=${DEPS_WORK:-/tmp/prospero-deps}
-export jobs=$(nproc)
+jobs=$(nproc)
+export jobs
 dl="$root/.cache/deps/dl"
 mirror=${DEPS_MIRROR:-https://github.com/Darkatek7/ProsperoSunshine/releases/download/deps-mirror}
 srcroot="$root/.cache/deps/src"

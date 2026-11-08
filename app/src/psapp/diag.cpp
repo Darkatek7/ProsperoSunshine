@@ -228,7 +228,6 @@ bool experimental_no_effect(std::uint32_t firmware, const std::string &key)
 HostLog parse_host_log(const std::string &text)
 {
     HostLog log;
-    std::string last_capture;
     std::string last_line;
     std::size_t at = 0;
     while (at < text.size())

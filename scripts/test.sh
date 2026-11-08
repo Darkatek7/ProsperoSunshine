@@ -2,12 +2,13 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Portable unit tests on the build host, under AddressSanitizer and UndefinedBehaviorSanitizer.
 set -euo pipefail
+# The tests call the code under test inside assert(), so NDEBUG must never reach them (-UNDEBUG below).
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 mkdir -p "$root/out"
 run_test() {
     local name=$1
     shift
-    clang++-18 -std=c++23 -stdlib=libstdc++ -Wall -Wextra -Werror -O1 -g \
+    clang++-18 -std=c++23 -stdlib=libstdc++ -Wall -Wextra -Werror -O1 -g -UNDEBUG \
         -fsanitize=address,undefined -I "$root/src" "$root/tests/$name.cpp" "$@" -o "$root/out/$name"
     "$root/out/$name"
 }
@@ -15,7 +16,7 @@ run_test() {
 run_capture_test() {
     local name=$1
     shift
-    clang-18 -std=gnu17 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -I "$root/src" -I "$root/tests" \
+    clang-18 -std=gnu17 -Wall -Wextra -Werror -O1 -g -UNDEBUG -fsanitize=address,undefined -I "$root/src" -I "$root/tests" \
         -I "$root/tests/stubs" "$root/tests/$name.c" "$@" -o "$root/out/$name"
     "$root/out/$name"
 }

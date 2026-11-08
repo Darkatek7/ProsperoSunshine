@@ -68,9 +68,10 @@ bool replace_file(const fs::path &path, std::string_view bytes, fs::perms mode) 
             return false;
         }
     }
+    // A rename that works clears ec, so a failed chmod is checked before it.
     std::error_code ec;
     fs::permissions(temporary, mode, ec);
-    fs::rename(temporary, path, ec);
+    if (!ec) fs::rename(temporary, path, ec);
     if (ec) std::remove(temporary.c_str());
     return !ec;
 }

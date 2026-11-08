@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-only
+# shellcheck disable=SC2154  # sdk, prefix, work, src_* and the rest come from scripts/deps.sh
 # ENet: moonlight's fork, configured by its own CMake feature checks.
 set -euo pipefail
 b="$work/enet-build"

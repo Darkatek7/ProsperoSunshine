@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-only
+# shellcheck disable=SC2154  # sdk, prefix, work, src_* and the rest come from scripts/deps.sh
 # FFmpeg: static libavutil, libavcodec and libswscale with nothing enabled but the two bitstream
 # filters that pull in the H.264/HEVC coded bitstream (CBS) reader and writer Sunshine's cbs.cpp
 # calls, plus the generic AVCodecContext/AVPacket API video.h includes. No codec is compiled in.

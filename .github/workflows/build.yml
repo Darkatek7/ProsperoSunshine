@@ -24,6 +24,13 @@ jobs:
         # The repo is public; this catches a LAN address, home folder or e-mail address before the long build.
         run: bash scripts/check_private.sh
 
+      - name: Shell scripts (shellcheck)
+        # Warnings and errors only; the image is pinned by digest like the actions.
+        run: |
+          docker run --rm -v "$PWD":/repo:ro -w /repo \
+            koalaman/shellcheck:v0.10.0@sha256:2097951f02e735b613f4a34de20c40f937a6c8f18ecb170612c88c34517221fb \
+            --severity=warning -x scripts/*.sh scripts/deps/*.sh scripts/hooks/pre-commit $(find tools app -name '*.sh')
+
       - name: Build SDK image
         run: docker build -t prosperosunshine-sdk:v0.45 -f scripts/Dockerfile .
 

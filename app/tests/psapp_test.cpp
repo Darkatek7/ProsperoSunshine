@@ -20,6 +20,17 @@ static int failures = 0;
             ++failures;                                                                            \
         }                                                                                          \
     } while (0)
+// CHECK, and the test function stops when it fails: for a pointer the next lines dereference.
+#define REQUIRE(cond)                                                                              \
+    do                                                                                             \
+    {                                                                                              \
+        if (!(cond))                                                                               \
+        {                                                                                          \
+            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);                            \
+            ++failures;                                                                            \
+            return;                                                                                \
+        }                                                                                          \
+    } while (0)
 
 using namespace psapp;
 
@@ -51,7 +62,7 @@ static void conf_tests()
     CHECK(!Config::parse("port =\n").get("port"));
 
     const OptionSpec *port = find_option("port");
-    CHECK(port != nullptr);
+    REQUIRE(port != nullptr);
     CHECK(!validate(*port, "47989"));
     CHECK(validate(*port, "1024"));
     CHECK(validate(*port, "65515"));
@@ -71,7 +82,7 @@ static void conf_tests()
 
     // close_game_on_quit: off by default, the app writes 1, and Sunshine's other words for on show as on.
     const OptionSpec *quit = find_option("close_game_on_quit");
-    CHECK(quit != nullptr);
+    REQUIRE(quit != nullptr);
     CHECK(quit->kind == OptionKind::toggle);
     CHECK(!validate(*quit, "1"));
     CHECK(!option_value(Config::parse("port = 48000\n"), *quit));
@@ -219,7 +230,7 @@ static void experimental_tests()
                             "experimental_small_modes"})
     {
         const OptionSpec *spec = find_option(key);
-        CHECK(spec != nullptr);
+        REQUIRE(spec != nullptr);
         CHECK(spec->kind == OptionKind::toggle);
         CHECK(!validate(*spec, "1"));
         CHECK(!validate(*spec, "0"));
@@ -379,7 +390,7 @@ static void experimental_tests()
     for (int i = 0; i < PS_EXP_SWITCH_COUNT; ++i)
     {
         const OptionSpec *spec = find_option(ps_exp_switch_at(i)->key);
-        CHECK(spec != nullptr);
+        REQUIRE(spec != nullptr);
         CHECK(spec->kind == OptionKind::toggle);
         CHECK(std::string(spec->label) == ps_exp_switch_at(i)->label);
     }

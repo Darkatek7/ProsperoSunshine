@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-only
+# shellcheck disable=SC2154  # sdk, prefix, work, src_* and the rest come from scripts/deps.sh
 # Boost: only the libraries Sunshine's kept sources include, via the CMake superproject.
 # Compiled libraries come from the dependency closure (filesystem, log, thread, atomic, ...); asio, ptree,
 # format, endian, bind and core are header-only. Boost.Log uses std::regex and has no IPC or syslog backend.

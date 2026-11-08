@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-only
+# shellcheck disable=SC2154  # sdk, prefix, work, src_* and the rest come from scripts/deps.sh
 # nanors: the same three sources Sunshine compiles directly. Its SIMD kernels use per-function
 # target attributes, but clang's immintrin.h hides AVX2/AVX-512 types on __SCE__ targets unless the
 # feature is enabled for the whole file, so the macro is masked for that one include.

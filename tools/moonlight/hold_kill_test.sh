@@ -6,7 +6,7 @@
 #
 #   tools/moonlight/hold_kill_test.sh [host]
 set -uo pipefail
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/../.." || exit 1
 HOST=${1:-${PS5_HOST:?pass the console address or set PS5_HOST}}
 if command -v py >/dev/null 2>&1; then PY=(py -3); else PY=(python3); fi
 REPO_WIN=$(pwd -W 2>/dev/null || pwd)

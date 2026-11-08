@@ -47,13 +47,13 @@ bool run(uint32_t ten_bit, const Variant &variant, std::vector<uint8_t> &buffer)
     const int open = ps_capture_open(&s);
     ps_capture_override_config(0, 0);
     if (open) {
-        klog_printf("ProsperoSunshine: hdr_spike bits=%u %s failed rc=%d raw=%#x\n", ten_bit ? 10 : 8, variant.name, open,
+        klog_printf("ProsperoSunshine: hdr_spike bits=%u %s failed rc=%d raw=%#x\n", ten_bit ? 10u : 8u, variant.name, open,
                     static_cast<unsigned>(ps_capture_last_open_rc()));
         sleep(1);
         return false;
     }
     char path[96];
-    snprintf(path, sizeof path, "/data/prosperosunshine/spike_hdr_%u_%s.bin", ten_bit ? 10 : 8, variant.name);
+    snprintf(path, sizeof path, "/data/prosperosunshine/spike_hdr_%u_%s.bin", ten_bit ? 10u : 8u, variant.name);
     FILE *out = fopen(path, "wb");
     const int header_size = ps_capture_headers(s, buffer.data(), buffer.size());
     if (header_size > 0 && out) fwrite(buffer.data(), 1, static_cast<size_t>(header_size), out);

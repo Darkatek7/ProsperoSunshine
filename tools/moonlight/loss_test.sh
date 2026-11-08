@@ -7,7 +7,7 @@
 #
 #   tools/moonlight/loss_test.sh [host] [seconds] [drop probability, e.g. 0.03]
 set -uo pipefail
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/../.." || exit 1
 HOST=${1:-${PS5_HOST:?pass the console address or set PS5_HOST}}
 SECS=${2:-30}
 P=${3:-0.03}

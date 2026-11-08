@@ -107,7 +107,7 @@ cp -r "$repo/licenses/ps5-payload-sdk-runtime" "$repo/licenses/THIRD_PARTY.md" "
 cp "$kit/LICENSE" "$title/licenses/ps5-homebrew-ui-LICENSE.txt"
 cp "$kit/THIRD_PARTY_NOTICES.md" "$title/licenses/ps5-homebrew-ui-THIRD_PARTY_NOTICES.md"
 printf '%s\n' "ps5-homebrew-ui (GPL-3.0-or-later): $kit_url at $kit_rev" > "$title/licenses/SOURCES.txt"
-rm -rf "$out/$title_id" "$out/$title_id$suffix.zip"
+rm -rf "${out:?}/$title_id" "${out:?}/$title_id$suffix.zip"
 mkdir -p "$out"
 cp -a "$title" "$out/"
 (cd "$out" && python3 -m zipfile -c "$title_id$suffix.zip" "$title_id")
