@@ -64,6 +64,10 @@ const std::vector<OptionSpec> &option_specs()
         {"wan_encryption_mode", "Internet encryption",
          "The same for clients outside it.", OptionKind::choice,
          "Optional", kEncryption, 0, 0, 1, 0},
+        // Sunshine's own key, read by the host (src/net/upnp_client.cpp). Off: the ports are forwarded by hand, if at all.
+        {"upnp", "UPnP port forwarding",
+         "On: the host asks the router to forward Moonlight's ports, so devices outside your network can connect. The web page shows the result.",
+         OptionKind::toggle, "Off", {}, 0, 0, 1, 0},
         // Sunshine reads this one (patch 0010), as it does the options above.
         {"close_game_on_quit", "Quit closes the game",
          "On: quitting in Moonlight also closes the game the stream started or found in front, and unsaved progress is lost.",
@@ -146,7 +150,7 @@ std::optional<std::string> validate(const OptionSpec &spec, std::string_view val
 std::optional<std::string> option_value(const Config &config, const OptionSpec &spec)
 {
     std::optional<std::string> value = config.get(spec.key);
-    if (value && std::string_view(spec.key) == "close_game_on_quit")
+    if (value && (std::string_view(spec.key) == "close_game_on_quit" || std::string_view(spec.key) == "upnp"))
     {
         // to_bool in Sunshine's src/config.cpp, which is case-sensitive.
         const std::string &v = *value;

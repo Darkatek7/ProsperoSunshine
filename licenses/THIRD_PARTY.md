@@ -15,5 +15,6 @@ licence texts are in `licenses/`. Versions and SHA256 of the exact sources: `dep
 | Boost | BSL-1.0 | `boost.txt` |
 | OpenSSL | Apache-2.0 | `openssl.txt` |
 | Opus | BSD-3-Clause | `opus.txt` |
+| MiniUPnPc | BSD-3-Clause | `miniupnpc.txt` |
 | FFmpeg libavcodec/libavutil/libswscale | LGPL-2.1-or-later | `ffmpeg.txt` |
 | PS5 Payload SDK runtime (libc, libc++, libc++abi, libunwind, start files) | BSD (FreeBSD libc), Apache-2.0 with LLVM exception | `ps5-payload-sdk-runtime/` |

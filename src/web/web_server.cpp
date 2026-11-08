@@ -2,6 +2,7 @@
 #include "web/web_server.hpp"
 #include "apps/app_access.hpp"
 #include "control/uuid_lines.hpp"
+#include "net/upnp_client.hpp"
 #include "web/web_auth.hpp"
 #include "web/web_cert.hpp"
 #include "web/web_lines.hpp"
@@ -389,6 +390,26 @@ void send_answer(const Response &response, const std::string &answer) {
     }
 }
 
+// The UPnP port mapping's last pass (src/net/upnp.hpp): state "off" unless upnp is on in sunshine.conf. "outer" is the
+// router in front of the console's, behind two routers, or null.
+json upnp_hop_json(const prospero::upnp::Hop &hop) {
+    if (hop.router.empty()) return nullptr;
+    json ports = json::array();
+    for (const auto &port : hop.ports)
+        ports.push_back({{"proto", port.mapping.udp ? "UDP" : "TCP"},
+                         {"port", port.mapping.port},
+                         {"outcome", prospero::upnp::name(port.outcome)},
+                         {"detail", port.detail}});
+    return {{"router", hop.router}, {"external", hop.external}, {"external_private", hop.external_private}, {"ports", ports}};
+}
+
+json upnp_json() {
+    const auto status = prospero::upnp::status();
+    return {{"state", prospero::upnp::name(status.state)},
+            {"inner", upnp_hop_json(status.inner)},
+            {"outer", upnp_hop_json(status.outer)}};
+}
+
 json settings_json() {
     const auto config = psapp::Config::parse(read_file(config::sunshine.config_file));
     json list = json::array();
@@ -581,7 +602,8 @@ void routes(Server &server, State &state, ControlServer &control, const std::sha
                                  {"trusted", uuid_list("web_trusted.txt")},
                                  {"risk_ack", uuid_list("web_risk_ack.txt")},
                                  {"menus", menus},
-                                 {"streams", records(ok_lines(control.handle("STREAMS", Caller::web)), stream_record)}});
+                                 {"streams", records(ok_lines(control.handle("STREAMS", Caller::web)), stream_record)},
+                                 {"upnp", upnp_json()}});
     });
     // The console's profiles, for choosing which ones a device may play as. Names are shown only here, signed in.
     get("^/api/users$", [&control](const Response &response, const Request &) {

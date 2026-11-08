@@ -9,6 +9,7 @@
 #include "input/title_profile.hpp"
 #include "log/log_filter.hpp"
 #include "log/remote_log.hpp"
+#include "net/upnp_client.hpp"
 #include "probe_scrub.hpp"
 #include "sunshine/self_check.hpp"
 #include "sunshine/video_ps5.hpp"
@@ -27,6 +28,7 @@
 #include "src/platform/common.h"
 #include "src/process.h"
 #include "src/rtsp.h"
+#include "src/stream.h"
 #include "src/video.h"
 #include <algorithm>
 #include <array>
@@ -317,6 +319,16 @@ int main(int argc, char *argv[]) {
             prospero::mdns::run_responder(stop, name, net::map_port(nvhttp::PORT_HTTP));
         });
         std::jthread stats_thread(log_stream_stats);
+        // Optional UPnP port mapping (upnp in sunshine.conf, off by default; src/net/upnp.hpp).
+        std::jthread upnp_thread;
+        if (config::sunshine.flags[config::flag::UPNP]) {
+            upnp_thread = std::jthread([](std::stop_token stop) {
+                prospero::upnp::run(stop, prospero::upnp::stream_mappings(
+                                              net::map_port(nvhttp::PORT_HTTPS), net::map_port(nvhttp::PORT_HTTP),
+                                              net::map_port(rtsp_stream::RTSP_SETUP_PORT), net::map_port(stream::VIDEO_STREAM_PORT),
+                                              net::map_port(stream::CONTROL_PORT), net::map_port(stream::AUDIO_STREAM_PORT)));
+            });
+        }
         ps_diag_log("ProsperoSunshine: host ready control_port=%u\n", prospero::ControlServer::port);
 
         again = wait_or_ports_lost(shutdown_event, ports, control);
@@ -340,6 +352,7 @@ int main(int argc, char *argv[]) {
         web_thread.request_stop();
         mdns_thread.request_stop();
         stats_thread.request_stop();
+        upnp_thread.request_stop();
         proc::proc.terminate();
         ps_diag_trace("wait for the service threads to end\n");
         mdns_thread.join();
@@ -348,6 +361,8 @@ int main(int argc, char *argv[]) {
         control_thread.join();
         report_thread.join();
         web_thread.join();
+        // Last, so a router slow to answer never holds up the other services (src/net/upnp_client.cpp bounds its wait).
+        if (upnp_thread.joinable()) upnp_thread.join();
         if (again) {
             shutdown_event->reset();
             while (!std::all_of(ports.begin(), ports.end(), prospero::port_free)) std::this_thread::sleep_for(2s);

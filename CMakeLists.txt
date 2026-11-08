@@ -44,7 +44,7 @@ function(prospero_dep name)
         INTERFACE_INCLUDE_DIRECTORIES "${PROSPERO_DEPS}/include"
         INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${PROSPERO_DEPS}/include")
 endfunction()
-foreach(lib ssl crypto opus enet nanors)
+foreach(lib ssl crypto opus enet nanors miniupnpc)
     prospero_dep(${lib})
 endforeach()
 set_target_properties(dep::ssl PROPERTIES INTERFACE_LINK_LIBRARIES "dep::crypto;pthread")
@@ -180,7 +180,7 @@ extern const std::size_t prospero_web_asset_count = sizeof prospero_web_assets /
     add_executable(prospero_sunshine "${CMAKE_BINARY_DIR}/generated/cover_png.cpp"
         "${CMAKE_BINARY_DIR}/generated/relaunch_helper_elf.cpp"
         "${CMAKE_BINARY_DIR}/generated/web_page.cpp" src/web/web_server.cpp src/web/web_login.cpp src/web/web_report.cpp
-        src/web/web_cert.cpp
+        src/web/web_cert.cpp src/net/upnp_client.cpp
         app/src/psapp/conf.cpp app/src/psapp/diag.cpp
         ${SUNSHINE_KEPT}
         "${MOONLIGHT_SRC}/src/RtspParser.c"
@@ -213,7 +213,8 @@ extern const std::size_t prospero_web_asset_count = sizeof prospero_web_assets /
     target_link_libraries(prospero_sunshine PRIVATE prospero_core prospero_pad prospero_mdns
         "-Wl,--start-group" ${BOOST_LIBS} "${PROSPERO_DEPS}/lib/libdisplaydevice_common.a"
         "${PROSPERO_DEPS}/lib/libavcodec.a" "${PROSPERO_DEPS}/lib/libswscale.a" "${PROSPERO_DEPS}/lib/libavutil.a"
-        dep::ssl dep::crypto dep::opus dep::enet dep::nanors "-Wl,--end-group" pthread SceSystemService SceUserService)
+        dep::ssl dep::crypto dep::opus dep::enet dep::nanors dep::miniupnpc "-Wl,--end-group" pthread SceSystemService
+        SceUserService)
     if(PROSPERO_DEBUG)
         target_link_options(prospero_sunshine PRIVATE "-Wl,-Map=${PROSPERO_OUT}/prospero_sunshine.map")
         add_custom_command(TARGET prospero_sunshine POST_BUILD

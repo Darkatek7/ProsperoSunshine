@@ -139,7 +139,7 @@ async function refresh() {
     const data = await api('/api/overview');
     renderHost(data.host, data.status);
     showPending(data.host.settings_pending);
-    renderStatus(data.host, data.status);
+    renderStatus(data.host, data.status, data.upnp);
     renderPairings(data.pairings);
     renderStreams(data.streams);
     lastDevices = data.devices;
@@ -165,7 +165,73 @@ function renderHost(host, status) {
   document.title = `${host.name || 'ProsperoSunshine'} · ProsperoSunshine`;
 }
 
-function renderStatus(host, status) {
+// One line for the UPnP port mapping (upnp in Settings): off, looking, no router, or which ports the router forwards.
+function upnpText(upnp) {
+  if (!upnp || upnp.state === 'off') return 'off (Settings)';
+  if (upnp.state === 'searching') return 'looking for the router';
+  if (upnp.state === 'no_router') return 'no UPnP router answered: forward the ports by hand or turn UPnP on in the router';
+  const hop = (h) => {
+    const ports = h.ports || [];
+    const open = ports.filter((p) => p.outcome === 'open').length;
+    // Ports with the same problem in one sentence: "UDP 47998, 47999 and 48000 go to 192.168.1.20, another device".
+    const groups = new Map();
+    for (const p of ports.filter((p) => p.outcome !== 'open')) {
+      const key = `${p.proto}|${p.outcome}|${p.detail}`;
+      groups.set(key, [...(groups.get(key) || []), p]);
+    }
+    const problems = [...groups.values()].map((g) => {
+      const numbers = g.map((p) => p.port);
+      const list = numbers.length > 1 ? `${numbers.slice(0, -1).join(', ')} and ${numbers.at(-1)}` : `${numbers[0]}`;
+      const p = g[0];
+      if (p.outcome === 'taken') {
+        return `${p.proto} ${list} ${g.length > 1 ? 'go' : 'goes'} to ${p.detail}, another device: turn UPnP off there or change Base port`;
+      }
+      // 729 ConflictWithOtherMechanisms: the router keeps the port for itself, with nothing mapped on it.
+      const hint = /\(729\)/.test(p.detail || '') ? ', the router keeps it for itself: change Base port' : '';
+      return `${p.proto} ${list} ${p.outcome}${p.detail ? `: ${p.detail}` : ''}${hint}`;
+    });
+    let text = `${open} of ${ports.length} ports forwarded by ${h.router}${h.external ? ` (internet side ${h.external})` : ''}`;
+    if (problems.length) text += `; ${problems.join('; ')}`;
+    return text;
+  };
+  if (!upnp.inner) return 'no UPnP router answered';
+  let text = hop(upnp.inner);
+  if (upnp.outer) text += `. Router in front: ${hop(upnp.outer)}`;
+  const last = upnp.outer || upnp.inner;
+  if (last.external_private) text += `. ${last.external || 'Its internet side'} is private: a router or your provider in front must forward the ports to ${last.router}`;
+  return text;
+}
+
+// The address a friend adds in Moonlight: the internet side of the last router UPnP reached, when it is public.
+function publicAddress(upnp) {
+  if (!upnp || upnp.state !== 'ready' || !upnp.inner) return '';
+  const last = upnp.outer || upnp.inner;
+  return last.external && !last.external_private ? last.external : '';
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // Older browsers, or a page whose certificate the browser didn't take as secure: the selection way.
+    const area = el('textarea', { readonly: '' });
+    area.value = text;
+    document.body.append(area);
+    area.select();
+    const copied = document.execCommand('copy');
+    area.remove();
+    if (!copied) throw new Error('copy failed');
+  }
+}
+
+function addressWithCopy(address) {
+  return el('span', {}, `${address} `, el('button', { type: 'button', class: 'ghost', text: 'Copy',
+    title: 'Copy the address to add the console in Moonlight from outside your network',
+    onclick: () => copyText(address).then(() => notice(`Copied ${address}`),
+      () => notice('Copying failed: select the address and copy it by hand', true)) }));
+}
+
+function renderStatus(host, status, upnp) {
   const facts = [
     ['Stream', status.running === '1' ? `running${status.client ? ` to ${status.client}` : ''}` : 'none'],
     ['App', status.app || '–'],
@@ -173,8 +239,11 @@ function renderStatus(host, status) {
     ['Version', `${host.version} (${host.commit})`],
     ['Firmware', host.firmware],
     ['Base port', String(host.port)],
+    ['UPnP', upnpText(upnp)],
   ];
-  $('status').replaceChildren(...facts.flatMap(([key, value]) => [el('dt', { text: key }), el('dd', { text: value })]));
+  const address = publicAddress(upnp);
+  if (address) facts.push(['Internet address', addressWithCopy(address)]);
+  $('status').replaceChildren(...facts.flatMap(([key, value]) => [el('dt', { text: key }), el('dd', {}, value)]));
 }
 
 function renderPairings(pairings) {

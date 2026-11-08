@@ -14,7 +14,7 @@ if [[ "${PROSPERO_DEBUG:-0}" == 1 ]]; then
     out="$root/out/debug"
 fi
 stage="$root/dist/$name"
-expected_licenses="boost enet ffmpeg libdisplaydevice moonlight-common-c nanors nlohmann-json openssl opus
+expected_licenses="boost enet ffmpeg libdisplaydevice miniupnpc moonlight-common-c nanors nlohmann-json openssl opus
 simple-web-server sunshine"
 
 for elf in prospero_sunshine firmware_probe host_restart; do
