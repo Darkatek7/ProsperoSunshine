@@ -5,3 +5,4 @@ __pycache__/
 *.pyc
 *.elf
 dist/
+.private-words

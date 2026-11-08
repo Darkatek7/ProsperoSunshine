@@ -18,14 +18,18 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: No private data in tracked files
+        # The repo is public; this catches a LAN address, home folder or e-mail address before the long build.
+        run: bash scripts/check_private.sh
 
       - name: Build SDK image
         run: docker build -t prosperosunshine-sdk:v0.45 -f scripts/Dockerfile .
 
       - name: Cache third-party builds
         id: deps-cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           # deps.sh rebuilds a library whenever its extracted source tree is missing, so the
           # extracted trees are cached together with the build output.
@@ -60,7 +64,7 @@ jobs:
           bash scripts/package.sh "$version"
           PROSPERO_DEBUG=1 bash scripts/package.sh "$version"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: prosperosunshine-${{ github.sha }}
           path: dist/*.tar.gz
@@ -68,7 +72,7 @@ jobs:
       - name: Keep the debug host's line info
         # Not in the user's zip: with these, `llvm-addr2line -f -e prospero_sunshine.debug.elf <address>` turns a crash
         # address from klog into a function, file and line (the debug ELF that ships has the same code and addresses).
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: prosperosunshine-debug-symbols-${{ github.sha }}
           path: |
@@ -76,7 +80,7 @@ jobs:
             out/debug/prospero_sunshine.map
 
       - name: Hand the hosts to the app job
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: hosts-${{ github.sha }}
           retention-days: 1
@@ -101,16 +105,16 @@ jobs:
       PS5SD_URL: https://github.com/Darkatek7/PS5SD
       PS5SD_REV: 0654534bc7042d9164167835fba67e74215f1617  # v1.0.0
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: hosts-${{ github.sha }}
           path: out
 
       - name: Restore the ps5-opengl SDK
         id: glcache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: .cache/app/ps5-opengl-sdk
           key: ps5-opengl-sdk-${{ env.PS5SD_REV }}
@@ -132,14 +136,14 @@ jobs:
 
       - name: Save the ps5-opengl SDK
         if: steps.glcache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: .cache/app/ps5-opengl-sdk
           key: ps5-opengl-sdk-${{ env.PS5SD_REV }}
 
       - name: ps5-opengl build log
         if: failure() && steps.glcache.outputs.cache-hit != 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ps5-opengl-build-log
           path: ${{ runner.temp }}/ps5sd/.deps/ps5-opengl-work/build.log
@@ -158,7 +162,7 @@ jobs:
           cp build/app/PPSA47989.zip build/app-debug/PPSA47989-debug.zip dist-app/
           sha256sum dist-app/*.zip
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: PPSA47989-${{ github.sha }}
           path: dist-app/*.zip
@@ -171,12 +175,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: prosperosunshine-${{ github.sha }}
           path: assets
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: PPSA47989-${{ github.sha }}
           path: assets

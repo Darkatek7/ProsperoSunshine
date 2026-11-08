@@ -1,0 +1,22 @@
+# What scripts/check_private.sh lets through: <path glob> <regular expression (ERE) for the matched text>.
+# The glob's * also crosses folders. Keep entries narrow (one file or one folder, the exact address), say why, and
+# never list the console's or the router's real address. The owner's words (.private-words) have no exceptions.
+
+# A network with its prefix (Sunshine's LAN ranges such as 10.0.0.0/8 and the notes about them) is not a host.
+*                       \.0/[0-9]{1,2}$
+
+# Example addresses in unit tests and in the comment that shows the remote log's format.
+tests/*.cpp             ^192\.168\.1\.[0-9]{1,3}$
+app/tests/*.cpp         ^192\.168\.1\.[0-9]{1,3}$
+src/log/remote_log.hpp  ^192\.168\.1\.10$
+tests/*.cpp             ^10\.0\.0\.[0-9]$
+
+# The app connects a UDP socket to this address only to learn its own one from the route; nothing is sent.
+app/src/psapp/io.cpp    ^10\.0\.0\.1$
+
+# Addresses that reach nobody: GitHub's no-reply ones and noreply@ senders.
+*                       @users\.noreply\.github\.com$
+*                       ^noreply@
+
+# Third-party license texts name their authors, as upstream ships them.
+licenses/*              @

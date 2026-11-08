@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-only
+# Stops a commit that adds a LAN address, a home folder, an e-mail address or a word from .private-words
+# (scripts/check_private.sh). Enable once per clone: git config core.hooksPath scripts/hooks
+set -euo pipefail
+exec bash "$(git rev-parse --show-toplevel)/scripts/check_private.sh" --staged

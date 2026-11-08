@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# The workflow's actions are pinned to commit SHAs; this proposes the new SHA (with its version comment) as a PR.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
