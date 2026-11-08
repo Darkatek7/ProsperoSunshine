@@ -20,6 +20,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: No private data in tracked files
+        # The repo is public; this catches a LAN address, home folder or e-mail address before the long build.
+        run: bash scripts/check_private.sh
+
       - name: Build SDK image
         run: docker build -t prosperosunshine-sdk:v0.45 -f scripts/Dockerfile .
 

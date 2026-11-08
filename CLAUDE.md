@@ -57,7 +57,10 @@ Toolchain: PS5 Payload SDK v0.45 in the Docker image `prosperosunshine-sdk:v0.45
 ## Rules
 
 - **The repo will be public.** No console IP, local paths, e-mail addresses or names in tracked files.
-  Test tools take the console address from `PS5_HOST`. Grep the diff before every commit.
+  Test tools take the console address from `PS5_HOST`. `scripts/check_private.sh` finds LAN addresses, home folders and
+  e-mail addresses (CI runs it on the whole tree; exceptions with their reason in `scripts/private_allowlist.txt`); enable
+  it for every commit once per clone with `git config core.hooksPath scripts/hooks`. Names and handles go one per line into
+  the untracked `.private-words`. It only knows patterns, so still read the diff before every commit.
 - Firmware 13.00 and 10.20 are verified. Capture refuses other versions unless the ResourceArbitrator calls
   resolve by NID, and then logs them as unverified; see `docs/firmware-porting.md` before porting.
 - New or changed third-party sources: pin them in `deps.lock` (SHA256), patch via `patches/<dep>/`. Archives from servers
