@@ -118,12 +118,14 @@ ignored, also the "hold Select" PS, so a guest can't leave your game, open the c
 or broadcast your screen. The role belongs to the host's device, not to the first slot: when the host leaves, nobody else
 gets it, and the host's device takes it back when it reconnects. Once every controller is gone, the next device to connect
 is the host. To give PS and Create to everyone, turn on **PS for all players** in the app's Settings and restart the host.
+On a device with [profiles of its own](#profiles-per-device), once you choose the [console menus](#console-menus), the
+controller's profile decides instead of its role.
 
 ## Web page
 
 The host can serve a small web page, so a phone or PC in your network can do what the app does without leaving the game:
 see the host's status, version and firmware, enter the PIN of a pending pairing, end a device's stream, rename or remove
-paired devices, choose the console profiles each device plays as, [hide apps](#hiding-apps) from devices you don't trust, change the settings, read or download the end of `sunshine.log` and `host_diag.log`, get the same
+paired devices, choose the console profiles each device plays as and which of them reach the console's menus, [hide apps](#hiding-apps) from devices you don't trust, change the settings, read or download the end of `sunshine.log` and `host_diag.log`, get the same
 diagnostic report as the app's (ready to paste into an issue), and restart the host.
 It is off until you set a login, and nothing listens on its port before that.
 
@@ -200,20 +202,48 @@ own gets a profile of their own.
 The setting lives in `/data/prosperosunshine/device_profiles.txt`. A device whose line there is damaged only watches, and
 so does every device while the file can't be read: an error never gives a device a free choice.
 
-**Set a sign-in passcode on your own profile.** The console's own user switching stays outside the host: a device that
-has PS and Create (the host's, see [Streaming](#streaming)) can still reach it.
+### Console menus
+
+**Devices → Console menus** chooses which profiles reach the console's own menus from Moonlight. Lend the console and a
+friend plays their game, but can't open Settings, update the system (which also ends the jailbreak) or sign in to PSN.
+On a device with profiles of its own:
+
+- A controller playing as a chosen profile has PS and Create, also F1 and F2 of the
+  [keyboard's controller](#keyboard-and-mouse-as-a-controller) and the PS of a held Select. A controller playing as another
+  profile has neither, even the host's. The device's own keyboard plays as the profile of its first controller, and for a
+  profile without the menus its two keys into them do nothing: Print Screen (the Create menu) and Pause (the control
+  center).
+- Only a device with at least one chosen profile, or a [spectator](#profiles-per-device), gets **"PS5 Screen"** in its app
+  list, and the host refuses to start it for any other device, as a client can ask for an app by its id without seeing it.
+  A spectator only watches: it has no input to reach the menus with. Any device can start a game from its list,
+  and leave it with Quit when **Quit closes the game** is on.
+- While no game is in front (the home screen, an app of the console's, a media app or homebrew), the
+  controllers, keyboard and mouse of other profiles do nothing, and a press says why: "<profile> can't use the console's
+  menus. Start a game from Moonlight". They play again once a game is back in front. A game left open behind the home
+  screen doesn't count: PS held on a controller of a chosen profile opens the home screen, and the others wait until the
+  game has the screen again. The control center that a short PS opens over a game leaves it in front.
+
+Until you choose (the default), everything goes as before: the host's controller has PS and Create (every controller with
+**PS for all players**), and every device gets "PS5 Screen". Choosing no profile closes the menus to all of them. Devices
+that can choose freely keep the host's rule either way, as which profile the console seated their controllers in isn't
+known. A change counts within a second, also during a stream. Devices shows "(menus)" after a device's profiles that
+reach them. The choice lives in `/data/prosperosunshine/menu_profiles.txt`; while it is there but can't be read, no profile
+reaches the menus.
+
+**Set a sign-in passcode on your own profile.** The console's own user switching stays outside the host: a controller
+that reaches the console's menus can still reach it.
 
 ## Hiding apps
 
 Some apps can change the console: a store installs, updates or removes games. The [web page](#web-page)'s **Apps** lists
 the installed titles; **Hide** keeps one from devices you don't trust. Such a device doesn't see it in Moonlight, and the
 host refuses to start or resume it, also when the device asks by an app ID it remembers from an older list (Moonlight
-"Launch app failed: This app is hidden on this device"). **PS5 Screen** is never hidden. While a trusted device streams a
-hidden app, the others can't join it.
+"Launch app failed: This app is hidden on this device"). **Apps** never hides **PS5 Screen**: whether a device gets it goes
+by the [console menus](#console-menus). While a trusted device streams a hidden app, the others can't join it.
 
 This only keeps the app out of Moonlight. A device streaming PS5 Screen with a controller can still open the app from the
 console's home screen, like anyone holding a controller in the room; a spectator (see [Profiles per
-device](#profiles-per-device)) can't.
+device](#profiles-per-device)) can't, nor can a controller whose profile doesn't reach the [console menus](#console-menus).
 
 Trusted with every app is a device you trusted in **Devices** (**I trust this device**) that still plays as any profile.
 Limit its profiles or make it a spectator, and it counts as not trusted for apps too, while its mark stays. Nothing is

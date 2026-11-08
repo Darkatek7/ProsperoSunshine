@@ -25,7 +25,11 @@ constexpr bool trusted_with_apps(bool marked_trusted, bool profiles_set, bool pr
     return marked_trusted && (!profiles_set || profiles_free);
 }
 
-// Whether a device sees an app and may start or resume it. "PS5 Screen" is never hidden: it is how every device streams.
-constexpr bool app_allowed(bool is_screen, bool hidden, bool trusted) { return is_screen || !hidden || trusted; }
+// Whether a device sees an app and may start or resume it. No list hides "PS5 Screen": it goes by screen_offered, whether one
+// of the device's profiles reaches the console's menus (control/menu_access.hpp), which every device does until the owner
+// chooses the profiles that do.
+constexpr bool app_allowed(bool is_screen, bool hidden, bool trusted, bool screen_offered = true) {
+    return is_screen ? screen_offered : !hidden || trusted;
+}
 
 }  // namespace prospero

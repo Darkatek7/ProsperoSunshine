@@ -17,8 +17,10 @@ int main() {
     static_assert(!trusted_with_apps(true, true, false));   // trusted once, limited to some profiles or watching now
     static_assert(!trusted_with_apps(false, false, false) && !trusted_with_apps(false, true, true));
 
-    // PS5 Screen always; a hidden app only for a trusted device; everything else for everyone.
+    // PS5 Screen whatever the list says, while the device reaches the console's menus; a hidden app only for a trusted
+    // device; everything else for everyone.
     static_assert(app_allowed(true, true, false));
+    static_assert(app_allowed(true, false, true, true) && !app_allowed(true, false, true, false));
     static_assert(app_allowed(false, false, false));
     static_assert(!app_allowed(false, true, false));
     static_assert(app_allowed(false, true, true));
@@ -40,5 +42,5 @@ int main() {
     }
     std::filesystem::remove(file);
 
-    std::cout << "PASS: app access (title IDs, trust only with a free choice of profile, PS5 Screen always, the hidden list)\n";
+    std::cout << "PASS: app access (title IDs, trust only with a free choice of profile, PS5 Screen by the console's menus, the hidden list)\n";
 }

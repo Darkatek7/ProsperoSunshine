@@ -9,6 +9,7 @@
 #include "control/device_profiles.hpp"
 #include "control/uuid_lines.hpp"
 #include "platform/ps5/title_launch.h"
+#include "sunshine/platform_ps5.hpp"
 #include "src/config.h"
 #include "src/logging.h"
 #include "src/nvhttp.h"
@@ -347,9 +348,11 @@ bool trusted_with_apps(const std::string &cert) {
 }
 }  // namespace
 
+// "PS5 Screen" streams the home screen, where the D-pad reaches Settings without a PS button: a device none of whose profiles
+// reaches the console's menus neither sees it nor may start or join it (control/menu_access.hpp). No list hides it.
 bool app_allowed(const std::string &client_cert, const ctx_t &app) {
     const bool screen = app.id == std::to_string(screen_app_id);
-    if (screen) return true;
+    if (screen) return prospero::app_allowed(true, false, false, platf::screen_offered_to(client_cert));
     const auto hidden = hidden_apps();
     // Nothing hidden, the usual case: no need to look the device up.
     if (std::find(hidden.begin(), hidden.end(), app.cmd) == hidden.end()) return true;
@@ -357,7 +360,11 @@ bool app_allowed(const std::string &client_cert, const ctx_t &app) {
 }
 
 bool app_id_allowed(const std::string &client_cert, int app_id) {
-    if (app_id == screen_app_id) return true;
+    if (app_id == screen_app_id) {
+        const bool offered = platf::screen_offered_to(client_cert);
+        if (!offered) BOOST_LOG(info) << "PS5 Screen refused: none of the device's profiles reaches the console's menus"sv;
+        return offered;
+    }
     const std::string id = std::to_string(app_id);
     for (const auto &app : all_apps())
         if (app.id == id) return app_allowed(client_cert, app);
