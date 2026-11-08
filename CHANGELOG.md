@@ -11,6 +11,11 @@
 - **A stream that falls back from 1440p or 4K to 1080p gets 1080p's share of the bitrate** (issue 39): 9/16 of the client's
   rate from 1440p, a quarter from 4K. On 10.x the encoder's QP follows the bitrate, so the fallback cost the client as much
   as the larger picture. A smaller mode falling back to 1080p keeps the client's rate.
+- **A running stream no longer changes its size** (issue 39). When a game or app took the capture mid-stream and the
+  console's output then refused the stream's mode (an app with a 1080p output in front of a 4K stream), the host reopened
+  at 1080p. Moonlight for Windows doesn't set up its decoder anew for that, and the picture stayed broken. Now the host
+  ends the stream instead, and the client's next stream starts at what the output takes. While a title starts or closes
+  and the output has no mode yet, the reopens wait for it as before, now for every mode, not only below 1080p.
 
 ## 0.5.0 (2026-11-07)
 
