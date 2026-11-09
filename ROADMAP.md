@@ -13,8 +13,9 @@ nur ein erfolgreicher Build.
 
 ## Nächste konkrete Schritte
 
-1. **Menüs je Profil (PR #38):** nach 0.5.0 auf `main`, mit dem Testclient auf 13.00 gemessen (`STATUS.md`,
-   „Konsolenmenüs, PR 38“). Vor dem nächsten Release noch mit echtem Moonlight.
+1. **Menüs je Profil (PR #38):** nach 0.5.0 auf `main`, mit dem Testclient und mit echtem Moonlight (6.2.0, Linux) auf 13.00
+   geprüft (`STATUS.md`, „Konsolenmenüs, PR 38“ und „… mit echtem Moonlight“). Offen: Tastatur und Moonlight auf Windows,
+   Android und iOS.
 2. **Zweiter Aufnahmekanal** (seit 0.2.4) weiter prüfen. Auf 13.00 gemessen: gleicher Modus teilt Kanal 0, H.264 neben HEVC,
    1080p neben 720p und SDR neben HDR auf Kanal 1, das erste Gerät geht zuerst, ein drittes Gerät, die Übernahme in
    Kanal 1, 4K für Kanal 1 und 5 Minuten Kanal 1 allein (`docs/status-archive.md`, „Zweiter Aufnahmekanal im Host“). Offen:

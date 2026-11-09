@@ -57,7 +57,8 @@ Issue 36“) und ein Debug-Build in jedem Release („Debug-Build (PR 29) zusamm
 ## Offen und bekannte Grenzen
 
 1. **Menüs je Profil (PR 38):** nach 0.5.0 auf `main` gemergt, in keinem Release. Mit dem Testclient auf 13.00 gemessen
-   („Konsolenmenüs, PR 38“), mit echtem Moonlight noch nicht.
+   („Konsolenmenüs, PR 38“), mit echtem Moonlight 6.2.0 unter Linux der Controller-Weg (App-Liste, Ablehnung, PS); Tastatur und
+   Moonlight auf anderen Systemen noch nicht.
 2. **Echtes Moonlight fehlt** beim zweiten Aufnahmekanal, bei den Profilen pro Gerät, den versteckten Apps, der Host-Rolle
    mit mehreren Geräten und bei Touch und Bewegung. Dort lief nur der Testclient.
 3. **Andere Firmware:** Nur 13.00 und 10.20 sind geprüft (Checkliste in `docs/firmware-porting.md`). 9.60 hat einen
@@ -91,6 +92,21 @@ Issue 36“) und ein Debug-Build in jedem Release („Debug-Build (PR 29) zusamm
     Store nicht eigens installiert worden.
 
 ## Neuere Nachweise
+
+### Konsolenmenüs mit echtem Moonlight, PR 38 (2026-11-09, 13.00, Stand `db5b258`)
+
+Moonlight 6.2.0 für Linux (offizielles AppImage, SHA256 wie auf GitHub) headless in Docker unter Xvfb, Software-Dekodierung,
+ein virtueller Xbox-360-Controller über uinput, den Moonlight als Gamepad an den Host gibt (`pads=1`). Per PIN gekoppelt
+(`devicename=roth`), das Gerät auf ein Profil gesetzt (`SETPROFILES`):
+- Menüs nur für ein anderes Profil: Die App-Liste des Geräts hat kein „PS5 Screen“. Moonlight startete es aus seiner
+  zwischengespeicherten Liste trotzdem; der Host lehnte mit 403 „This app is hidden on this device“ ab (Log: `PS5 Screen
+  refused: none of the device's profiles reaches the console's menus`), Moonlight zeigte den Fehler, kein Stream.
+- Dasselbe Gerät startet Mario 64 aus Moonlight: Der Controller sitzt im Profil des Geräts, PS zweimal gedrückt, beide Male
+  `PS or Create ignored, its profile doesn't reach the console's menus`; Mario 64 blieb vorne (Bild nach dem Stream).
+- Menüs für das Profil des Geräts: „PS5 Screen“ steht in der Liste und startet (200). PS auf dem Home-Bildschirm öffnete das
+  Kontrollzentrum. In Mario 64 brachte langes PS den Home-Bildschirm, das Spiel lief dahinter weiter.
+- Danach `SETMENUS unset`, Profil des Geräts zurückgesetzt, Release-Host 0.5.0 wieder gestartet.
+Nicht geprüft: Moonlight auf Windows, Android oder iOS, Tastatur (F1/F2, Druck, Pause), mehrere Geräte zugleich.
 
 ### HEVC 8 bit bei hoher Rate mit Bewegung, Issue 50 (2026-11-09, 13.00, Host 0.5.0, Testclient)
 
