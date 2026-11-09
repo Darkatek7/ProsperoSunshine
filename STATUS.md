@@ -93,6 +93,20 @@ Issue 36“) und ein Debug-Build in jedem Release („Debug-Build (PR 29) zusamm
 
 ## Neuere Nachweise
 
+### Release 0.6.0 auf der Konsole (2026-11-09, 13.00)
+
+App nach `/data/homebrew/PPSA47989` kopiert (`contentVersion` `01.000.025`) und neu registriert, sie öffnet mit „Ready to
+stream“. Host-ELF nach `/data/prosperosunshine/` und in den Autoload-Slot, mit `host_restart.elf` neu gestartet: `host 0.6.0
+(commit db0ac58b)`, Steuerport nur lokal. Testclient, Home-Bildschirm, je 30 s 1080p60:
+
+| Variante | H.264: Bilder, längste Lücke | HEVC: Bilder, längste Lücke |
+| --- | --- | --- |
+| Normal | 1791, 19 ms | 1792, 19 ms |
+| Debug (`0.6.0-debug`, Selbsttest `problems=0`) | 1795, 20 ms | 1790, 38 ms |
+
+Alle fehlerfrei dekodiert, ohne Tonfehler. Danach wieder die normale Variante über `host_restart.elf`. Beide Testsuiten,
+Host normal und debug, App normal und debug ohne Warnung; 25 Prüfsummen im Archiv stimmen, keine privaten Strings im ELF.
+
 ### Konsolenmenüs mit echtem Moonlight, PR 38 (2026-11-09, 13.00, Stand `db5b258`)
 
 Moonlight 6.2.0 für Linux (offizielles AppImage, SHA256 wie auf GitHub) headless in Docker unter Xvfb, Software-Dekodierung,
