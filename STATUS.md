@@ -123,7 +123,13 @@ mit der 10.20 auch bei QP 24/28 in 1080p abbrach: HEVC 8 bit 1080p60 bei 14988, 
 bei 30988, 3840x2160 bei 62988, je 12 s. Überall 59,96–59,99 fps, längste Lücke 19–25 ms, ffmpeg fehlerfrei, kein
 `capture lost` im Host-Log. Branch `fix-50-hevc8-qp` (db5b258, Obergrenze 24/28 und eine Stufe gröber nach zwei schnellen
 Leseverlusten): beide Testsuiten, Normal- und Debug-Build ohne Warnung, als Testhost auf 13.00 HEVC 1080p, H.264 1080p
-und HEVC HDR 4K sauber (dort ohne Wirkung, Ratenfelder). Auf 10.20 noch ungeprüft.
+und HEVC HDR 4K sauber (dort ohne Wirkung, Ratenfelder).
+
+Auf 10.20 vom Melder bestätigt (PS5 Pro, Moonlight 6.2 für Windows, je etwa 12 s): Mit der Rauschseite in 1080p bei 30 und
+80 Mbit/s verlor der Stand `db5b258` den Read zweimal etwa 20 ms nach dem Öffnen, dann lief die dritte Öffnung mit 27/31 ohne
+weitere Verluste (101–108 Mbit/s, auch über 30 s); jeder neue Stream begann wieder bei 24/28. Die Seite in 4K und ein
+bewegter Clip in 1080p blieben bei 24/28 ohne Verlust (166–170 und 32–36 Mbit/s). Offen: Bei 27/31 kamen mit 30 Mbit/s
+angefragt rund 104 Mbit/s, mit 12 Mbit/s am Morgen rund 49; die angefragte Rate wirkt also noch auf etwas anderes als den QP.
 
 ### Browser als Client über moonlight-web-stream (2026-11-08, 13.00, Host 0.5.0)
 
