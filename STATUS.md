@@ -102,6 +102,13 @@ je 15 s, Rate laut Host-Log: HEVC 1080p60 bei 22988 kbit/s zweimal (geliefert 19
 im Host-Log. Auf 13.00 setzt der Host keinen QP (Ratenfelder), der Fehler hängt also am QP-Pfad von 10.x oder an 10.x
 selbst. Nicht geprüft: echtes Moonlight, ein Spiel mit 60 fps Bewegung.
 
+Zweite Gegenprobe am selben Tag mit der Seite des Melders (480x270 Rauschen auf die Karte gestreckt, zwölf bewegte Kreise),
+mit der 10.20 auch bei QP 24/28 in 1080p abbrach: HEVC 8 bit 1080p60 bei 14988, 22988 (zweimal) und 62988 kbit/s, 2560x1440
+bei 30988, 3840x2160 bei 62988, je 12 s. Überall 59,96–59,99 fps, längste Lücke 19–25 ms, ffmpeg fehlerfrei, kein
+`capture lost` im Host-Log. Branch `fix-50-hevc8-qp` (db5b258, Obergrenze 24/28 und eine Stufe gröber nach zwei schnellen
+Leseverlusten): beide Testsuiten, Normal- und Debug-Build ohne Warnung, als Testhost auf 13.00 HEVC 1080p, H.264 1080p
+und HEVC HDR 4K sauber (dort ohne Wirkung, Ratenfelder). Auf 10.20 noch ungeprüft.
+
 ### Browser als Client über moonlight-web-stream (2026-11-08, 13.00, Host 0.5.0)
 
 moonlight-web-stream v2.10.0 in Docker auf einem Linux-Rechner im LAN, als Moonlight-Client per PIN über `PIN` gepairt,
