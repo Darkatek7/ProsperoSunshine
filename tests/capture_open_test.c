@@ -568,6 +568,15 @@ int main(void)
     fake_log[0] = 0;
     set_switches(0, 0, 0, 1);
     assert(logged("experimental switches=none set=bitrate firmware=0x10400000\n"));
+    // HEVC 8 bit stops at 24/28 (issue 50); HEVC 10 bit goes on to 21/25.
+    setup(0x10200000u, 1, 1, 0, 1, 0, 4);
+    ps_capture_set_opening_bitrate(22988000, 25746000);
+    assert(open_and_close() == 0);
+    assert(record_u32(0xc4) == 24 && record_u32(0xc8) == 28);
+    setup(0x10200000u, 1, 1, 0, 1, 1, 4);
+    ps_capture_set_opening_bitrate(22988000, 25746000);
+    assert(open_and_close() == 0);
+    assert(record_u32(0xc4) == 21 && record_u32(0xc8) == 25);
 
     // The wait for the resource: which of three endings it was, how long it took, and who else is active.
     fake_active[0] = 175;

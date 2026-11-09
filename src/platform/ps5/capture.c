@@ -342,7 +342,7 @@ void ps_capture_build_config(uint8_t *p, const ps_capture_video_config *c, uint3
     } else {
         // No rate fields below 11: the encoder's QP follows the client's bitrate instead (encoder_qp.h).
         const uint32_t average = c->average;
-        const ps_qp qp = ps_qp_for_bitrate(average);
+        const ps_qp qp = ps_qp_for_bitrate(average, c->codec == 1 && !c->ten_bit);
         u32(p, ps_qp_offset(shift), qp.idr);
         u32(p, ps_qp_offset(shift) + 4, qp.other);
         const uint32_t firmware = kernel_get_fw_version();
