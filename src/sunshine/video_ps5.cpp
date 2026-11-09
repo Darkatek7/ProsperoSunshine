@@ -466,6 +466,7 @@ void capture(safe::mail_t mail, config_t config, stream::session_t *channel_data
         prospero::EncodedFrame frame;
         prospero::CaptureSession::Descriptor desc{};
         bool lost = false;  // the session could not be reopened: nothing to hand over
+        uint32_t qp_coarser_logged = 0;
         // Moonlight asks for an IDR after loss; Avcap2 delivers one within 2-3 frames (R1).
         while (!shutdown_event->peek()) {
             bool keyframe = false;
@@ -517,6 +518,11 @@ void capture(safe::mail_t mail, config_t config, stream::session_t *channel_data
                                 << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() -
                                                                                          lost_at).count()
                                 << " ms"sv;
+                if (const auto coarser = ps_capture_slot_qp_coarser(slot); coarser != qp_coarser_logged) {
+                    qp_coarser_logged = coarser;
+                    BOOST_LOG(warning) << "PS5 capture: the encoder lost the picture right after opening, QP "sv << coarser
+                                       << (coarser == 1 ? " step"sv : " steps"sv) << " coarser for this stream"sv;
+                }
                 check_fallback();
                 continue;
             }

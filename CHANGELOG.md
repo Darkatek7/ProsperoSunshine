@@ -30,6 +30,13 @@
   takes. A game with a 1080p output (Black Myth: Wukong on 10.20) does this when it's launched from Moonlight at 4K. While
   a title starts or closes and the output has no mode yet, the reopens wait for it as before, now for every mode, not only
   below 1080p.
+- **10.x: HEVC without HDR no longer loses the capture in a loop at 20 Mbit/s and above** (issue 50). Firmware 10.x has
+  no rate fields, so the host sets the encoder's QP from the client's bitrate. On its finest step, 21/25, HEVC 8 bit with
+  a moving picture failed every read shortly after each open (`capture lost (4), reopening`), and the stream often died.
+  HEVC 8 bit now stops at 24/28, which held at 1440p and 4K and with a moving clip at 1080p (39 to 140 Mbit/s in the
+  reporter's runs). Animated noise at 1080p still lost it at 24/28, so when two opens of a stream in a row lose the read
+  that way within 120 frames, the stream's next opens go one QP step coarser (up to 30/34; `sunshine.log` says so once per
+  step). H.264 and HEVC HDR keep 21/25; 13.00 is unaffected.
 
 ## 0.5.0 (2026-11-07)
 

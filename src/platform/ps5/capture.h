@@ -70,6 +70,8 @@ typedef struct {
     int resource;                                 // ResourceArbitrator id, cfg+0x28
     // 10.x, H.264: 1 leaves out the slice fields (cfg+0x40/0x44/0x48), after the firmware refused them once.
     int no_slices;
+    // 10.x: QP steps coarser than the bitrate gives (encoder_qp.h), after reads failed right after opening (issue 50).
+    uint32_t qp_coarser;
 } ps_capture_video_config;
 void ps_capture_build_config(uint8_t *record, const ps_capture_video_config *config, uint32_t output, int variant);
 ptrdiff_t ps_capture_record_shift(void);
@@ -116,6 +118,8 @@ int ps_capture_slot_set_codec(int slot, uint32_t codec);
 void ps_capture_slot_set_ten_bit(int slot, uint32_t ten_bit);
 void ps_capture_slot_set_opening_bitrate(int slot, uint32_t average, uint32_t peak);
 uint32_t ps_capture_slot_opening_average(int slot);
+// 10.x: how many QP steps coarser this stream's opens go after reads failed right after opening (issue 50); 0 elsewhere.
+uint32_t ps_capture_slot_qp_coarser(int slot);
 uint32_t ps_capture_slot_video_resolution(int slot);
 int ps_capture_slot_fall_back_mode(int slot);
 void ps_capture_slot_set_reopening(int slot, int on);

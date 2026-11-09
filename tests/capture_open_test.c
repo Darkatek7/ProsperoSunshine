@@ -68,6 +68,23 @@ static int read_fails(const char *step, const uint8_t *record)
     (void)record;
     return !strcmp(step, "read") ? START_FAILED : 0;
 }
+static int qp_too_fine(const char *step, const uint8_t *record)
+{
+    (void)record;
+    return !strcmp(step, "read") ? (int)0x8195000d : 0;
+}
+// Opens a session, reads `frames` frames, then once with `fail` deciding the read, and closes it.
+static void open_read_close(int frames, int (*fail)(const char *, const uint8_t *))
+{
+    ps_capture *session = NULL;
+    assert(ps_capture_open_or_fall_back(&session) == 0);
+    static uint8_t buffer[64], descriptor[0x88];
+    for (int i = 0; i < frames; i++) assert(ps_capture_read2(session, buffer, sizeof buffer, descriptor) == 16);
+    fake_decide = fail;
+    (void)ps_capture_read2(session, buffer, sizeof buffer, descriptor);
+    fake_decide = NULL;
+    ps_capture_close(session);
+}
 static int large_fails(const char *step, const uint8_t *record)
 {
     uint32_t resolution;
@@ -568,6 +585,45 @@ int main(void)
     fake_log[0] = 0;
     set_switches(0, 0, 0, 1);
     assert(logged("experimental switches=none set=bitrate firmware=0x10400000\n"));
+    // HEVC 8 bit stops at 24/28 (issue 50); HEVC 10 bit goes on to 21/25.
+    setup(0x10200000u, 1, 1, 0, 1, 0, 4);
+    ps_capture_set_opening_bitrate(22988000, 25746000);
+    assert(open_and_close() == 0);
+    assert(record_u32(0xc4) == 24 && record_u32(0xc8) == 28);
+    setup(0x10200000u, 1, 1, 0, 1, 1, 4);
+    ps_capture_set_opening_bitrate(22988000, 25746000);
+    assert(open_and_close() == 0);
+    assert(record_u32(0xc4) == 21 && record_u32(0xc8) == 25);
+    // Two opens in a row whose read fails with 0x8195000d before 120 frames: the next opens go one step coarser, up to 30/34.
+    setup(0x10200000u, 1, 1, 0, 1, 0, 4);
+    ps_capture_set_opening_bitrate(22988000, 25746000);
+    open_read_close(5, qp_too_fine);
+    assert(ps_capture_slot_qp_coarser(0) == 0 && record_u32(0xc4) == 24);
+    open_read_close(0, qp_too_fine);
+    assert(ps_capture_slot_qp_coarser(0) == 1 && logged("QP 1 step coarser from the next open"));
+    assert(open_and_close() == 0);
+    assert(record_u32(0xc4) == 27 && record_u32(0xc8) == 31 && logged("(coarser after failed reads)"));
+    // Another error between them, or a loss after 120 frames, starts the count again.
+    open_read_close(3, qp_too_fine);
+    open_read_close(3, read_fails);
+    open_read_close(3, qp_too_fine);
+    open_read_close(130, qp_too_fine);
+    assert(ps_capture_slot_qp_coarser(0) == 1);
+    for (int i = 0; i < 6; i++) open_read_close(0, qp_too_fine);
+    assert(ps_capture_slot_qp_coarser(0) == 3);
+    assert(open_and_close() == 0);
+    assert(record_u32(0xc4) == 30 && record_u32(0xc8) == 34);
+    // A new stream starts at its bitrate's step again.
+    ps_capture_set_opening_bitrate(22988000, 25746000);
+    assert(ps_capture_slot_qp_coarser(0) == 0);
+    assert(open_and_close() == 0);
+    assert(record_u32(0xc4) == 24);
+    // 13.00 takes rate fields: the same failures change nothing.
+    setup(0x13000040u, 1, 1, 0, 1, 0, 4);
+    ps_capture_set_opening_bitrate(22988000, 25746000);
+    open_read_close(0, qp_too_fine);
+    open_read_close(0, qp_too_fine);
+    assert(ps_capture_slot_qp_coarser(0) == 0);
 
     // The wait for the resource: which of three endings it was, how long it took, and who else is active.
     fake_active[0] = 175;

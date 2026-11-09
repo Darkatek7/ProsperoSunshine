@@ -3,7 +3,7 @@
 // bit depth and bitrate below, from configure() and as OpenVideo receives them, hashed and compared with
 // tests/capture_records.golden, taken from the code before the switches existed. Only 10.x's lines were taken again
 // when its QP came to follow the bitrate (cfg+0xc4 and +0xc8, platform/ps5/encoder_qp.h), and 10.x's H.264 lines when
-// the slice fields came (cfg+0x40, +0x44, +0x48). 13.40's lines are 13.60's, whose record it takes since GitHub issue 14.
+// the slice fields came (cfg+0x40, +0x44, +0x48), and their HEVC 8 bit lines again when it stopped at QP 24/28 (issue 50). 13.40's lines are 13.60's, whose record it takes since GitHub issue 14.
 // 9.60's lines came with its own record and QP fields, from the firmware probe.
 // `--hashes` prints those lines, `--full` the records themselves, for a byte-wise comparison with another build.
 #include "fake_avcap.h"
@@ -51,7 +51,7 @@ int main(int argc, char **argv)
                         CONFIGURE(configured, 0x13c);
                         // The probes' builder with the same values must write the same record.
                         const ps_capture_video_config explicit_values = {resolution, timing, codec, ten_bit, average, average / 100 * 112,
-                                                                         atomic_load(&resource_id[0]), 0};
+                                                                         atomic_load(&resource_id[0]), 0, 0};
                         uint8_t built[0x2e8] = {0};
                         ps_capture_build_config(built, &explicit_values, 0x13c, PS_EXP_STANDARD);
                         if (memcmp(built, configured, sizeof built)) {
