@@ -27,6 +27,11 @@ int main() {
             assert(qp.idr >= 1 && qp.other <= 51 && qp.other > qp.idr);  // 52 and above make Start fail
             assert(qp.idr >= ps_qp_for_bitrate(bitrate, 0).idr);
         }
-    std::puts("PASS: encoder QP on 10.x (from the client's bitrate, edges, never coarser for more, HEVC 8 bit at most 24/28)");
+    // Coarser steps after failed reads (issue 50): three QP apart, never past 30/34, the gap to the others kept.
+    const auto step = [](uint32_t idr, uint32_t steps) { return ps_qp_coarser(ps_qp{idr, idr + 4}, steps); };
+    assert(step(24, 0).idr == 24 && step(24, 1).idr == 27 && step(24, 1).other == 31 && step(24, 2).idr == 30);
+    assert(step(24, 3).idr == 30 && step(21, 3).idr == 30 && step(30, 1).idr == 30 && step(30, 1).other == 34);
+    assert(step(21, 1).idr == 24 && step(21, 1).other == 28 && step(27, 9).idr == 30);
+    std::puts("PASS: encoder QP on 10.x (from the client's bitrate, edges, never coarser for more, HEVC 8 bit at most 24/28, coarser steps)");
     return 0;
 }

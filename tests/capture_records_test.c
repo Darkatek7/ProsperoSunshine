@@ -51,7 +51,7 @@ int main(int argc, char **argv)
                         CONFIGURE(configured, 0x13c);
                         // The probes' builder with the same values must write the same record.
                         const ps_capture_video_config explicit_values = {resolution, timing, codec, ten_bit, average, average / 100 * 112,
-                                                                         atomic_load(&resource_id[0]), 0};
+                                                                         atomic_load(&resource_id[0]), 0, 0};
                         uint8_t built[0x2e8] = {0};
                         ps_capture_build_config(built, &explicit_values, 0x13c, PS_EXP_STANDARD);
                         if (memcmp(built, configured, sizeof built)) {

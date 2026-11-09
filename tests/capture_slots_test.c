@@ -62,7 +62,7 @@ int main(void)
                         // configure() agrees with what OpenVideo got, and with the probes' builder.
                         uint8_t configured[0x2e8] = {0}, built[0x2e8] = {0};
                         configure(1, configured, 0x13c, PS_EXP_STANDARD);
-                        const ps_capture_video_config values = {resolution, timing, codec, ten_bit, 20000000, 20000000 / 100 * (codec ? 110 : 112), 175, 0};
+                        const ps_capture_video_config values = {resolution, timing, codec, ten_bit, 20000000, 20000000 / 100 * (codec ? 110 : 112), 175, 0, 0};
                         ps_capture_build_config(built, &values, 0x13c, PS_EXP_STANDARD);
                         assert(!memcmp(configured, built, sizeof built));
                         if (!(codec == 1 && record_shift() >= 0)) assert(!memcmp(configured, fake_record, sizeof configured));

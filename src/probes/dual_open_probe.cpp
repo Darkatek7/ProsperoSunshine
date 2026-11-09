@@ -322,7 +322,7 @@ void open_channel(const calls &c, channel &ch, int output) {
     const uint32_t average = s.mbit * 1000000u;
     // Peak as the host's spikes use it: HEVC 1.1, H.264 1.12 times the average.
     const ps_capture_video_config values = {s.resolution, 1, s.codec, 0, average, s.codec ? average / 100 * 110 : average / 100 * 112,
-                                            s.resource, 0};
+                                            s.resource, 0, 0};
     uint8_t config[0x2e8] = {};
     ps_capture_build_config(config, &values, static_cast<uint32_t>(output), PS_EXP_STANDARD);
     if (s.codec == 1 && ps_capture_record_shift() >= 0) {

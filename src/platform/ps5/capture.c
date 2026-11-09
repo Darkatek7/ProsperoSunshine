@@ -24,6 +24,8 @@
 static _Atomic int resource_id[PS_CAPTURE_SLOTS] = {180, 175}, session_resource[PS_CAPTURE_SLOTS] = {180, 175};
 #define AGAIN ((int)0x81950002)
 #define RESOURCE_NOT_ACTIVE ((int)0x81950008)
+// What ReadVideo2 returned on 10.20 shortly after each open while the encoder's QP was too fine for the picture (issue 50).
+#define READ_QP_TOO_FINE ((int)0x8195000d)
 // Slices per H.264 frame asked of 10.x (cfg+0x44), well below what the decoders take.
 #define PS_H264_SLICES 4
 #define LOG(...) ps_diag_log("ProsperoSunshine: capture " __VA_ARGS__)
@@ -59,6 +61,7 @@ struct ps_capture {
     uint8_t memory[0x40];
     int has_memory;
     uint32_t mode[7];  // what mode_snapshot() returned at open
+    uint32_t frames;   // read since the open
 };
 
 // Callback ABI currently has no verified instance context, so resource ownership
@@ -118,12 +121,39 @@ static _Atomic uint32_t video_resolution[PS_CAPTURE_SLOTS] = {4, 4}, video_timin
 static _Atomic int last_open_rc = 0;
 
 static _Atomic uint32_t opening_average[PS_CAPTURE_SLOTS] = {6000000, 6000000}, opening_peak[PS_CAPTURE_SLOTS];
+// 10.x: how many QP steps coarser a stream's opens go (ps_qp_coarser), and how many of its opens in a row lost the read with
+// READ_QP_TOO_FINE before QUICK_LOSS_FRAMES frames. A new stream starts at its bitrate's QP again.
+static ptrdiff_t record_shift(void);
+static _Atomic uint32_t qp_coarser[PS_CAPTURE_SLOTS];
+static _Atomic int quick_losses[PS_CAPTURE_SLOTS];
+#define QUICK_LOSS_FRAMES 120u
 
 void ps_capture_slot_set_opening_bitrate(int slot, uint32_t average, uint32_t peak)
 {
     if (!valid_slot(slot)) return;
     atomic_store(&opening_average[slot], average);
     atomic_store(&opening_peak[slot], peak);
+    atomic_store(&qp_coarser[slot], 0);
+    atomic_store(&quick_losses[slot], 0);
+}
+
+uint32_t ps_capture_slot_qp_coarser(int slot) { return valid_slot(slot) ? atomic_load(&qp_coarser[slot]) : 0; }
+
+// A read that failed with READ_QP_TOO_FINE before QUICK_LOSS_FRAMES frames, twice in a row on firmware without rate fields:
+// the next opens of this stream take the next coarser QP step.
+static void count_quick_loss(ps_capture *s, int rc)
+{
+    if (rc != READ_QP_TOO_FINE || record_shift() >= 0 || s->frames >= QUICK_LOSS_FRAMES) {
+        atomic_store(&quick_losses[s->slot], 0);
+        return;
+    }
+    if (atomic_fetch_add(&quick_losses[s->slot], 1) + 1 < 2) return;
+    atomic_store(&quick_losses[s->slot], 0);
+    const uint32_t steps = atomic_load(&qp_coarser[s->slot]);
+    if (steps >= 3) return;
+    atomic_store(&qp_coarser[s->slot], steps + 1);
+    SLOG(s->slot, "ReadVideo2 rc=%#x twice in a row within %u frames of an open: QP %u step%s coarser from the next open\n",
+         (unsigned)rc, QUICK_LOSS_FRAMES, steps + 1, steps ? "s" : "");
 }
 
 void ps_capture_set_opening_bitrate(uint32_t average, uint32_t peak) { ps_capture_slot_set_opening_bitrate(0, average, peak); }
@@ -342,12 +372,13 @@ void ps_capture_build_config(uint8_t *p, const ps_capture_video_config *c, uint3
     } else {
         // No rate fields below 11: the encoder's QP follows the client's bitrate instead (encoder_qp.h).
         const uint32_t average = c->average;
-        const ps_qp qp = ps_qp_for_bitrate(average, c->codec == 1 && !c->ten_bit);
+        const ps_qp qp = ps_qp_coarser(ps_qp_for_bitrate(average, c->codec == 1 && !c->ten_bit), c->qp_coarser);
         u32(p, ps_qp_offset(shift), qp.idr);
         u32(p, ps_qp_offset(shift) + 4, qp.other);
         const uint32_t firmware = kernel_get_fw_version();
-        LOG("firmware %#x: no rate fields, QP %u/%u at %#zx for %u kbit/s%s\n", firmware, qp.idr, qp.other, ps_qp_offset(shift),
-            average / 1000, firmware < 0x9000000u ? " (record of 9.60, guessed below 9)" : "");
+        LOG("firmware %#x: no rate fields, QP %u/%u at %#zx for %u kbit/s%s%s\n", firmware, qp.idr, qp.other, ps_qp_offset(shift),
+            average / 1000, c->qp_coarser ? " (coarser after failed reads)" : "",
+            firmware < 0x9000000u ? " (record of 9.60, guessed below 9)" : "");
     }
     if (shift < 0 && c->codec == 0 && !c->no_slices) {
         // 10.x cuts H.264 into one slice per macroblock row, 34 at 1080p, and the hardware decoders on Windows take at most
@@ -414,6 +445,7 @@ static void configure(int slot, uint8_t *p, uint32_t mode, int variant)
         .peak = atomic_load(&opening_peak[slot]),
         .resource = atomic_load(&session_resource[slot]),
         .no_slices = atomic_load(&slices_refused),
+        .qp_coarser = atomic_load(&qp_coarser[slot]),
     };
     ps_capture_build_config(p, &c, mode, variant);
     if (atomic_load(&override_field)) u32(p, atomic_load(&override_field), atomic_load(&override_value));
@@ -1080,7 +1112,13 @@ int ps_capture_read2(ps_capture *s, void *destination, size_t capacity, uint8_t 
     u64(descriptor, 0, 0x88);
     int rc = s->read2(s->handle, destination, capacity, descriptor, 1);
     if (rc == AGAIN || rc == 0) return 0;
-    if (rc < 0 || (size_t)rc > capacity) { atomic_store(&failure_rc[s->slot], rc); SLOG(s->slot, "ReadVideo2 rc=%#x\n", rc); return rc < 0 ? rc : PS_CAPTURE_ERROR; }
+    if (rc < 0 || (size_t)rc > capacity) {
+        atomic_store(&failure_rc[s->slot], rc);
+        SLOG(s->slot, "ReadVideo2 rc=%#x\n", rc);
+        count_quick_loss(s, rc);
+        return rc < 0 ? rc : PS_CAPTURE_ERROR;
+    }
+    if (s->frames < QUICK_LOSS_FRAMES && ++s->frames == QUICK_LOSS_FRAMES) atomic_store(&quick_losses[s->slot], 0);
     return rc;
 }
 
