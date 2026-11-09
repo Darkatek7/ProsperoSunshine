@@ -92,6 +92,16 @@ Issue 36“) und ein Debug-Build in jedem Release („Debug-Build (PR 29) zusamm
 
 ## Neuere Nachweise
 
+### HEVC 8 bit bei hoher Rate mit Bewegung, Issue 50 (2026-11-09, 13.00, Host 0.5.0, Testclient)
+
+Gegenprobe zu Issue 50 (auf 10.20 verliert HEVC 8 bit auf der QP-Stufe 21/25 mit Bewegung die Capture). Bewegte Seite in
+der Browser-Karte (Rauschen auf der halben Fläche, bewegte Formen, rund 25 Bilder/s), Testclient per `--network host`,
+je 15 s, Rate laut Host-Log: HEVC 1080p60 bei 22988 kbit/s zweimal (geliefert 19,1 und 19,3 Mbit/s) und bei 62988
+(49,5); HEVC HDR 1080p 22988 (15,6); H.264 1080p 22988 (19,4); HEVC 3840x2160 bei 62988 (51,9); HEVC 2560x1440 bei
+30988 (25,4). Überall 59,94–59,96 fps, längste Lücke 21–26 ms, ffmpeg fehlerfrei, kein `capture lost` und kein Reopen
+im Host-Log. Auf 13.00 setzt der Host keinen QP (Ratenfelder), der Fehler hängt also am QP-Pfad von 10.x oder an 10.x
+selbst. Nicht geprüft: echtes Moonlight, ein Spiel mit 60 fps Bewegung.
+
 ### Browser als Client über moonlight-web-stream (2026-11-08, 13.00, Host 0.5.0)
 
 moonlight-web-stream v2.10.0 in Docker auf einem Linux-Rechner im LAN, als Moonlight-Client per PIN über `PIN` gepairt,

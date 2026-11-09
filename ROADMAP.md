@@ -39,6 +39,12 @@ nur ein erfolgreicher Build.
    H.264 auf 10.x mit Moonlight für Windows nachprüfen und README und `STATUS.md` anpassen. Das Feld, das auf 10.x die
    Slice-Zahl setzt, bleibt eine Alternative (eine Sonde, die freie Wörter im Encoder-Block durchprobiert, oder
    SceRemotePlay von 10.20). Bis dahin HEVC empfehlen.
+   Größere Modi auf 10.x (Issue #39): Ein Titel mit 1080p-Ausgabe (`video out mode 0x44`, VLC, Black Myth: Wukong) beendet
+   seit dem Fix einen laufenden 1440p/4K-Stream. Startet die Session selbst den Titel, sollte die erste Capture erst öffnen,
+   wenn er die Ausgabe hat (`0x13c` → `0` → `0x44` nach 3,5–3,7 s; Zeitlimit für Titel, die `0x13c` behalten), dann
+   beginnt der Stream gleich in 1080p. Außerdem die abgelehnte Ausgabe merken, damit der nächste Stream ohne den
+   Umweg über den Arbitrator (bis 6,4 s) direkt 1080p öffnet. Skalieren auf die Stream-Größe bräuchte ein Feld im
+   Capture-Record, das nicht bekannt ist.
 7. **Ruhemodus** mit offenem Spiel und laufendem Stream: Der Neustart der Dienste endet dort nicht in `host ready`
    (`docs/status-archive.md`, „Stand 30. Oktober 2026“). Das ist zu klären. Offen sind außerdem das Aufwecken per Controller
    und der einmalige Hänger im ersten Test. Wecken aus Moonlight geht nicht (`docs/status-archive.md`, „Wecken aus

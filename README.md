@@ -395,9 +395,11 @@ address.
   however much the client asks for, because 13.00 won't start them with more. Every other firmware streams 1080p whatever
   the request, and 10.20 does so for requests above 1080p, unless you turn on the
   [experimental switches](#testing-other-firmware). The frame rate follows the client: 30 or 60 fps.
-- The console refuses 1440p and 4K capture in some titles (seen in a Mario 64 port and Teardown; GTA III works). The stream
-  then runs at 1080p, also when such a title starts during a stream, and stays there until the next stream. The same should
-  apply when the console's video output is smaller than the request; that is not tested yet.
+- The console refuses 1440p and 4K capture in some titles (seen in a Mario 64 port and Teardown; GTA III works), and on 10.x
+  while an app or game with a 1080p video output is in front (VLC for PS5, Black Myth: Wukong). A stream started then runs
+  at 1080p. When such a title takes over during a 1440p or 4K stream, including one launched from Moonlight, the host ends
+  the stream rather than change its size, which Moonlight for Windows can't follow: Moonlight shows "Connection
+  terminated", and starting the stream again gets 1080p.
 - At 4K the console can show "Gameplay recording paused because you entered a blocked scene" shortly after the stream starts
   (seen in GTA III). The stream keeps running.
 - HEVC and HDR are offered on firmware 13.00 and 10.20, elsewhere H.264 unless you turn on the
@@ -479,6 +481,9 @@ address.
 - **Black or paused picture for a moment:** expected when a game starts or exits (see limits).
 - **Controller works on the home screen but not in an app:** turn off other controllers connected to the console (see
   limits).
+- **The TV switches to the PS5 when a stream starts:** the console sends HDMI-CEC One-Touch Play when the host adds the
+  stream's controller, as it does for a real controller turning on (issue 41). Turn off Settings → System → HDMI →
+  **Enable One-Touch Play**; HDMI Device Link can stay on. A real controller then won't switch the TV either.
 - **Other firmware:** 13.00 and 10.20 are tested. On other versions capture is refused if the system-library lookups fail;
   if they succeed it runs, untested. The kernel log says which case applies. See [Testing other firmware](#testing-other-firmware).
 - **Diagnosis:** the app's **Diagnostics** page collects a report for a bug report, without addresses, device names, ids or
