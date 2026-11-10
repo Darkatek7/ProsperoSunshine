@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "input/keyboard_map.hpp"
 #include <cassert>
+#include <climits>
 #include <iostream>
 using namespace prospero;
 
@@ -70,6 +71,15 @@ int main() {
     assert(wheel.add(-30) == 0 && wheel.add(-100) == -1);
     wheel.clear();
     assert(wheel.add(120 * 200) == 127 && wheel.add(0) == 73);
+    // A client that sends the largest distance in every report scrolls at full speed, and what waits stays bounded (the
+    // count would overflow after about 122 000 such reports otherwise).
+    wheel.clear();
+    for (int i = 0; i < 200'000; i++) assert(wheel.add(32767) == 127);
+    int waiting = 0;
+    for (int steps; (steps = wheel.add(0)) != 0;) waiting += steps;
+    assert(waiting == (32767 - 127 * 120) / 120);
+    wheel.clear();
+    assert(wheel.add(INT_MAX) == 127 && wheel.add(INT_MIN) == -127 && wheel.add(INT_MIN) == -127);
 
     std::cout << "PASS: keyboard and mouse map (keys, modifiers, ASCII, held keys, buttons, wheel steps)\n";
 }
