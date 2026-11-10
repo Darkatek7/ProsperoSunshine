@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **A device gets its profile back after 45 s** (issue 52). When a player left and their profile stayed signed in because
+  it was in front on the console, most often because their game was still open there, the host forgot it had signed it
+  in. Coming back later than 45 s, their controller could only watch, and the console asked to sign the profile out
+  first. Now the host keeps that profile for the device, which can join it again at any time, until someone signs it out
+  on the console. A profile someone signed in on the console is still blocked, as before.
+
 ## 0.6.0 (2026-11-09)
 
 ### Added

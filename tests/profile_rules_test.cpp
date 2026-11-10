@@ -27,8 +27,9 @@ int main() {
     // Signing out: never someone else's, nor one a controller of the host sits in.
     assert(sign_out({false, false, Answer::no, Answer::no}) == SignOut::never);
     assert(sign_out({true, true, Answer::no, Answer::no}) == SignOut::never);
-    // The profile in front stays, for whoever sits at the TV.
-    assert(sign_out({true, false, Answer::yes, Answer::no}) == SignOut::never);
+    // The profile in front stays signed in, kept for its device (issue 52) and for whoever sits at the TV.
+    assert(sign_out({true, false, Answer::yes, Answer::no}) == SignOut::kept);
+    assert(sign_out({true, false, Answer::yes, Answer::yes}) == SignOut::kept);
     // Not on a guess: the console didn't say what is in front, or who a controller the console asked about plays as.
     assert(sign_out({true, false, Answer::unknown, Answer::no}) == SignOut::later);
     assert(sign_out({true, false, Answer::no, Answer::unknown}) == SignOut::later);
@@ -36,6 +37,41 @@ int main() {
     assert(sign_out({true, false, Answer::no, Answer::yes}) == SignOut::later);
     assert(sign_out({true, false, Answer::no, Answer::no}) == SignOut::now);
     static_assert(sign_out_grace >= std::chrono::seconds(30) && sign_out_grace <= std::chrono::seconds(60));
+
+    // The host's profiles (issue 52): one kept as it was in front can be joined again, but isn't signed out by the host.
+    {
+        HostProfiles host;
+        host.add(0x1b1d9381);
+        host.add(0x1b1d9382);
+        host.add(0x1b1d9381);
+        assert((host.signed_in == std::vector<uint32_t>{0x1b1d9381, 0x1b1d9382}));
+        assert(host.knows(0x1b1d9381) && host.signed_in_by_host(0x1b1d9381) && !host.knows(0x1b1d9383));
+        host.keep(0x1b1d9381);
+        assert((host.signed_in == std::vector<uint32_t>{0x1b1d9382}));
+        assert((host.kept == std::vector<uint32_t>{0x1b1d9381}));
+        assert(host.knows(0x1b1d9381) && !host.signed_in_by_host(0x1b1d9381));
+        // Its device comes back: free to join, as a profile the host signed in.
+        assert(join_block({false, Answer::yes, host.knows(0x1b1d9381)}) == JoinBlock::none);
+        // Keeping one the host didn't sign in, or one already kept, changes nothing.
+        host.keep(0x1b1d9383);
+        host.keep(0x1b1d9381);
+        assert((host.kept == std::vector<uint32_t>{0x1b1d9381}) && !host.knows(0x1b1d9383));
+        // A controller sits in it: the host's again, signed out after it leaves.
+        host.seat(0x1b1d9381);
+        assert(host.kept.empty() && host.signed_in_by_host(0x1b1d9381));
+        // Seating one that isn't kept changes nothing.
+        host.seat(0x1b1d9383);
+        assert(!host.knows(0x1b1d9383));
+        // Signed out on the console: forgotten, so someone else signing it in later blocks the device again.
+        host.keep(0x1b1d9382);
+        host.forget(0x1b1d9382);
+        assert(!host.knows(0x1b1d9382));
+        assert(join_block({false, Answer::yes, host.knows(0x1b1d9382)}) == JoinBlock::signed_in_elsewhere);
+        // Signed in anew by the host while kept: the host's again.
+        host.keep(0x1b1d9381);
+        host.add(0x1b1d9381);
+        assert(host.kept.empty() && host.signed_in_by_host(0x1b1d9381));
+    }
 
     // Keyboard and mouse: without a stream behind it, only a release, and only on the shared devices.
     assert(kbm_route(false, false, false, false) == KbmRoute::none);

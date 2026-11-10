@@ -93,6 +93,20 @@ Issue 36“) und ein Debug-Build in jedem Release („Debug-Build (PR 29) zusamm
 
 ## Neuere Nachweise
 
+### Profil nach 45 s zurück, Issue 52 (2026-11-10, 13.00, Testclient, nicht veröffentlicht)
+
+Testgerät mit einem Profil (ein zweites Konsolenprofil, vorher abgemeldet), `--no-script`, Home-Bildschirm:
+
+- PS 1,5 s gehalten: Der Host meldete das Profil an und setzte das Pad hinein, das Profil kam nach vorne (beim ersten
+  von zwei Versuchen nicht, dann wurde es nach 45 s abgemeldet). 45 s nach dem Streamende: „stays signed in, it is in
+  front on the console; its device may join it again“.
+- 55 s nach dem Streamende neu verbunden, ein Steuerkreuz-Druck: „attached in its device's profile“ ohne Hinweis. Mit 0.6.0
+  blieb das Pad hier nur Zuschauer (Issue 52, auf 10.20 gemessen).
+- Danach gilt wieder die normale Regel: das Profil des Besitzers nach vorne geholt, 45 s nach dem Ende abgemeldet (`rc 0`).
+- Ein kurzer PS-Druck (Kontrollzentrum) brachte das Profil auf 13.00 nicht nach vorne; es wurde nach 45 s abgemeldet.
+
+Unit-Tests (`profile_rules_test`) und Host-Build ohne Warnung. Danach wieder 0.6.0 über `host_restart.elf`.
+
 ### Release 0.6.0 auf der Konsole (2026-11-09, 13.00)
 
 App nach `/data/homebrew/PPSA47989` kopiert (`contentVersion` `01.000.025`) und neu registriert, sie öffnet mit „Ready to
