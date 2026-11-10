@@ -1964,9 +1964,8 @@ static void release_keyboard_ps(input_raw_t &input) {
 
 // Windows+Esc on the keys of a device that has a controller (the on-screen one of Moonlight for iPhone and iPad, say):
 // PS on its first controller, held while Esc is (Windows+Shift+Esc: ps_long_hold at least), with that controller's rules
-// for PS (its role, the console's menus), and
-// Esc doesn't reach the keyboard. Without a controller of the device Esc goes on as Esc. Returns whether the key was the
-// chord's. Caller holds input.mutex.
+// for PS (its role, the console's menus), and Esc doesn't reach the keyboard. Without a controller of the device Esc goes
+// on as Esc. Returns whether the key was the chord's. Caller holds input.mutex.
 static bool keyboard_ps(input_t &input, uint16_t vk, bool release) {
     const std::string cert = input_owner && *input_owner ? gamepad_owner(*input_owner) : std::string();
     if (cert.empty()) return false;

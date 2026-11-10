@@ -45,10 +45,10 @@ inline constexpr uint64_t half = 1ull << 42;
 
 // One profile per way of playing, so a game feels the way it does with keyboard and mouse on a PC. Every profile keeps
 // Enter ✕, Backspace ○, Esc Options (pause), Tab the touchpad (map and inventory in most PS5 games), F1 PS (Windows+Esc
-// too, and Windows+Shift+Esc holds it, keyboard_map.hpp's ps_chord) and F2 Create, and Ctrl+Backspace switches the pad to its device's next profile
-// (gamepad_map.hpp, switch_seat). None
-// uses Alt, so no profile can form Moonlight's Ctrl+Alt+Shift shortcuts. The key right of the space bar
-// held gives the menu keys (standard's with W A S D on the D-pad), for a game's menus.
+// too, and Windows+Shift+Esc holds it, keyboard_map.hpp's ps_chord) and F2 Create, and Ctrl+Backspace switches the pad to
+// its device's next profile (gamepad_map.hpp, switch_seat). None uses Alt, so no profile can form Moonlight's
+// Ctrl+Alt+Shift shortcuts. The key right of the space bar held gives the menu keys (standard's with W A S D on the
+// D-pad), for a game's menus.
 enum class Profile : uint8_t { standard, action, shooter, driving, fighting, platformer, sports };
 
 inline constexpr std::array<std::string_view, 7> profile_names = {"standard", "action",     "shooter", "driving",
