@@ -4,3 +4,5 @@ Dockerfile text eol=lf
 *.patch text eol=lf
 deps.lock text eol=lf
 *.golden text eol=lf
+# Fuzz seeds are bytes: a line ending in one is part of the input.
+tests/fuzz/corpus/** -text

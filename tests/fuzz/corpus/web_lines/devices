@@ -1,0 +1,4 @@
+OK 1111 1 1280x720@60 Steam Deck
+OK 2222 0 - Phone
+END
+\;name\;OK uuid=u1 address=172.17.0.4 codec=HEVC name=Deck 2

@@ -1,0 +1,2 @@
+[   5] ProsperoSunshine: capture RUNNING outcome=timeout value=-1 waited_ms=2000 list_rc=0 active=none
+\;OK uuid=u1 address=172.17.0.4 codec=HEVC hdr=1 mode=1920x1080@60 kbps=20000 secs=42 pads=1 role=capture channel=0 sent_kbps=18000 rtt_ms=4 recoveries=2 name=A B\;

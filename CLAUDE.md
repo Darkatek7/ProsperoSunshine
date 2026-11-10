@@ -28,11 +28,16 @@ Development runs on Linux with Docker, from the repository root. Build the SDK i
 docker run --rm -e PROSPERO_COMMIT=$(git rev-parse --short=8 HEAD) --mount type=bind,source="$PWD",target=/repo prosperosunshine-sdk:v0.45 bash scripts/build.sh   # host + probes -> out/
 docker run --rm -e PROSPERO_COMMIT=$(git rev-parse --short=8 HEAD) -e PROSPERO_DEBUG=1 --mount type=bind,source="$PWD",target=/repo prosperosunshine-sdk:v0.45 bash scripts/build.sh   # the debug flavor -> out/debug/
 docker run --rm --mount type=bind,source="$PWD",target=/repo prosperosunshine-sdk:v0.45 bash scripts/test.sh
+docker run --rm --mount type=bind,source="$PWD",target=/repo prosperosunshine-sdk:v0.45 bash scripts/fuzz.sh [seconds] [target ...]   # libFuzzer, 0 = replay the seeds
 ```
 
 `PROSPERO_COMMIT` names the commit the host reports; in a git worktree the container can't find it itself. On a machine with
 little RAM, add `--memory=6g --memory-swap=6g` to the build so that a memory spike stops the container, not the machine. On
 Windows, `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 [-Debug]` does the same.
+
+`scripts/fuzz.sh` fuzzes the portable parsers (`tests/fuzz/`, seeds in `tests/fuzz/corpus/<target>/`); CI runs it for 5 s per
+target. A crash leaves its input in `out/fuzz/crash-<target>-*` (reproduce with `out/fuzz/<target> <file>`): fix the bug, add
+a case to that file's unit test and move the input into the seeds. Don't edit the script while it runs.
 
 The app and its tests (the app bundles `out/prospero_sunshine.elf`, so build the host first). Build its image once with
 `docker build -t prosperosunshine-app:2 -f app/Dockerfile app`; the volume `prosperosunshine-app-cache` needs the ps5-opengl

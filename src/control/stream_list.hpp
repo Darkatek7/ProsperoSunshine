@@ -26,10 +26,12 @@ struct StreamFacts {
     int missing_frames = 0;  // frames the client reported lost (patch 0025)
 };
 
-// kbit/s from a count of bytes sent over some seconds; -1 when there's too little time to tell.
+// kbit/s from a count of bytes sent over some seconds; -1 when there's too little time to tell. A counter that jumped (a
+// difference of two that went back) gives the largest int, not a conversion that overflows.
 inline int sent_rate_kbps(unsigned long long bytes, double seconds) {
-    if (seconds < 0.5) return -1;
-    return static_cast<int>(static_cast<double>(bytes) * 8.0 / 1000.0 / seconds + 0.5);
+    if (!(seconds >= 0.5)) return -1;  // also NaN
+    const double rate = static_cast<double>(bytes) * 8.0 / 1000.0 / seconds + 0.5;
+    return rate >= 2147483647.0 ? 2147483647 : static_cast<int>(rate);
 }
 
 // A PS5 capture channel while a stream holds it.

@@ -55,6 +55,10 @@ int main() {
     assert(meta && meta->name == "Video" && !meta->game);
     meta = parse_param_json(param_json("Caf\\u00e9 \\ud83c\\udfae \\\"x\\\"", 0));
     assert(meta && meta->name == "Café 🎮 \"x\"");
+    // A surrogate escape that is not half of a pair becomes U+FFFD, not invalid UTF-8 for the app list's XML (found by
+    // tests/fuzz/titles_fuzz.cpp).
+    meta = parse_param_json(param_json("a\\ud800b\\udc00c\\ud800", 0));
+    assert(meta && meta->name == "a\xef\xbf\xbd" "b\xef\xbf\xbd" "c\xef\xbf\xbd");
     // The console's own copies end in zero bytes.
     meta = parse_param_json(param_json("Game", 0) + std::string(3, '\0'));
     assert(meta && meta->name == "Game");

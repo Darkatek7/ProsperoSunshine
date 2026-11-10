@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "control/stream_list.hpp"
 #include <cassert>
+#include <cmath>
 #include <iostream>
 using namespace prospero;
 
@@ -111,6 +112,11 @@ int main() {
     assert(sent_rate_kbps(2'500'000, 2.0) == 10000);
     assert(sent_rate_kbps(0, 5.0) == 0);
     assert(sent_rate_kbps(1'000'000, 0.2) == -1);
+    // A counter that went back (an unsigned difference of nearly 2^64) or a clock that is not a number (found by
+    // tests/fuzz/web_lines_fuzz.cpp under -fsanitize=float-cast-overflow): an int, never an overflowing conversion.
+    assert(sent_rate_kbps(~0ull, 1.0) == 2147483647 && sent_rate_kbps(~0ull, 0.5) == 2147483647);
+    assert(sent_rate_kbps(1, std::nan("")) == -1 && sent_rate_kbps(1, -1.0) == -1);
+    assert(sent_rate_kbps(2'500'000, 1e300) == 0);
 
     // The debug log's line: the same facts without who it is, and what changed since the last line.
     StreamFacts logged = first;

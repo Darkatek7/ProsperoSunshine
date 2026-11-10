@@ -63,6 +63,14 @@ int main() {
     assert(get(data / "sunshine.conf") == conf_before);
     assert(path_key("# log_path = x\nmin_log_level = debug\nexperimental_hevc = 1\ncertificate_note = 1\n").empty());
     assert(path_key("cert = x") == "cert" && path_key("\tlog_path=x") == "log_path");
+    // Sunshine reads the file its own way, not line by line (tests/fuzz/file_bridge_fuzz.cpp found these): a lone CR ends a
+    // line, the character after a CR or a closing bracket is skipped whatever it is, and a list goes on over lines.
+    assert(path_key("\rpkey=x\n") == "pkey" && path_key("a=b\r\rpkey = /f\n") == "pkey" && path_key("a=b\r_pkey=/f") == "pkey");
+    assert(path_key("a = [x]Ypkey = /f\n") == "pkey" && path_key("a = [\n]Xlog_path=/x") == "log_path");
+    assert(path_key("a = [[1],\n[2]]\r\ncert=/c\n") == "cert" && path_key("a=1 # c\r\rglobal_prep_cmd=[]") == "global_prep_cmd");
+    assert(path_key("a = b\r\nmin_log_level = 1\r\n# pkey=x\r\nlist = [\n 1,\n 2\n]\n").empty());
+    assert(file("PUT /data/prosperosunshine/sunshine.conf " + to_hex("x=1\r\rpkey = /f\n"), root) == "ERR not allowed: pkey");
+    assert(get(data / "sunshine.conf") == conf_before);
     assert(file("PUT /data/prosperosunshine/diagnostics.txt " + to_hex("log_path = x\n"), root) == "OK");
 
     // Only the app's socket on this console: not the web page, not a client over the LAN switch.

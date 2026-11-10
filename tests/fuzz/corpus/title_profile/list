@@ -1,0 +1,11 @@
+PPSA01234 = driving
+[kart]
+base = driving
+Space = r1
+Mouse1 = r2
+WheelUp = l1
+PPSA05555 = kart
+PPSA06666 = nonsense
+# c
+not a line
+\;Tekken™ 8\;
