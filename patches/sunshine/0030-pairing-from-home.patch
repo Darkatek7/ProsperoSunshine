@@ -1,9 +1,9 @@
 ProsperoSunshine: pairing at home only unless the owner allows the internet, and pending pairings by address
 
 Pairing goes over plain HTTP with a four-digit PIN, which a man in the middle can try offline. With the ports forwarded, any
-stranger could also start pairings (a card and a chime in the app each time), hold the uniqueid every Moonlight sends
-(0123456789ABCDEF) so that the owner's Moonlight got 409 for five minutes, and with a later step end or use up the owner's
-pending pairing. Now:
+stranger could also start pairings (a card and a chime in the app each time), hold the uniqueid that Moonlight for Android
+and iOS send from every device (0123456789ABCDEF) so that the owner's Moonlight got 409 for five minutes, and with a later
+step end or use up the owner's pending pairing. Now:
 - /pair from an address outside the LAN and Tailscale (net::from_address) is refused with 403 and a message Moonlight shows,
   unless pair_over_internet = enabled in sunshine.conf (off by default, an option in the app and on the web page).
 - A pending pairing is keyed by the address it came from and its uniqueid (src/net/exposure.hpp), so requests from another
@@ -119,7 +119,7 @@ Somebody behind the owner's own address (the same NAT) is still indistinguishabl
      }
  
 +#ifdef __SCE__
-+    // A pending pairing belongs to the address that started it: Moonlight sends the same uniqueid from every device, so
++    // A pending pairing belongs to the address that started it: some Moonlight clients send one uniqueid for all devices, so
 +    // requests from another address must neither find, end, use up nor block it.
 +    auto uniqID = prospero::exposure::pairing_key(address, get_arg(args, "uniqueid"));
 +#else

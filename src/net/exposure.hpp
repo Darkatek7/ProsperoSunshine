@@ -20,10 +20,11 @@ inline constexpr std::string_view pairing_refused_message =
     "This host pairs only at home: pair this device on the same network as the console or over Tailscale, "
     "or turn on Pair over the internet in the host's settings";
 
-// The key of a pending pairing: the address it came from and the client's uniqueid. Moonlight sends the same uniqueid from
-// every device, so keyed by the uniqueid alone, one request from a stranger held the key against the owner's Moonlight (409),
-// and a later step from a stranger ended or used up the owner's pending pairing. With the address in the key, requests from
-// another address neither find nor block it. An address has no space, so the key is unique per address and uniqueid.
+// The key of a pending pairing: the address it came from and the client's uniqueid. Moonlight for Android and iOS send the
+// same uniqueid from every device, so keyed by the uniqueid alone, one request from a stranger held the key against the
+// owner's Moonlight (409), and a later step from a stranger ended or used up the owner's pending pairing. With the address
+// in the key, requests from another address neither find nor block it. An address has no space, so the key is unique per
+// address and uniqueid.
 inline std::string pairing_key(std::string_view address, std::string_view unique_id) {
     std::string key(address);
     key += ' ';
@@ -31,8 +32,8 @@ inline std::string pairing_key(std::string_view address, std::string_view unique
     return key;
 }
 
-// Pending pairings one address may hold. A device pairs once at a time and Moonlight's uniqueid is the same on every device,
-// so a second one from an address is rare; without a cap, one address could fill Sunshine's table of 32 and keep everybody
+// Pending pairings one address may hold. A device pairs once at a time, and on Android and iOS Moonlight's uniqueid is the
+// same on every device, so a second one from an address is rare; without a cap, one address could fill Sunshine's table of 32 and keep everybody
 // else from pairing.
 inline constexpr std::size_t max_pairings_per_address = 2;
 

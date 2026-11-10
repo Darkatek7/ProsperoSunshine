@@ -1,0 +1,64 @@
+ProsperoSunshine: a failed read of a chunked body doesn't throw, and a server may refuse request bodies
+
+Two of the places that report a failed read called on_error without looking whether one is set, as every other place does.
+Sunshine sets none, so a chunked request whose connection ended inside a chunk threw std::bad_function_call out of the io
+thread: one request from anybody who reaches the port, before any route or login, ended the server's start(). Both places
+now look first.
+
+Config::accept_content = false makes the server end a connection whose request announces a body (Content-Length above 0, or
+chunked) before it reads any of it. Sunshine's GameStream servers set it (their patch 0032): no GameStream request has a
+body, and waiting for one held a connection for timeout_content (300 s).
+
+--- a/server_http.hpp
++++ b/server_http.hpp
+@@ -391,6 +391,9 @@
+       /// Maximum size of request stream buffer. Defaults to architecture maximum.
+       /// Reaching this limit will result in a message_size error code.
+       std::size_t max_request_streambuf_size = (std::numeric_limits<std::size_t>::max)();
++      /// Whether a request may carry content (Content-Length above 0, or chunked). If false, such a request gets 413 before
++      /// any content is read, so its connection doesn't wait timeout_content for it.
++      bool accept_content = true;
+       /// IPv4 address in dotted decimal form or IPv6 address in hexadecimal notation.
+       /// If empty, the address will be any address.
+       std::string address;
+@@ -611,7 +614,7 @@
+                 this->on_error(session->request, make_error_code::make_error_code(errc::protocol_error));
+               return;
+             }
+-            if(content_length > session->request->streambuf->max_size()) {
++            if(content_length > session->request->streambuf->max_size() || (content_length > 0 && !this->config.accept_content)) {
+               auto response = std::shared_ptr<Response>(new Response(session, this->config.timeout_content));
+               response->write(StatusCode::client_error_payload_too_large);
+               if(this->on_error)
+@@ -644,6 +647,13 @@
+             }
+           }
+           else if((header_it = session->request->header.find("Transfer-Encoding")) != session->request->header.end() && header_it->second == "chunked") {
++            if(!this->config.accept_content) {
++              auto response = std::shared_ptr<Response>(new Response(session, this->config.timeout_content));
++              response->write(StatusCode::client_error_payload_too_large);
++              if(this->on_error)
++                this->on_error(session->request, make_error_code::make_error_code(errc::message_size));
++              return;
++            }
+             // Expect hex number to not exceed 16 bytes (64-bit number), but take into account previous additional read bytes
+             auto chunk_size_streambuf = std::make_shared<asio::streambuf>(std::max<std::size_t>(16 + 2, session->request->streambuf->size()));
+ 
+@@ -733,7 +743,7 @@
+                     return;
+                   if(!ec)
+                     read_next(session, chunk_size_streambuf);
+-                  else
++                  else if(this->on_error)
+                     this->on_error(session->request, ec);
+                 });
+               }
+@@ -752,7 +762,7 @@
+                 return;
+               if(!ec)
+                 read_next(session, chunk_size_streambuf);
+-              else
++              else if(this->on_error)
+                 this->on_error(session->request, ec);
+             });
+           }

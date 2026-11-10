@@ -1,0 +1,89 @@
+ProsperoSunshine: the GameStream servers take no request bodies and keep serving after an error on one connection
+
+Anyone who reaches TCP 47989 (the internet too, once the ports are forwarded) could stop the host with one request: a
+chunked body cut off inside a chunk made Simple-Web-Server throw out of the io thread (its patch 0002 has the cause). Before
+patch 0029 that ended the process with std::terminate; with it, accept_and_run logged and stopped the host cleanly, which
+is as much of an off switch.
+- Both servers refuse request bodies (accept_content = false): every GameStream request is a GET without one. This also
+  takes away the 300 s a connection could wait for an announced body.
+- Both servers set an on_error that does nothing, in case Simple-Web-Server calls it unchecked somewhere else.
+- accept_and_run stops the host only when the server never got to accept (the port could not be bound, as upstream meant
+  it). An exception after that comes out of a connection's callback: it is logged and the io_context runs on.
+
+--- a/src/nvhttp.cpp
++++ b/src/nvhttp.cpp
+@@ -59,7 +59,8 @@
+    * @brief Most bytes a request's head (request line and headers) or body may take on either server.
+    * @details Simple-Web-Server's default is no limit, and anyone who reaches the ports may send. Moonlight's largest request
+    *          is /pair with its client certificate in hex in the query: under 3 KB for its 2048-bit RSA certificate, under 6 KB
+-   *          for a 4096-bit one. A longer head ends the connection without an answer, a longer body gets 413.
++   *          for a 4096-bit one. A longer head ends the connection without an answer, and so does a request that brings a
++   *          body: no GameStream request has one (accept_content below).
+    */
+   constexpr std::size_t MAX_REQUEST_SIZE = 64 * 1024;
+ 
+@@ -2101,6 +2102,8 @@
+     https_server.config.address = net::get_bind_address(address_family);
+     https_server.config.port = port_https;
+     https_server.config.max_request_streambuf_size = MAX_REQUEST_SIZE;
++    // Every GameStream request is a GET without content. Refused at once, a body can't hold a connection for timeout_content.
++    https_server.config.accept_content = false;
+ 
+     http_server.default_resource["GET"] = not_found<SimpleWeb::HTTP>;
+     http_server.resource["^/serverinfo$"]["GET"] = serverinfo<SimpleWeb::HTTP>;
+@@ -2112,27 +2115,44 @@
+     http_server.config.address = net::get_bind_address(address_family);
+     http_server.config.port = port_http;
+     http_server.config.max_request_streambuf_size = MAX_REQUEST_SIZE;
++    http_server.config.accept_content = false;
++    // Simple-Web-Server calls on_error unchecked in places (its patch 0002 guards the ones known): with a no-op set, one
++    // missed can't throw std::bad_function_call out of the io thread.
++    https_server.on_error = [](auto, const SimpleWeb::error_code &) {};
++    http_server.on_error = [](auto, const SimpleWeb::error_code &) {};
+ 
+     auto accept_and_run = [&](auto *web_server) {
++      // Set by start()'s callback once the port is bound and accepting: an exception from then on comes out of a
++      // connection's callback, which anyone who reaches the port can cause, and must not stop the host.
++      bool serving = false;
+       try {
+         std::string name = "nvhttp::" + std::to_string(web_server->config.port);
+         platf::set_thread_name(name);
+         platf::trace_call("bind the HTTP(S) port TCP " + std::to_string(web_server->config.port));
+-        web_server->start();
+-      } catch (boost::system::system_error &err) {
++        web_server->start([&serving](unsigned short) {
++          serving = true;
++        });
++      } catch (std::exception &err) {
+         // It's possible the exception gets thrown after calling http_server->stop() from a different thread
+         if (shutdown_event->peek()) {
+           return;
+         }
+-
+-        BOOST_LOG(fatal) << "Couldn't start http server on ports ["sv << port_https << ", "sv << port_https << "]: "sv << err.what();
+-        shutdown_event->raise(true);
+-        return;
+-      } catch (std::exception &err) {
+-        // Anything else out of the server's handlers (std::bad_alloc, say) would leave the thread and end the process with
+-        // std::terminate, without a log line and with the streams and port mappings left as they were. Stop cleanly instead.
+-        BOOST_LOG(fatal) << "HTTP server on port "sv << web_server->config.port << " failed: "sv << err.what();
+-        shutdown_event->raise(true);
++        if (!serving) {
++          BOOST_LOG(fatal) << "Couldn't start http server on port "sv << web_server->config.port << ": "sv << err.what();
++          shutdown_event->raise(true);
++          return;
++        }
++        // asio leaves the io_context running after a callback threw (Simple-Web-Server catches only the request handlers'
++        // own exceptions): serving goes on with it until a stop is asked for.
++        BOOST_LOG(error) << "HTTP server on port "sv << web_server->config.port << ": "sv << err.what() << ", serving on"sv;
++        while (!shutdown_event->peek()) {
++          try {
++            web_server->io_service->run();
++            return;
++          } catch (std::exception &again) {
++            BOOST_LOG(error) << "HTTP server on port "sv << web_server->config.port << ": "sv << again.what() << ", serving on"sv;
++          }
++        }
+       } catch (...) {
+         BOOST_LOG(fatal) << "HTTP server on port "sv << web_server->config.port << " failed"sv;
+         shutdown_event->raise(true);

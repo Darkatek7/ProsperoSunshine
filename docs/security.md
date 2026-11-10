@@ -20,7 +20,8 @@ andere Payload auf der Konsole hat dieselben. Daraus folgt die Grenze des Modell
 - **Tailscale zählt wie LAN.** Sunshine rechnet `100.64.0.0/10` zum LAN (`src/network.cpp` im Sunshine-Baum,
   `lan_ips_v4`). Jedes Gerät im Tailnet, auch ein geteiltes, wird wie ein Gerät zu Hause behandelt, auch beim
   Koppeln. ps5-tailscale leitet die Ports auf der Konsole selbst weiter; Geräte im Tailnet erscheinen dem Host dann als
-  `127.0.0.1` (`src/web/web_server.cpp`, `forwarded`).
+  `127.0.0.1` (`src/web/web_server.cpp`, `forwarded`). `100.64.0.0/10` ist auch der Bereich für Carrier-Grade-NAT: Liegt
+  die WAN-Adresse des Routers darin und sind die Ports weitergeleitet, zählen andere Kunden desselben Anbieters als LAN.
 - **Das Internet ist feindlich.** Mit UPnP (`upnp = 1`) oder einer eigenen Portweiterleitung erreicht jeder im Internet
   die sechs Stream-Ports.
 
@@ -73,11 +74,17 @@ zeigen.
 ## Größe von Anfragen
 
 Sunshines HTTP- und HTTPS-Server (47989, 47984) nehmen Kopf und Inhalt einer Anfrage bis je 64 KiB an (Patch 0029,
-`max_request_streambuf_size` in Simple-Web-Server). Ist der Kopf größer, schließt der Server die Verbindung ohne Antwort;
-kündigt die Anfrage einen größeren Inhalt an, antwortet er 413. Moonlights größte Anfrage, `/pair` mit dem Zertifikat des
-Clients in Hex, bleibt unter 6 KiB. Den Gerätenamen einer Kopplung kürzt der Host auf 128 Byte, an einer Zeichengrenze
-(`src/net/exposure.hpp`, `cap_name`). Wirft ein Handler eine Ausnahme, die der Server nicht selbst abfängt, beendet sich
-der Host geordnet mit der Log-Zeile „HTTP server on port … failed“, statt abzustürzen.
+`max_request_streambuf_size` in Simple-Web-Server). Ist der Kopf größer, schließt der Server die Verbindung ohne Antwort.
+Einen Inhalt nehmen die beiden Server gar nicht an (Patch 0032, `accept_content = false`): Keine GameStream-Anfrage hat
+einen, und eine Anfrage, die einen ankündigt (`Content-Length` über 0 oder `chunked`), beendet ihre Verbindung ohne Antwort,
+bevor etwas davon gelesen wird. Moonlights größte Anfrage, `/pair` mit dem Zertifikat des Clients in Hex, bleibt unter
+6 KiB. Den Gerätenamen einer Kopplung kürzt der Host auf 128 Byte, an einer Zeichengrenze (`src/net/exposure.hpp`,
+`cap_name`).
+
+Ein Fehler auf einer Verbindung beendet den Host nicht. Simple-Web-Server rief an zwei Stellen seine Fehlerfunktion auf,
+ohne zu prüfen, ob eine gesetzt ist (`patches/simple-web-server/0002-error-callback-and-no-content.patch`); Sunshine setzt
+keine. Wirft ein Rückruf einer Verbindung trotzdem eine Ausnahme, schreibt der Host die Log-Zeile „HTTP server on port …,
+serving on“ und bedient weiter. Nur wenn ein Server seinen Port gar nicht binden kann, beendet sich der Host.
 
 ## Kopplung
 
@@ -98,8 +105,9 @@ Grenzen, die im Protokoll liegen:
 - **Die Kopplung läuft über unverschlüsseltes HTTP** und ist nur so stark wie die vierstellige PIN. Wer sich bei einer
   Kopplung über das Internet aktiv zwischen Moonlight und Konsole schaltet, kann die PIN nachträglich durchprobieren.
   Darum koppelt der Host standardmäßig nur im LAN und über Tailscale.
-- Moonlight schickt bei jedem Gerät dieselbe `uniqueid`. Der Host trennt offene Anfragen deshalb nach Absenderadresse und
-  `uniqueid`: Eine Anfrage von einer anderen Adresse kann die offene Kopplung des Besitzers weder beenden noch übernehmen.
+- Moonlight für Android und iOS schickt bei jedem Gerät dieselbe `uniqueid`. Der Host trennt offene Anfragen deshalb nach
+  Absenderadresse und `uniqueid`: Eine Anfrage von einer anderen Adresse kann die offene Kopplung des Besitzers weder
+  beenden noch übernehmen.
   Wer dieselbe Adresse hat (dasselbe Gerät, oder mit `pair_over_internet = 1` jemand hinter demselben NAT), ist davon nicht
   zu unterscheiden; das gibt das Protokoll nicht her.
 - Offene Anfragen gelten fünf Minuten, höchstens 32 gleichzeitig (`MAX_PENDING_PAIRING_SESSIONS`) und höchstens zwei je
@@ -175,6 +183,9 @@ Konsole selbst vorbehalten (`src/control/file_bridge.hpp`). Ein Payload, der Ver
 Damit ein offener Socket nicht unbemerkt bleibt, schreibt der Host beim Start eine Warnung ins Log, `STATUS` meldet
 `lan=1`, und die Startseite der App sowie der Status der Web-Seite zeigen eine Warnung, solange die Datei da ist.
 
+Der Socket bedient einen Client zur Zeit. Wer 30 s lang nichts schickt, wird getrennt (gezählt ab der letzten Zeile oder
+Antwort), damit eine stehen gelassene Verbindung die App nicht aussperrt.
+
 ## Dateien
 
 In `/data/prosperosunshine/`:
@@ -219,6 +230,9 @@ Gemessen am ausgelieferten `prospero_sunshine.elf` (`readelf`, `objdump`):
   64 KiB je Anfrage hinaus gibt es nicht.
 - Ein gekoppeltes Gerät ist ein Gerät, dem der Besitzer den Stream anvertraut. Die Grenzen pro Gerät verhindern Fehler
   und Neugier, sind aber kein Ersatz dafür, ein fremdes Gerät gar nicht erst zu koppeln.
+- Ein gekoppeltes Gerät erfährt aus `serverinfo` (über HTTPS) die App-ID des laufenden Spiels, auch wenn die App für es
+  verborgen ist. Moonlight braucht sie, um „Fortsetzen“ statt „Starten“ anzubieten; aus einer Liste von Titel-IDs lässt
+  sie sich zurückrechnen.
 
 ## Empfehlungen für das Streamen über das Internet
 
@@ -248,8 +262,12 @@ Gemessen am ausgelieferten `prospero_sunshine.elf` (`readelf`, `objdump`):
   Jetzt gilt das Zertifikat der eigenen Verbindung, und die Variable ist weg (Patch 0028).
 - **Größe von Anfragen:** Anfragen an 47989 und 47984 waren unbegrenzt groß, und eine offene Kopplung hielt einen
   beliebig langen Gerätenamen fünf Minuten im Speicher (Patch 0029).
-- **Kopplung:** Sie ging auch aus dem Internet, und eine Anfrage mit Moonlights fester `uniqueid` von irgendeiner Adresse
-  beendete oder blockierte die offene Kopplung des Besitzers (Patch 0030).
+- **Kopplung:** Sie ging auch aus dem Internet, und eine Anfrage mit der festen `uniqueid`, die Moonlight für Android und
+  iOS schickt, beendete oder blockierte von irgendeiner Adresse aus die offene Kopplung des Besitzers (Patch 0030).
+- **Eine Anfrage beendete den Host:** Eine Anfrage an 47989 mit einem Inhalt in Stücken (`chunked`), deren Verbindung
+  mitten in einem Stück endete, ließ den Host abstürzen; dafür brauchte es keine Kopplung. Die beiden Server nehmen jetzt
+  keinen Inhalt mehr an und bedienen nach einem Fehler auf einer Verbindung weiter (Patch 0032,
+  `patches/simple-web-server/0002-error-callback-and-no-content.patch`).
 - **Kleineres:** `/cancel` eines beliebigen gekoppelten Geräts schloss mit `close_game_on_quit = 1` das Spiel, das ein
   anderes gestartet hatte; der Bericht auf 47996 antwortete jeder Adresse; `serverinfo` über HTTP nannte dem Internet das
   laufende Spiel und die LAN-Adresse; `/appasset` lieferte Bilder verborgener Apps; Modus 2 ließ Clients ohne

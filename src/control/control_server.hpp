@@ -81,6 +81,8 @@ private:
     static constexpr std::chrono::seconds report_window{8};
     // A FILE PUT is the longest request: the app's diagnostic report, in hex.
     static constexpr size_t largest_request = 2u << 20;
+    // How long a control client may send nothing before the socket lets it go; counted from its last line or answer.
+    static constexpr std::chrono::seconds idle_limit{30};
     std::shared_ptr<safe::event_t<bool>> shutdown_;
     DeviceModes modes_;
     DeviceProfiles profiles_;

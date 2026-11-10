@@ -3,10 +3,11 @@ ProsperoSunshine: limits on what a request to the GameStream ports may bring
 Anyone who reaches TCP 47989 or 47984 (the internet too, once the ports are forwarded) could send a request head of any size,
 as Simple-Web-Server's default buffer has no limit, and /pair kept the device name of any length for the five minutes a
 pairing waits. Both servers now take at most 64 KiB per request head or body, far above Moonlight's largest request (/pair
-with its client certificate in hex, a few KB); a longer head ends the connection, a longer body gets 413. The device name a
+with its client certificate in hex, a few KB); a longer head or body ends the connection without an answer. The device name a
 pairing request brings is cut to 128 bytes at a UTF-8 character boundary (src/net/exposure.hpp), the length pin() accepts for
 the name the operator confirms. An exception other than boost::system::system_error out of a server's handlers (an allocation
-failure, say) used to leave its thread and end the process with std::terminate; it now logs and stops the host cleanly.
+failure, say) used to leave its thread and end the process with std::terminate; it is now caught and logged (patch 0032
+says what happens then).
 
 --- a/src/nvhttp.cpp
 +++ b/src/nvhttp.cpp

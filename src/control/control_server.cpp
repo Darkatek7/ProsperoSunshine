@@ -545,12 +545,18 @@ void ControlServer::run(std::stop_token stop) {
         std::string buffer;
         char chunk[16384];
         bool refused = false;
-        // One client at a time; requests are short and rare.
+        // One client at a time; requests are short and rare. A client that sends nothing for a while is let go, so one idle
+        // connection (with control_lan, anyone's in the network) can't keep the app and the web page out for good.
+        auto last_seen = std::chrono::steady_clock::now();
         while (!stop.stop_requested()) {
             pollfd cfd{client, POLLIN, 0};
-            if (poll(&cfd, 1, 250) <= 0) continue;
+            if (poll(&cfd, 1, 250) <= 0) {
+                if (std::chrono::steady_clock::now() - last_seen > idle_limit) break;
+                continue;
+            }
             const ssize_t n = recv(client, chunk, sizeof chunk, 0);
             if (n <= 0) break;
+            last_seen = std::chrono::steady_clock::now();
             buffer.append(chunk, static_cast<size_t>(n));
             for (size_t nl; (nl = buffer.find('\n')) != std::string::npos;) {
                 std::string line = buffer.substr(0, nl);
@@ -569,6 +575,8 @@ void ControlServer::run(std::stop_token stop) {
                     sent += static_cast<size_t>(count);
                 }
             }
+            // A command may take long (PIN waits for Moonlight): the idle time counts from its answer.
+            last_seen = std::chrono::steady_clock::now();
             if (refused || buffer.size() > largest_request) break;
         }
         close(client);
