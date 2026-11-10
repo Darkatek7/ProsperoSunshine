@@ -617,8 +617,6 @@ struct input_raw_t {
     std::map<std::string, std::pair<prospero::PsChord, int>> ps_chords;
     // The devices told how to press PS from the keyboard (hint_ps_keys), once while streams go on.
     std::set<std::string> ps_hint_told;
-    // What each pad's controller has, from its arrival (Moonlight's button flags): a controller with PS needs no hint.
-    std::array<uint32_t, MAX_GAMEPADS> supported{};
     bool game_in_front = true;  // refreshed every half second by poll_pad_output
     bool ps_all_players = false;  // ps_button_all_players: every pad may press PS and Create, not only the host's
     prospero::PadRoles<MAX_GAMEPADS> roles;  // who is the host: a paired device, not a slot (GitHub issue 15)
@@ -1237,11 +1235,12 @@ static prospero::MenuAccess pad_menu_access(input_raw_t &input, int nr);
 
 // Moonlight for iPhone and iPad has no PS button: neither its on-screen controller nor the bar above its on-screen keyboard
 // has one, nor F1, but the bar has Windows and Esc (keyboard_map.hpp, ps_chord). Once a controller of such a device joins
-// that may press PS and has none of its own, the console says how, once per device while streams go on. Caller holds
-// input.mutex.
+// that may press PS, the console says how, once per device while streams go on, whatever buttons the controller reports:
+// with a Bluetooth controller connected to an iPhone, the one tried gave PS only by a held Select, which can't hold PS.
+// Caller holds input.mutex.
 static void hint_ps_keys(input_raw_t &input, int nr) {
     const std::string &cert = input.owner[nr];
-    if (cert.empty() || (input.supported[nr] & HOME) || input.ps_hint_told.contains(cert)) return;
+    if (cert.empty() || input.ps_hint_told.contains(cert)) return;
     if (!prospero::touch_apple_client(nvhttp::get_client_user_agent(cert))) return;
     const auto role = input.roles.is_host(nr) ? prospero::PadRole::host : prospero::PadRole::guest;
     if (!prospero::has_menu_buttons(role, input.ps_all_players, pad_menu_access(input, nr))) return;
@@ -1429,7 +1428,6 @@ int alloc_gamepad(input_t &input, const gamepad_id_t &id, const gamepad_arrival_
     input->feedback[id.globalIndex] = std::move(feedback);
     input->client_index[id.globalIndex] = id.clientRelativeIndex;
     input->touch_combo[id.globalIndex] = !prospero::has_touchpad(arrival.capabilities, arrival.supportedButtons);
-    input->supported[id.globalIndex] = arrival.supportedButtons;
     input->combo[id.globalIndex] = {};
     if (input->touch_combo[id.globalIndex])
         BOOST_LOG(info) << "PS5 virtual pad "sv << id.globalIndex << ": no touchpad, Select and Start together click it"sv;
