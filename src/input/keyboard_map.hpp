@@ -83,6 +83,52 @@ constexpr uint8_t vk_usage(uint16_t vk) {
 // Ctrl+Shift+Esc or Windows+G.
 constexpr bool opens_console_menu(uint8_t usage) { return usage == 0x46 || usage == 0x48; }
 
+// Windows+Esc (either Windows key, ⌘ on a Mac or an iPad keyboard) is PS, as F1 is on the keyboard pad. Moonlight for
+// iPhone and iPad has no PS button: neither its on-screen controller nor the bar above its on-screen keyboard (three
+// fingers on the screen) has one, nor F1, but the bar has Windows, which stays down until it is tapped again, and Esc.
+// modifiers: the HID modifier bits held (vk_modifier).
+constexpr bool ps_chord(uint16_t vk, uint8_t modifiers) { return vk == 0x1B && (modifiers & 0x88); }
+
+// The same for a client whose keys go to the console as a keyboard while it has a controller (the on-screen one, say):
+// its Esc with Windows held is that controller's PS, held while Esc is, and Esc doesn't reach the keyboard. One per client.
+class PsChord {
+public:
+    // pass: the key goes on as it is. press: PS goes down. release: PS comes up. swallow: Esc's repeat while PS is down.
+    enum class Action { pass, press, release, swallow };
+
+    Action key(uint16_t vk, bool release) {
+        if (const uint8_t bit = vk_modifier(vk); bit & 0x88) {
+            windows_ = release ? windows_ & ~bit : windows_ | bit;
+            return Action::pass;
+        }
+        if (vk != 0x1B) return Action::pass;
+        if (release) {
+            escape_ = false;
+            return held_ ? (held_ = false, Action::release) : Action::pass;
+        }
+        if (held_) return Action::swallow;
+        // Esc that went down as Esc stays Esc while it repeats, even once Windows is down too.
+        if (escape_ || !ps_chord(vk, windows_)) {
+            escape_ = true;
+            return Action::pass;
+        }
+        held_ = true;
+        return Action::press;
+    }
+
+    // PS couldn't go down (no controller to press it on): Esc goes on as Esc, its release too.
+    void cancel() {
+        held_ = false;
+        escape_ = true;
+    }
+    bool held() const { return held_; }
+
+private:
+    uint8_t windows_ = 0;
+    bool held_ = false;    // Esc is down as PS
+    bool escape_ = false;  // Esc is down as Esc
+};
+
 // What a printable ASCII character is on a US keyboard: its key and whether it needs Shift. Usage 0 if none.
 struct AsciiKey {
     uint8_t usage;

@@ -71,5 +71,40 @@ int main() {
     wheel.clear();
     assert(wheel.add(120 * 200) == 127 && wheel.add(0) == 73);
 
-    std::cout << "PASS: keyboard and mouse map (keys, modifiers, ASCII, held keys, buttons, wheel steps)\n";
+    // Windows+Esc is PS: on the keyboard pad (ps_chord) and, for a client with a controller, on that controller (PsChord).
+    static_assert(ps_chord(0x1B, 0x08) && ps_chord(0x1B, 0x80) && ps_chord(0x1B, 0x8B));
+    static_assert(!ps_chord(0x1B, 0) && !ps_chord(0x1B, 0x77) && !ps_chord(0x70, 0x08));
+    {
+        using A = PsChord::Action;
+        PsChord chord;
+        assert(chord.key(0x1B, false) == A::pass && chord.key(0x1B, true) == A::pass);  // Esc alone
+        for (const uint16_t windows : {uint16_t(0x5B), uint16_t(0x5C)}) {
+            assert(chord.key(windows, false) == A::pass);  // Windows still reaches the keyboard
+            assert(chord.key(0x1B, false) == A::press && chord.held());
+            assert(chord.key(0x1B, false) == A::swallow);  // the key repeat
+            assert(chord.key('A', false) == A::pass);
+            assert(chord.key(0x1B, true) == A::release && !chord.held());
+            assert(chord.key(0x1B, false) == A::press);  // again while Windows stays down (the iPhone's toggle)
+            assert(chord.key(windows, true) == A::pass);
+            assert(chord.key(0x1B, true) == A::release);  // PS comes up with Esc even after Windows did
+            assert(chord.key(0x1B, false) == A::pass && chord.key(0x1B, true) == A::pass);
+        }
+        // Left and right Windows both down: one up keeps the chord.
+        chord.key(0x5B, false);
+        chord.key(0x5C, false);
+        chord.key(0x5B, true);
+        assert(chord.key(0x1B, false) == A::press && chord.key(0x1B, true) == A::release);
+        chord.key(0x5C, true);
+        // Esc held before Windows stays Esc, its repeats too.
+        assert(chord.key(0x1B, false) == A::pass);
+        chord.key(0x5B, false);
+        assert(chord.key(0x1B, false) == A::pass);
+        assert(chord.key(0x1B, true) == A::pass);
+        // Nothing to press PS on: cancel, and Esc and its release go on as Esc.
+        assert(chord.key(0x1B, false) == A::press);
+        chord.cancel();
+        assert(chord.key(0x1B, true) == A::pass);
+    }
+
+    std::cout << "PASS: keyboard and mouse map (keys, modifiers, ASCII, held keys, buttons, wheel steps, Windows+Esc)\n";
 }

@@ -211,10 +211,10 @@ friend plays their game, but can't open Settings, update the system (which also 
 On a device with profiles of its own:
 
 - A controller playing as a chosen profile has PS and Create, also F1 and F2 of the
-  [keyboard's controller](#keyboard-and-mouse-as-a-controller) and the PS of a held Select. A controller playing as another
-  profile has neither, even the host's. The device's own keyboard plays as the profile of its first controller, and for a
-  profile without the menus its two keys into them do nothing: Print Screen (the Create menu) and Pause (the control
-  center).
+  [keyboard's controller](#keyboard-and-mouse-as-a-controller), Windows+Esc and the PS of a held Select. A controller
+  playing as another profile has neither, even the host's. The device's own keyboard plays as the profile of its first
+  controller, and for a profile without the menus its two keys into them do nothing: Print Screen (the Create menu) and
+  Pause (the control center).
 - Only a device with at least one chosen profile, or a [spectator](#profiles-per-device), gets **"PS5 Screen"** in its app
   list, and the host refuses to start it for any other device, as a client can ask for an app by its id without seeing it.
   A spectator only watches: it has no input to reach the menus with. Any device can start a game from its list,
@@ -268,6 +268,13 @@ console asks "Who's using this controller?".
 | Esc | Options (pause) |
 | Tab | touchpad (the map or inventory in most games) |
 | F1 / F2 | PS / Create, the host only (as on every controller, see above) |
+| Windows+Esc | PS, as F1 |
+
+**Moonlight for iPhone and iPad** has no PS button, and its on-screen keyboard has no F1. Touch the screen with three
+fingers for the keyboard, then tap Win, Esc and Win again: Win stays down until it is tapped again. Windows+Esc is PS on
+the keys of a device with a controller too (its on-screen controller, say): it presses that controller's PS, with the
+same rules for who may. When a controller of Moonlight for iPhone or iPad joins that may press PS and has no PS button of
+its own, the console says how, once per device.
 
 The rest depends on the profile, `keyboard_mouse_profile` in `sunshine.conf` (`standard` unless set). They follow the
 keyboard layouts of PC games of each kind; [docs/keyboard-profiles.md](docs/keyboard-profiles.md) has every table and why.

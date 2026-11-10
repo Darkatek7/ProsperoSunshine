@@ -44,8 +44,9 @@ inline constexpr uint64_t half = 1ull << 42;
 }
 
 // One profile per way of playing, so a game feels the way it does with keyboard and mouse on a PC. Every profile keeps
-// Enter ✕, Backspace ○, Esc Options (pause), Tab the touchpad (map and inventory in most PS5 games), F1 PS and F2
-// Create, and Ctrl+Backspace switches the pad to its device's next profile (gamepad_map.hpp, switch_seat). None
+// Enter ✕, Backspace ○, Esc Options (pause), Tab the touchpad (map and inventory in most PS5 games), F1 PS (Windows+Esc
+// too, keyboard_map.hpp's ps_chord) and F2 Create, and Ctrl+Backspace switches the pad to its device's next profile
+// (gamepad_map.hpp, switch_seat). None
 // uses Alt, so no profile can form Moonlight's Ctrl+Alt+Shift shortcuts. The key right of the space bar
 // held gives the menu keys (standard's with W A S D on the D-pad), for a game's menus.
 enum class Profile : uint8_t { standard, action, shooter, driving, fighting, platformer, sports };
@@ -512,6 +513,14 @@ public:
         if (vk == vk::backspace && ((generic_modifiers_ | sided_modifiers_) & 0x11)) {
             if (held_[index]) return false;
             held_[index] = moonlight::switch_seat;
+            since_[index] = now;
+            return true;
+        }
+        // Windows+Esc is PS, as F1 is, in every profile and in the menu keys, whatever a profile of one's own gives Esc:
+        // Moonlight for iPhone and iPad has Windows and Esc above its on-screen keyboard, but no F1.
+        if (ps_chord(vk, generic_modifiers_ | sided_modifiers_)) {
+            if (held_[index]) return false;
+            held_[index] = moonlight::home;
             since_[index] = now;
             return true;
         }

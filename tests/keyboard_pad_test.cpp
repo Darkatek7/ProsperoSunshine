@@ -680,6 +680,45 @@ int main() {
         sw.clear();
     }
 
+    // Windows+Esc is PS, as F1 is (Moonlight for iPhone and iPad: Windows stays down until tapped again, Esc is a tap),
+    // with either Windows key, in every profile and in the menu keys; Esc alone stays Options, also after.
+    {
+        KeyboardPad ps;
+        const auto t = std::chrono::steady_clock::now();
+        for (const Profile profile : {Profile::standard, Profile::shooter, Profile::driving, Profile::fighting}) {
+            ps.set_profile(profile);
+            for (const uint16_t windows : {uint16_t(0x5B), uint16_t(0x5C)}) {
+                assert(!ps.key(windows, false, t) || windows == 0x5C);  // right Windows is a menu key: it lets go
+                assert(!ps.pressed(t));                                 // Windows alone adds no pad
+                assert(ps.key(esc, false, t));
+                assert(ps.state(t).buttons == moonlight::home);
+                assert(ps.pressed(t));
+                assert(!ps.key(esc, false, t));  // a repeat changes nothing
+                assert(ps.key(esc, true, t));
+                assert(ps.state(t).buttons == 0);
+                ps.key(windows, true, t);
+                assert(press(ps, esc, t) == moonlight::start);
+            }
+        }
+        // Esc down before Windows stays Options until it comes up.
+        ps.set_profile(Profile::standard);
+        ps.key(esc, false, t);
+        ps.key(0x5B, false, t);
+        assert(ps.state(t).buttons == moonlight::start);
+        ps.key(esc, true, t);
+        ps.key(0x5B, true, t);
+        // A profile of one's own that gives Esc something else: Windows+Esc is still PS.
+        auto own = std::make_shared<CustomProfile>();
+        own->keys.push_back({esc, moonlight::y});
+        ps.set_profile(Profile::standard, own);
+        assert(press(ps, esc, t) == moonlight::y);
+        ps.key(0x5B, false, t);
+        assert(press(ps, esc, t) == moonlight::home);
+        ps.key(0x5B, true, t);
+        ps.clear();
+    }
+
     std::cout << "PASS: keyboard pad (keys, sticks, shortcuts, mouse, wheel taps, seven profiles, easing, vehicle layer, "
-                 "what adds the pad, sensitivity per client, settings, Ctrl+Backspace switches the profile)\n";
+                 "what adds the pad, sensitivity per client, settings, Ctrl+Backspace switches the profile, "
+                 "Windows+Esc is PS)\n";
 }
