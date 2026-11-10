@@ -1575,11 +1575,13 @@ void Screen::draw_home(hui::gfx::DrawList &list, std::uint32_t glass) const
         const float knob = snap_.autoload ? track.x + track.w - 19.0f : track.x + 19.0f;
         list.circle(knob, track.cy(), 15.0f, Color::rgb(0xffffff));
     }
-    // What the firmware or the last capture attempt means for streaming, above the boot hint.
-    if (!snap_.notice.text.empty())
-        hui::ui::text(list, fonts_.semibold, shorten(fonts_.semibold, snap_.notice.text, 22.0f, 1728.0f), 96.0f, 660.0f, 22.0f,
-                      snap_.notice.bad ? kBad : kAccent);
-    const float boot_hint_y = snap_.notice.text.empty() ? 660.0f : 690.0f;
+    // What the firmware or the last capture attempt means for streaming, above the boot hint; first the control socket's
+    // development switch while it is on.
+    const diag::Notice notice = diag::with_control_lan(snap_.notice, snap_.running && snap_.control_lan);
+    if (!notice.text.empty())
+        hui::ui::text(list, fonts_.semibold, shorten(fonts_.semibold, notice.text, 22.0f, 1728.0f), 96.0f, 660.0f, 22.0f,
+                      notice.bad ? kBad : kAccent);
+    const float boot_hint_y = notice.text.empty() ? 660.0f : 690.0f;
     if (snap_.autoload && snap_.manager_present && !snap_.manager_autoload)
         hui::ui::text(list, fonts_.regular, "The Payload Manager's own autoload is off, so nothing starts at boot.",
                       action_rect(2).x, boot_hint_y, 20.0f, kAccent);

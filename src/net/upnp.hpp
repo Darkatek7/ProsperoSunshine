@@ -112,7 +112,106 @@ struct PortStatus {
     Outcome outcome = Outcome::pending;
     std::string detail;     // the other device's address (taken), or the router's error (failed)
     bool added = false;     // mapped by the host, so removed again when it stops
+    bool permanent = false; // added without a lease, as the router takes no other (UPnP error 725)
 };
+
+// A mapping the host added without a lease. It stays on the router until someone removes it, also after a crash, a power cut
+// or a start with upnp off, when the host doesn't remove it at stop. So the host notes each in a file in appdata
+// (upnp_permanent.txt, one per line) and removes the ones still noted at its next start (upnp_client.cpp).
+struct PermanentMapping {
+    std::string control_url;   // the router's control URL, from its description
+    std::string service_type;  // the WAN connection service the mapping was added on
+    std::string client;        // where the port went: the console, or the inner router
+    bool udp = false;
+    uint16_t port = 0;
+
+    bool operator==(const PermanentMapping &) const = default;
+};
+
+// "<control url> <service type> <client> <TCP|UDP> <port>"; empty when a field would not stay one word.
+inline std::string format_permanent(const PermanentMapping &m) {
+    const auto word = [](const std::string &text) {
+        if (text.empty()) return false;
+        for (const char c : text)
+            if (static_cast<unsigned char>(c) <= ' ' || c == 0x7f) return false;
+        return true;
+    };
+    if (!word(m.control_url) || !word(m.service_type) || !word(m.client) || m.port == 0) return {};
+    return m.control_url + ' ' + m.service_type + ' ' + m.client + (m.udp ? " UDP " : " TCP ") + std::to_string(m.port);
+}
+
+// The lines of the file; a line that isn't one of format_permanent()'s is left out.
+inline std::vector<PermanentMapping> parse_permanent(std::string_view text) {
+    std::vector<PermanentMapping> list;
+    while (!text.empty()) {
+        const size_t end = text.find('\n');
+        std::string_view line = text.substr(0, end);
+        text = end == std::string_view::npos ? std::string_view() : text.substr(end + 1);
+        std::vector<std::string> words;
+        while (!line.empty()) {
+            const size_t space = line.find(' ');
+            if (space != 0) words.emplace_back(line.substr(0, space));
+            line = space == std::string_view::npos ? std::string_view() : line.substr(space + 1);
+        }
+        if (words.size() != 5 || (words[3] != "TCP" && words[3] != "UDP") || words[4].empty() || words[4].size() > 5) continue;
+        unsigned long port = 0;
+        bool digits = true;
+        for (const char c : words[4]) {
+            digits = digits && c >= '0' && c <= '9';
+            port = port * 10 + static_cast<unsigned>(c - '0');
+        }
+        if (!digits || port == 0 || port > 65535) continue;
+        list.push_back({words[0], words[1], words[2], words[3] == "UDP", static_cast<uint16_t>(port)});
+    }
+    return list;
+}
+
+// The file's text for a list: one line each, none twice.
+inline std::string format_permanent_list(const std::vector<PermanentMapping> &list) {
+    std::string text;
+    std::vector<PermanentMapping> written;
+    for (const auto &m : list) {
+        const std::string line = format_permanent(m);
+        if (line.empty()) continue;
+        bool seen = false;
+        for (const auto &w : written) seen = seen || w == m;
+        if (seen) continue;
+        written.push_back(m);
+        text += line + '\n';
+    }
+    return text;
+}
+
+// The noted list after some mappings were added and others removed. A router has one mapping per port and protocol, so that is
+// what identifies one; a mapping added again replaces its old note (the console may have another address now).
+inline std::vector<PermanentMapping> merge_permanent(std::vector<PermanentMapping> list, const std::vector<PermanentMapping> &added,
+                                                     const std::vector<PermanentMapping> &removed) {
+    const auto same_port = [](const PermanentMapping &a, const PermanentMapping &b) {
+        return a.control_url == b.control_url && a.service_type == b.service_type && a.udp == b.udp && a.port == b.port;
+    };
+    std::vector<PermanentMapping> kept;
+    for (const auto &m : list) {
+        bool replaced = false;
+        for (const auto &r : removed) replaced = replaced || same_port(m, r);
+        for (const auto &a : added) replaced = replaced || same_port(m, a);
+        if (!replaced) kept.push_back(m);
+    }
+    for (const auto &a : added) {
+        bool twice = false;
+        for (const auto &k : kept) twice = twice || same_port(k, a);
+        if (!twice) kept.push_back(a);
+    }
+    return kept;
+}
+
+// Whether a mapping noted earlier is one of the ports the host maps now: the run renews those itself, by port and protocol,
+// as it doesn't know yet which router answers. The others are left from an earlier Base port, or from a run with upnp on
+// when it's off now.
+inline bool mapped_now(const PermanentMapping &m, const std::vector<Mapping> &mappings) {
+    for (const auto &now : mappings)
+        if (now.port == m.port && now.udp == m.udp) return true;
+    return false;
+}
 
 // One router and what it forwards. `router` is empty while there is none.
 struct Hop {

@@ -22,6 +22,14 @@ int main() {
     assert(st.at("address") == "192.168.1.20" && st.at("client") == "Living room PC");
     const auto idle = status("running=0 app= pending=2 address= client=");
     assert(idle.at("app").empty() && idle.at("pending") == "2" && idle.at("client").empty());
+    assert(idle.find("lan") == idle.end());  // an older host
+    // lan=1: the control socket is open to the LAN (control_lan).
+    const auto open = status("running=0 app=PS5 Screen pending=0 lan=1 address= client=");
+    assert(open.at("app") == "PS5 Screen" && open.at("pending") == "0" && open.at("lan") == "1");
+    assert(open.at("address").empty() && open.at("client").empty());
+    // A client name that looks like more keys stays the name.
+    const auto named = status("running=1 app=PS5 Screen pending=0 lan=0 address=203.0.113.9 client=Phone lan=1 address=x");
+    assert(named.at("lan") == "0" && named.at("address") == "203.0.113.9" && named.at("client") == "Phone lan=1 address=x");
 
     const auto dev = device("ABC-1 1 1920x1080@60 Steam Deck");
     assert(dev.at("uuid") == "ABC-1" && dev.at("streaming") == "1" && dev.at("mode") == "1920x1080@60");

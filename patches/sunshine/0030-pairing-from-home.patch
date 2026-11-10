@@ -1,0 +1,142 @@
+ProsperoSunshine: pairing at home only unless the owner allows the internet, and pending pairings by address
+
+Pairing goes over plain HTTP with a four-digit PIN, which a man in the middle can try offline. With the ports forwarded, any
+stranger could also start pairings (a card and a chime in the app each time), hold the uniqueid every Moonlight sends
+(0123456789ABCDEF) so that the owner's Moonlight got 409 for five minutes, and with a later step end or use up the owner's
+pending pairing. Now:
+- /pair from an address outside the LAN and Tailscale (net::from_address) is refused with 403 and a message Moonlight shows,
+  unless pair_over_internet = enabled in sunshine.conf (off by default, an option in the app and on the web page).
+- A pending pairing is keyed by the address it came from and its uniqueid (src/net/exposure.hpp), so requests from another
+  address neither find, end, use up nor block it. Moonlight sends every step of a pairing from the same address.
+- One address holds at most two pending pairings; Sunshine's limit of 32 for all stays.
+Somebody behind the owner's own address (the same NAT) is still indistinguishable; the PIN is what pairs.
+
+--- a/src/config.cpp
++++ b/src/config.cpp
+@@ -908,6 +908,7 @@
+    */
+   ps5_t ps5 {
+     false,  // close_game_on_quit
++    false,  // pair_over_internet
+   };
+ #endif
+ 
+@@ -1770,6 +1771,7 @@
+     bool_f(vars, "dd_config_revert_on_disconnect", video.dd.config_revert_on_disconnect);
+ #ifdef __SCE__
+     bool_f(vars, "close_game_on_quit", ps5.close_game_on_quit);
++    bool_f(vars, "pair_over_internet", ps5.pair_over_internet);
+ #endif
+     generic_f(vars, "dd_mode_remapping", video.dd.mode_remapping, dd::mode_remapping_from_view);
+     {
+--- a/src/config.h
++++ b/src/config.h
+@@ -420,6 +420,7 @@
+    */
+   struct ps5_t {
+     bool close_game_on_quit;  ///< Moonlight's Terminate App closes the session's game too (off by default).
++    bool pair_over_internet;  ///< Pairing requests from outside the LAN and Tailscale are answered (off by default).
+   };
+ 
+   extern ps5_t ps5;
+--- a/src/nvhttp.cpp
++++ b/src/nvhttp.cpp
+@@ -694,6 +694,15 @@
+     if (map_id_sess.contains(sess.client.uniqueID)) {
+       return pair_session_insert_e::ALREADY_EXISTS;
+     }
++#ifdef __SCE__
++    // One address can't fill the table and keep everyone else from pairing (src/net/exposure.hpp).
++    const auto from_address = std::ranges::count_if(map_id_sess, [&sess](const auto &entry) {
++      return entry.second.async_insert_pin.address == sess.async_insert_pin.address;
++    });
++    if (prospero::exposure::pairing_address_full(static_cast<std::size_t>(from_address))) {
++      return pair_session_insert_e::ADDRESS_FULL;
++    }
++#endif
+     if (map_id_sess.size() >= MAX_PENDING_PAIRING_SESSIONS) {
+       return pair_session_insert_e::FULL;
+     }
+@@ -1154,6 +1163,11 @@
+         tree.put("root.<xmlattr>.status_code", 503);
+         tree.put("root.<xmlattr>.status_message", "Too many pending pairing sessions");
+         return false;
++      case ADDRESS_FULL:
++        tree.put("root.paired", 0);
++        tree.put("root.<xmlattr>.status_code", 503);
++        tree.put("root.<xmlattr>.status_message", "Too many pending pairing requests from this address");
++        return false;
+       case ADDED:
+         break;
+       default:
+@@ -1189,6 +1203,24 @@
+     return false;
+   }
+ 
++#ifdef __SCE__
++  /**
++   * @brief Log a pairing request refused for coming from the internet: the first per address, then one every 10 minutes.
++   *
++   * @param address Normalized address the request came from.
++   */
++  void log_pairing_refused(const std::string &address) {
++    static std::mutex mutex;
++    static prospero::LogThrottle throttle {10min, 64};
++    std::size_t held_back = 0;
++    std::scoped_lock lock {mutex};
++    if (throttle.due(address, std::chrono::steady_clock::now(), held_back)) {
++      BOOST_LOG(info) << "Pairing refused for "sv << address << ": it isn't from the LAN or Tailscale, and pair_over_internet is off"sv
++                      << (held_back ? std::format(" ({} more since the last line)", held_back) : ""s);
++    }
++  }
++#endif
++
+   /**
+    * @brief Dispatch the top-level GameStream pairing request by phase.
+    *
+@@ -1209,6 +1241,19 @@
+       response->close_connection_after_response = true;
+     });
+ 
++#ifdef __SCE__
++    // Pairing goes over plain HTTP with a four-digit PIN that a man in the middle can try offline: from the LAN and
++    // Tailscale only, unless the owner allows the internet (src/net/exposure.hpp).
++    const auto address = net::addr_to_normalized_string(request->remote_endpoint().address());
++    if (!prospero::exposure::pairing_allowed(net::from_address(address) != net::WAN, config::ps5.pair_over_internet)) {
++      log_pairing_refused(address);
++      tree.put("root.paired", 0);
++      tree.put("root.<xmlattr>.status_code", 403);
++      tree.put("root.<xmlattr>.status_message", std::string(prospero::exposure::pairing_refused_message));
++      return;
++    }
++#endif
++
+     auto args = request->parse_query_string();
+     if (args.find("uniqueid"s) == std::end(args)) {
+       tree.put("root.<xmlattr>.status_code", 400);
+@@ -1217,7 +1262,13 @@
+       return;
+     }
+ 
++#ifdef __SCE__
++    // A pending pairing belongs to the address that started it: Moonlight sends the same uniqueid from every device, so
++    // requests from another address must neither find, end, use up nor block it.
++    auto uniqID = prospero::exposure::pairing_key(address, get_arg(args, "uniqueid"));
++#else
+     auto uniqID {get_arg(args, "uniqueid")};
++#endif
+ 
+     const auto phrase_it = args.find("phrase");
+     if (phrase_it != std::end(args) && phrase_it->second == "getservercert"sv) {
+--- a/src/nvhttp.h
++++ b/src/nvhttp.h
+@@ -181,7 +181,8 @@
+   enum class pair_session_insert_e {
+     ADDED,  ///< The session was inserted successfully.
+     ALREADY_EXISTS,  ///< A session with the same client unique ID is already active.
+-    FULL  ///< The bounded session store has reached its limit.
++    FULL,  ///< The bounded session store has reached its limit.
++    ADDRESS_FULL  ///< The address the request came from holds as many sessions as one address may (PS5 host).
+   };
+ 
+   /**

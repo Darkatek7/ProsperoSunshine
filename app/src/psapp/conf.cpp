@@ -76,6 +76,10 @@ const std::vector<OptionSpec> &option_specs()
         {"ps_button_all_players", "PS for all players",
          "Off: only the host, who plays as the console's user, has PS and Create. On: every player has them, friends online too.",
          OptionKind::toggle, "Off", {}, 0, 0, 1, 0},
+        // Sunshine reads this one (patch 0030), like close_game_on_quit. Off, pairing works from the LAN and Tailscale only.
+        {"pair_over_internet", "Pair over the internet",
+         "Off: devices pair at home, on the same network or over Tailscale. On: also from the internet, where only the four-digit PIN guards it.",
+         OptionKind::toggle, "Off", {}, 0, 0, 1, 0},
         };
         // The Experimental switches, which the host reads itself (src/sunshine/main_ps5.cpp), not Sunshine.
         for (int i = 0; i < PS_EXP_SWITCH_COUNT; ++i)
@@ -150,7 +154,8 @@ std::optional<std::string> validate(const OptionSpec &spec, std::string_view val
 std::optional<std::string> option_value(const Config &config, const OptionSpec &spec)
 {
     std::optional<std::string> value = config.get(spec.key);
-    if (value && (std::string_view(spec.key) == "close_game_on_quit" || std::string_view(spec.key) == "upnp"))
+    const std::string_view key = spec.key;
+    if (value && (key == "close_game_on_quit" || key == "upnp" || key == "pair_over_internet"))
     {
         // to_bool in Sunshine's src/config.cpp, which is case-sensitive.
         const std::string &v = *value;

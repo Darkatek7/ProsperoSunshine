@@ -243,6 +243,12 @@ function renderStatus(host, status, upnp) {
   ];
   const address = publicAddress(upnp);
   if (address) facts.push(['Internet address', addressWithCopy(address)]);
+  // The development switch control_lan: the control socket, which has no login, answers the whole network.
+  if (status.lan === '1') {
+    facts.unshift(['Control socket', el('span', { class: 'warn-text',
+      text: 'open to the LAN (control_lan): anyone in your network can pair devices, change this page\'s login and stop '
+        + 'the host. Delete the file unless you develop on a network you trust.' })]);
+  }
   $('status').replaceChildren(...facts.flatMap(([key, value]) => [el('dt', { text: key }), el('dd', {}, value)]));
 }
 

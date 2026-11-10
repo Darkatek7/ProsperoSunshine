@@ -382,6 +382,16 @@ Notice notice(std::uint32_t firmware, const HostLog &log, bool host_running)
     return {};
 }
 
+Notice with_control_lan(Notice notice, bool control_lan)
+{
+    if (!control_lan)
+        return notice;
+    std::string text = "Control socket open to the LAN (control_lan): anyone in your network can control the host.";
+    if (!notice.text.empty())
+        text += " " + notice.text;
+    return {text, true};
+}
+
 std::string capture_summary(const HostLog &log)
 {
     std::string out;

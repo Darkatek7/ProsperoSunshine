@@ -98,6 +98,15 @@ static void conf_tests()
     CHECK(!option_value(Config::parse("port = 48000\n"), *upnp));
     CHECK(option_value(Config::parse("upnp = enabled\n"), *upnp) == std::optional<std::string>("1"));
     CHECK(option_value(Config::parse("upnp = disabled\n"), *upnp) == std::optional<std::string>("0"));
+    // pair_over_internet: the host's own key, which Sunshine's config reads (patch 0030); off by default, read the same way.
+    const OptionSpec *pair = find_option("pair_over_internet");
+    REQUIRE(pair != nullptr);
+    CHECK(pair->kind == OptionKind::toggle);
+    CHECK(std::string_view(pair->default_label) == "Off");
+    CHECK(!validate(*pair, "1"));
+    CHECK(!option_value(Config::parse("port = 48000\n"), *pair));
+    CHECK(option_value(Config::parse("pair_over_internet = enabled\n"), *pair) == std::optional<std::string>("1"));
+    CHECK(option_value(Config::parse("pair_over_internet = 0\n"), *pair) == std::optional<std::string>("0"));
     // Other options stay as they are in the file.
     CHECK(option_value(Config::parse("experimental_hevc = on\n"), *find_option("experimental_hevc")) == std::optional<std::string>("on"));
 }
@@ -496,6 +505,13 @@ static void diag_tests()
     // No file yet: only the firmware can speak.
     CHECK(diag::parse_host_log("").capture == diag::Capture::unknown);
     CHECK(diag::notice(0x13000040, {}, false).text.empty());
+    // The control socket's development switch goes in front of the home page's line, as a failure.
+    CHECK(diag::with_control_lan({}, false).text.empty());
+    CHECK(diag::with_control_lan({}, true).bad);
+    CHECK(diag::with_control_lan({}, true).text.find("control_lan") != std::string::npos);
+    CHECK(diag::with_control_lan({"Firmware 13.60 is untested.", false}, true).text.find(" Firmware 13.60 is untested.") !=
+          std::string::npos);
+    CHECK(diag::with_control_lan({"Firmware 13.60 is untested.", false}, false).text == "Firmware 13.60 is untested.");
     diag::Notice note = diag::notice(0x10400000, {}, false);
     CHECK(note.text.find("Firmware 10.40 is untested") == 0);
     CHECK(!note.bad);

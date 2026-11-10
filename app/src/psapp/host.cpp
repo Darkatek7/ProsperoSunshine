@@ -450,7 +450,7 @@ void Host::read_files()
 void Host::poll()
 {
     const io::Exchange reply = io::exchange(kControlPort, "STATUS\nPAIRINGS\n", is_end, 3000);
-    bool running = false, streaming = false;
+    bool running = false, streaming = false, control_lan = false;
     std::string app, client, client_address, error;
     bool client_known = false;
     std::vector<Pairing> pairings;
@@ -481,6 +481,7 @@ void Host::poll()
                 client = status_field(line, "client");
                 client_address = status_field(line, "address");
                 client_known = line.find(" client=") != std::string::npos;
+                control_lan = status_field(line, "lan") == "1";
                 continue;
             }
             if (line == "END" || line.rfind("OK ", 0) != 0)
@@ -581,6 +582,7 @@ void Host::poll()
     state_.client = client;
     state_.client_address = client_address;
     state_.client_known = client_known;
+    state_.control_lan = control_lan;
     state_.pairings = pairings;
     state_.poll_error = error;
     state_.devices_known = devices_known;

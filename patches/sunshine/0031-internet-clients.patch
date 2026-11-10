@@ -1,0 +1,70 @@
+ProsperoSunshine: less for strangers on the internet, and Required encryption covers the input
+
+Two changes for clients outside the LAN and Tailscale:
+- /serverinfo over plain HTTP, which anybody may ask, told an internet address the running game (currentgame, a hash a list
+  of title IDs reverses), whether the console is busy, and the console's LAN address. From the internet it now says
+  currentgame 0, SUNSHINE_SERVER_FREE and LocalIP 127.0.0.1, the placeholder Moonlight already gets and ignores for IPv6.
+  Moonlight asks paired hosts over HTTPS, which tells all as before; from the LAN and Tailscale nothing changes.
+- With encryption mode Required (wan_encryption_mode or lan_encryption_mode = 2), ANNOUNCE also refuses a client that doesn't
+  use control stream v2. It checked only video and audio, so a client could send its control stream, and with it the input,
+  under GameStream's older schemes. Every client that encrypts video and audio uses v2, so none of them is refused.
+
+--- a/src/nvhttp.cpp
++++ b/src/nvhttp.cpp
+@@ -1422,6 +1422,14 @@
+     }
+ 
+     auto local_endpoint = request->local_endpoint();
++#ifdef __SCE__
++    // Over plain HTTP anybody may ask, from the internet a stranger who scans ports: the running game, the busy state and the
++    // console's LAN address stay unsaid there (src/net/exposure.hpp). Over HTTPS (paired devices) and from home, all is told.
++    const auto view = prospero::exposure::serverinfo_view(
++      std::is_same_v<SunshineHTTPS, T>,
++      net::from_address(net::addr_to_normalized_string(request->remote_endpoint().address())) != net::WAN
++    );
++#endif
+ 
+     pt::ptree tree;
+ 
+@@ -1457,6 +1465,12 @@
+     } else {
+       tree.put("root.LocalIP", net::addr_to_normalized_string(local_endpoint.address()));
+     }
++#ifdef __SCE__
++    if (!view.local_address) {
++      // The same placeholder as for IPv6 above, which Moonlight ignores.
++      tree.put("root.LocalIP", "127.0.0.1");
++    }
++#endif
+ 
+     const uint32_t codec_mode_flags = get_codec_mode_flags();
+     tree.put("root.ServerCodecModeSupport", codec_mode_flags);
+@@ -1478,6 +1492,11 @@
+     if (current_appid == 0) {
+       current_appid = proc::game_left_running();
+     }
++#endif
++#ifdef __SCE__
++    if (!view.running_game) {
++      current_appid = 0;
++    }
+ #endif
+     tree.put("root.PairStatus", pair_status);
+     tree.put("root.currentgame", current_appid);
+--- a/src/rtsp.cpp
++++ b/src/rtsp.cpp
+@@ -1301,9 +1301,12 @@
+       return;
+     }
+ 
+-    // Check that any required encryption is enabled
++    // Check that any required encryption is enabled. Required also covers what the client sends: its control stream, with
++    // the input, in control v2's AES-GCM. Every client that encrypts video and audio has it; one without it would protect its
++    // input only with GameStream's older schemes (a 16-byte IV with an 8-bit counter, or none for control messages).
+     auto encryption_mode = net::encryption_mode_for_address(sock.remote_endpoint().address());
+-    if (encryption_mode == config::ENCRYPTION_MODE_MANDATORY && (config.encryptionFlagsEnabled & (SS_ENC_VIDEO | SS_ENC_AUDIO)) != (SS_ENC_VIDEO | SS_ENC_AUDIO)) {
++    const bool control_v2 = config.controlProtocolType == 13 && (config.encryptionFlagsEnabled & SS_ENC_CONTROL_V2);
++    if (encryption_mode == config::ENCRYPTION_MODE_MANDATORY && ((config.encryptionFlagsEnabled & (SS_ENC_VIDEO | SS_ENC_AUDIO)) != (SS_ENC_VIDEO | SS_ENC_AUDIO) || !control_v2)) {
+       BOOST_LOG(error) << "Rejecting client that cannot comply with mandatory encryption requirement"sv;
+ 
+       respond(sock, session, &option, 403, "Forbidden", req->sequenceNumber, {});

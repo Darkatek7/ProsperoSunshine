@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Development control socket (ROADMAP P2.3). One line per request, one line per answer:
-//   STATUS                      -> "OK running=<0|1> app=<name> pending=<n> address=<ip> client=<name>"
-//                                  (address and client empty while no stream runs; client is the rest
-//                                  of the line and may contain spaces)
+//   STATUS                      -> "OK running=<0|1> app=<name> pending=<n> lan=<0|1> address=<ip> client=<name>"
+//                                  (lan=1: this socket is open to the LAN by control_lan; address and client empty while
+//                                  no stream runs; client is the rest of the line and may contain spaces)
 //   PAIRINGS                    -> "OK <id> <client name>" per pending request, then "END"
 //   PIN <pin> [name]            -> approves the only pending request ("OK paired" / "ERR ...")
 //   PIN <id> <pin> [name]       -> approves the given request
@@ -43,7 +43,9 @@
 //   FILE <request>, INSTALL     -> the host's files for an app that has no /data, from this console only (file_bridge.hpp)
 //   QUIT                        -> raises the host's shutdown event
 // It has no authentication, so it listens on 127.0.0.1 only (the PS5 app); the empty file
-// <appdata>/control_lan opens it to the LAN for development on trusted networks (ROADMAP P9.1).
+// <appdata>/control_lan opens it to the LAN for development on trusted networks (ROADMAP P9.1). Then anyone in the network
+// can pair devices, change the web page's login and stop the host, so the host says so: a warning in its log, lan=1 in
+// STATUS, which the app's home page and the web page's Status show.
 #pragma once
 #include "control/device_modes.hpp"
 #include "control/device_profiles.hpp"
@@ -85,6 +87,7 @@ private:
     std::atomic_bool report_listening_{false};
     std::atomic_bool relisten_{false};
     std::atomic_bool client_local_{true};
+    std::atomic_bool open_to_lan_{false};  // the socket was bound to every address (control_lan)
     std::atomic<std::chrono::steady_clock::rep> report_until_{0};
     std::string handle_locked(const std::string &line, Caller caller);
     void migrate_profiles();

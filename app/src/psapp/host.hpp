@@ -60,6 +60,7 @@ struct Snapshot
     bool client_known = false; // the host reports client= (newer hosts); then empty means nobody
     std::string client;       // STATUS client= and address=
     std::string client_address;
+    bool control_lan = false; // STATUS lan=1: the control socket answers the LAN (control_lan), the home page warns
     std::vector<Pairing> pairings;
     std::string poll_error;   // set when the socket is there but did not answer properly
     bool devices_known = false;       // the running host answered DEVICES (an older one does not)

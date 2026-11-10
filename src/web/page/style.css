@@ -88,6 +88,7 @@ input:focus, select:focus, button:focus-visible { outline: 2px solid var(--accen
 }
 .latency.good, .rate.good { color: var(--ok); }
 .latency.fair, .rate.fair { color: var(--warn); }
+.warn-text { color: var(--warn); font-weight: 600; }
 .latency.poor, .rate.poor { color: var(--danger); }
 
 .dialog {

@@ -1,0 +1,315 @@
+ProsperoSunshine: every per-device decision uses the certificate of the request's own connection
+
+Upstream kept the client certificate of the last TLS handshake in a process-wide value and read it when a request arrived. A
+client may send its request up to timeout_request (5 s) after its handshake, and any other client's handshake in between
+replaced the value, so a request could be judged with another paired device's certificate. The PS5 host builds its limits on
+that certificate: hidden apps and "PS5 Screen" (patch 0023), the profiles a device's controllers play as (0016), the keyboard
+and mouse owner (0022), quitting only the own stream (0012), and the stream list. A limited device could time its request to
+follow a trusted device's handshake (Moonlight polls /serverinfo every few seconds) and act as that device.
+
+The global is gone. Each HTTPS handler that needs the client (applist, launch, resume, cancel, appasset) takes the certificate
+from its own connection's TLS session (Request::socket(), Simple-Web-Server patch 0001), checks it again against the paired
+devices, as it may have been unpaired or disabled since the handshake, and refuses with 401 when there is none. Requests on
+the same connection read the same TLS session, so neither a reused address and port nor keep-alive can mix clients up.
+
+Two checks that need the right certificate come with it: /cancel closes the game (close_game_on_quit) only for the device whose
+launch started it or a device trusted with every app (process_ps5.cpp), and /appasset gives the default cover for an app the
+device may not see, so it can't tell that a hidden title is installed.
+
+--- a/src/nvhttp.cpp
++++ b/src/nvhttp.cpp
+@@ -211,10 +211,6 @@
+   client_t client_root;  ///< In-memory representation of the paired-client database.
+   std::atomic<uint32_t> session_id_counter;  ///< Monotonic counter used to allocate GameStream session IDs.
+ 
+-  // Set by TLS verify callback, read by launch/resume handler (single-threaded HTTPS server)
+-  std::string last_verified_client_cert;  ///< Last client certificate accepted by the TLS verify callback.  // NOSONAR(cpp:S5421): intentionally mutable global
+-  std::string last_verified_client_name;  ///< Friendly name of last client certificate accepted by the TLS verify callback. // NOSONAR(cpp:S5421): intentionally mutable global
+-
+   /**
+    * @brief Case-insensitive map used for HTTP headers and query parameters.
+    */
+@@ -491,14 +487,71 @@
+     return uuid;
+   }
+ 
++  std::pair<bool, std::string> get_client_status(const std::string_view cert_pem);
++
++  /**
++   * @brief The paired client that sent an HTTPS request.
++   */
++  struct request_client_t {
++    std::string cert;  ///< PEM of the certificate the request's own TLS connection presented.
++    std::string name;  ///< Friendly name given at pairing.
++  };
++
++  /**
++   * @brief The paired client that sent a request, from the certificate of the TLS connection the request came on.
++   * @details Each handler asks for it: a process-wide "last verified certificate" set at the end of every handshake could
++   *          be another client's by the time a request arrives (a client may wait up to timeout_request after its
++   *          handshake). The certificate is checked again, as the device may have been unpaired or disabled since.
++   * @return Nothing when the connection is gone or the client is no longer paired and enabled: the handler refuses then.
++   */
++  std::optional<request_client_t> request_client(const req_https_t &request) {
++    const auto socket = request->socket();
++    if (!socket) {
++      return std::nullopt;
++    }
++    crypto::x509_t x509 {
++#if OPENSSL_VERSION_MAJOR >= 3
++      SSL_get1_peer_certificate(socket->native_handle())
++#else
++      SSL_get_peer_certificate(socket->native_handle())
++#endif
++    };
++    if (!x509) {
++      return std::nullopt;
++    }
++    std::lock_guard lock {client_auth_mutex()};
++    if (verify_client_certificate(x509.get())) {
++      return std::nullopt;
++    }
++    auto pem = crypto::pem(x509);
++    auto [enabled, name] = get_client_status(pem);
++    if (!enabled) {
++      return std::nullopt;
++    }
++    return request_client_t {std::move(pem), std::move(name)};
++  }
++
++  /**
++   * @brief Put the answer for a client whose certificate isn't (or is no longer) authorized.
++   *
++   * @param tree XML response body to fill.
++   * @param path Path of the refused request.
++   */
++  void put_not_authorized(pt::ptree &tree, const std::string &path) {
++    tree.put("root.<xmlattr>.status_code"s, 401);
++    tree.put("root.<xmlattr>.query"s, path);
++    tree.put("root.<xmlattr>.status_message"s, "The client is not authorized. Certificate verification failed."s);
++  }
++
+   /**
+    * @brief Create launch session.
+    *
+    * @param host_audio Host audio.
+    * @param args Arguments forwarded to the callable or parser.
++   * @param client The paired client that sent the request: the session, its gamepads and its input belong to it.
+    * @return Constructed launch session object.
+    */
+-  std::shared_ptr<rtsp_stream::launch_session_t> make_launch_session(bool host_audio, const args_t &args) {
++  std::shared_ptr<rtsp_stream::launch_session_t> make_launch_session(bool host_audio, const args_t &args, const request_client_t &client) {
+     auto launch_session = std::make_shared<rtsp_stream::launch_session_t>();
+ 
+     launch_session->id = ++session_id_counter;
+@@ -542,8 +595,8 @@
+       launch_session->rtsp_iv_counter = 0;
+     }
+     launch_session->rtsp_url_scheme = launch_session->rtsp_cipher ? "rtspenc://"s : "rtsp://"s;
+-    launch_session->client_cert = last_verified_client_cert;
+-    launch_session->client_name = last_verified_client_name;
++    launch_session->client_cert = client.cert;
++    launch_session->client_name = client.name;
+ 
+     // Generate the unique identifiers for this connection that we will send later during RTSP handshake
+     std::array<unsigned char, 8> raw_payload;
+@@ -1409,6 +1462,12 @@
+       response->close_connection_after_response = true;
+     });
+ 
++    const auto client = request_client(request);
++    if (!client) {
++      put_not_authorized(tree, request->path);
++      return;
++    }
++
+     auto &apps = tree.add_child("root", pt::ptree {});
+ 
+     apps.put("<xmlattr>.status_code", 200);
+@@ -1416,7 +1475,7 @@
+     for (auto &proc : proc::proc.get_apps()) {
+ #ifdef __SCE__
+       // An app the operator hid from devices they don't trust isn't listed for one of them.
+-      if (!proc::app_allowed(last_verified_client_cert, proc)) {
++      if (!proc::app_allowed(client->cert, proc)) {
+         continue;
+       }
+ #endif
+@@ -1458,6 +1517,12 @@
+       }
+     });
+ 
++    const auto client = request_client(request);
++    if (!client) {
++      put_not_authorized(tree, request->path);
++      return;
++    }
++
+     auto args = request->parse_query_string();
+     if (
+       args.find("rikey"s) == std::end(args) ||
+@@ -1476,7 +1541,7 @@
+ 
+ #ifdef __SCE__
+     // The list leaves a hidden app out, but a client may start one by its ID from a list it kept: it is refused here too.
+-    if (!proc::app_id_allowed(last_verified_client_cert, (int) appid)) {
++    if (!proc::app_id_allowed(client->cert, (int) appid)) {
+       BOOST_LOG(info) << "Launch refused: the app is hidden from devices that aren't trusted"sv;
+       tree.put("root.resume", 0);
+       tree.put("root.<xmlattr>.status_code", 403);
+@@ -1496,7 +1561,7 @@
+     }
+ 
+     host_audio = util::from_view(get_arg(args, "localAudioPlayMode"));
+-    auto launch_session = make_launch_session(host_audio, args);
++    auto launch_session = make_launch_session(host_audio, args, *client);
+     remember_launch_client(*launch_session, net::addr_to_normalized_string(request->remote_endpoint().address()));
+ 
+     if (rtsp_stream::session_count() == 0) {
+@@ -1584,6 +1649,12 @@
+       response->close_connection_after_response = true;
+     });
+ 
++    const auto client = request_client(request);
++    if (!client) {
++      put_not_authorized(tree, request->path);
++      return;
++    }
++
+     auto current_appid = proc::proc.running();
+ #ifdef __SCE__
+     if (current_appid == 0) {
+@@ -1600,7 +1671,7 @@
+ 
+ #ifdef __SCE__
+     // Nor may such a device join a hidden app that a trusted one started.
+-    if (!proc::app_id_allowed(last_verified_client_cert, current_appid)) {
++    if (!proc::app_id_allowed(client->cert, current_appid)) {
+       BOOST_LOG(info) << "Resume refused: the running app is hidden from devices that aren't trusted"sv;
+       tree.put("root.resume", 0);
+       tree.put("root.<xmlattr>.status_code", 403);
+@@ -1626,7 +1697,7 @@
+     // A device that joins another device's stream gets its picture, unless a capture channel of its own is free. One that
+     // asks for another dynamic range than every running stream while none is free is turned away here, where Moonlight
+     // shows the reason, and not after its stream has started.
+-    if (rtsp_stream::session_count_except_cert(last_verified_client_cert) > 0) {
++    if (rtsp_stream::session_count_except_cert(client->cert) > 0) {
+       const bool wants_hdr = util::from_view(get_arg(args, "hdrMode", "0")) != 0;
+       if (const auto running_hdr = video::hdr_conflict(wants_hdr)) {
+         BOOST_LOG(warning) << "Resume refused: both capture channels run "sv << (*running_hdr ? "in HDR"sv : "without HDR"sv);
+@@ -1647,7 +1718,7 @@
+     if (no_active_sessions && args.find("localAudioPlayMode"s) != std::end(args)) {
+       host_audio = util::from_view(get_arg(args, "localAudioPlayMode"));
+     }
+-    const auto launch_session = make_launch_session(host_audio, args);
++    const auto launch_session = make_launch_session(host_audio, args, *client);
+     remember_launch_client(*launch_session, net::addr_to_normalized_string(request->remote_endpoint().address()));
+ 
+     if (no_active_sessions) {
+@@ -1717,15 +1788,21 @@
+       response->close_connection_after_response = true;
+     });
+ 
++    const auto client = request_client(request);
++    if (!client) {
++      put_not_authorized(tree, request->path);
++      return;
++    }
++
+     tree.put("root.cancel", 1);
+     tree.put("root.<xmlattr>.status_code", 200);
+ 
+ #ifdef __SCE__
+     // A second player: while another device streams, quitting ends only this device's stream, so the app and the game
+     // stay for the others. The last one to quit ends the app as before.
+-    if (!last_verified_client_cert.empty() && rtsp_stream::session_count_except_cert(last_verified_client_cert) > 0) {
++    if (rtsp_stream::session_count_except_cert(client->cert) > 0) {
+       BOOST_LOG(info) << "Quit from one device while another streams: ending only its stream"sv;
+-      rtsp_stream::terminate_sessions_by_cert(last_verified_client_cert);
++      rtsp_stream::terminate_sessions_by_cert(client->cert);
+       return;
+     }
+ #endif
+@@ -1736,8 +1813,9 @@
+       proc::proc.terminate();
+     }
+ #ifdef __SCE__
+-    // Only here: a session's end and the host's shutdown also call terminate(), and they must leave the game running.
+-    proc::close_game_on_quit();
++    // Only here: a session's end and the host's shutdown also call terminate(), and they must leave the game running. Only
++    // the device that started the game, or one trusted with every app, closes it.
++    proc::close_game_on_quit(client->cert);
+ #endif
+ 
+     // The config needs to be reverted regardless of whether "proc::proc.terminate()" was called or not.
+@@ -1753,8 +1831,23 @@
+   void appasset(resp_https_t response, req_https_t request) {
+     print_req<SunshineHTTPS>(request);
+ 
++    const auto client = request_client(request);
++    if (!client) {
++      response->write(SimpleWeb::StatusCode::client_error_unauthorized);
++      response->close_connection_after_response = true;
++      return;
++    }
++
+     auto args = request->parse_query_string();
+-    auto app_image = proc::proc.get_app_image((int) util::from_view(get_arg(args, "appid")));
++    auto appid = (int) util::from_view(get_arg(args, "appid"));
++#ifdef __SCE__
++    // A hidden app's own cover would tell a device it is hidden from that the title is installed: it gets the default one,
++    // as for an ID no app has.
++    if (!proc::app_id_allowed(client->cert, appid)) {
++      appid = -1;
++    }
++#endif
++    auto app_image = proc::proc.get_app_image(appid);
+ 
+     std::ifstream in(app_image, std::ios::binary);
+     SimpleWeb::CaseInsensitiveMultimap headers;
+@@ -1883,16 +1976,13 @@
+         return verified;
+       }
+ 
+-      // Check if this client is enabled
+-      auto pem = crypto::pem(x509);
+-      auto [enabled, client_name] = get_client_status(pem);
+-      if (!enabled) {
++      // Check if this client is enabled. Only the decision is made here: each request reads the certificate of its own
++      // connection (request_client).
++      if (!get_client_status(crypto::pem(x509)).first) {
+         BOOST_LOG(info) << "Client is disabled -- denied"sv;
+         return verified;
+       }
+ 
+-      last_verified_client_cert = pem;
+-      last_verified_client_name = client_name;
+       verified = 1;
+ 
+       return verified;
+@@ -1908,9 +1998,7 @@
+         resp->close_connection_after_response = true;
+       });
+ 
+-      tree.put("root.<xmlattr>.status_code"s, 401);
+-      tree.put("root.<xmlattr>.query"s, req->path);
+-      tree.put("root.<xmlattr>.status_message"s, "The client is not authorized. Certificate verification failed."s);
++      put_not_authorized(tree, req->path);
+     };
+ 
+     https_server.default_resource["GET"] = not_found<SunshineHTTPS>;
+--- a/src/process.h
++++ b/src/process.h
+@@ -253,9 +253,10 @@
+ 
+ #ifdef __SCE__
+   /**
+-   * @brief Terminate App: with close_game_on_quit, closes the game the session started or found in front (process_ps5.cpp).
++   * @brief Terminate App: with close_game_on_quit, closes the game the session started or found in front (process_ps5.cpp),
++   * if the client with this certificate started it or is trusted with every app.
+    */
+-  void close_game_on_quit();
++  void close_game_on_quit(const std::string &client_cert);
+ 
+   /**
+    * @brief With close_game_on_quit, the app ID of the game a finished session left in front, else 0 (process_ps5.cpp).

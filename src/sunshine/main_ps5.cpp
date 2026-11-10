@@ -290,6 +290,11 @@ int main(int argc, char *argv[]) {
         BOOST_LOG(info) << "Terminate App in Moonlight closes the session's game (close_game_on_quit)"sv;
         ps_diag_log("ProsperoSunshine: host close_game_on_quit=1\n");
     }
+    if (config::ps5.pair_over_internet) {
+        // Off by default: pairing from the internet goes over plain HTTP, with only the PIN to guard it (patch 0030).
+        BOOST_LOG(warning) << "Pairing is answered from the internet too (pair_over_internet)"sv;
+        ps_diag_log("ProsperoSunshine: host pair_over_internet=1\n");
+    }
     const auto switched_on = [&](const char *key) { return setting(key) == "1"; };
     int switches[PS_EXP_SWITCH_COUNT];
     for (int i = 0; i < PS_EXP_SWITCH_COUNT; ++i) switches[i] = switched_on(ps_exp_switch_at(i)->key);
@@ -351,6 +356,10 @@ int main(int argc, char *argv[]) {
                                               net::map_port(rtsp_stream::RTSP_SETUP_PORT), net::map_port(stream::VIDEO_STREAM_PORT),
                                               net::map_port(stream::CONTROL_PORT), net::map_port(stream::AUDIO_STREAM_PORT)));
             });
+        } else {
+            // A mapping without a lease that an earlier run left behind (a crash, a power cut) would forward the ports for
+            // good: removed now that UPnP is off. Nothing to do without upnp_permanent.txt.
+            upnp_thread = std::jthread([](std::stop_token stop) { prospero::upnp::remove_leftovers(stop, {}); });
         }
         ps_diag_log("ProsperoSunshine: host ready control_port=%u\n", prospero::ControlServer::port);
 

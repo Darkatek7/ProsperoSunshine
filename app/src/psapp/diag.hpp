@@ -95,6 +95,10 @@ struct Notice
 };
 Notice notice(std::uint32_t firmware, const HostLog &log, bool host_running);
 
+// The home page's line with the development switch control_lan in front of it, when the host reports it open (STATUS lan=1):
+// the control socket, which has no login, then answers anyone in the network.
+Notice with_control_lan(Notice notice, bool control_lan);
+
 // Moonlight sends the same placeholder, "roth", from every device. What to call a device waiting to pair ...
 std::string pairing_label(const std::string &name);
 // ... and the name to offer for it: the client's own if it sent one, else the first free "Moonlight <n>".

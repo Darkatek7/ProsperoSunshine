@@ -1,0 +1,77 @@
+ProsperoSunshine: limits on what a request to the GameStream ports may bring
+
+Anyone who reaches TCP 47989 or 47984 (the internet too, once the ports are forwarded) could send a request head of any size,
+as Simple-Web-Server's default buffer has no limit, and /pair kept the device name of any length for the five minutes a
+pairing waits. Both servers now take at most 64 KiB per request head or body, far above Moonlight's largest request (/pair
+with its client certificate in hex, a few KB); a longer head ends the connection, a longer body gets 413. The device name a
+pairing request brings is cut to 128 bytes at a UTF-8 character boundary (src/net/exposure.hpp), the length pin() accepts for
+the name the operator confirms. An exception other than boost::system::system_error out of a server's handlers (an allocation
+failure, say) used to leave its thread and end the process with std::terminate; it now logs and stops the host cleanly.
+
+--- a/src/nvhttp.cpp
++++ b/src/nvhttp.cpp
+@@ -31,6 +31,7 @@
+ #include "globals.h"
+ #include "httpcommon.h"
+ #include "logging.h"
++#include "net/exposure.hpp"
+ #include "net/log_throttle.hpp"
+ #include "network.h"
+ #include "nvhttp.h"
+@@ -54,6 +55,14 @@
+ 
+   crypto::cert_chain_t cert_chain;  ///< Enabled paired-client certificates accepted by Sunshine's GameStream HTTPS server.
+ 
++  /**
++   * @brief Most bytes a request's head (request line and headers) or body may take on either server.
++   * @details Simple-Web-Server's default is no limit, and anyone who reaches the ports may send. Moonlight's largest request
++   *          is /pair with its client certificate in hex in the query: under 3 KB for its 2048-bit RSA certificate, under 6 KB
++   *          for a 4096-bit one. A longer head ends the connection without an answer, a longer body gets 413.
++   */
++  constexpr std::size_t MAX_REQUEST_SIZE = 64 * 1024;
++
+   /**
+    * @brief Get the mutex protecting paired-client authorization state.
+    *
+@@ -1113,7 +1122,9 @@
+       fresh_sess.client.uniqueID = unique_id;
+       fresh_sess.client.cert = util::from_hex_vec(get_arg(args, "clientcert"), true);
+       fresh_sess.async_insert_pin.salt = get_arg(args, "salt");
+-      fresh_sess.async_insert_pin.device_name = get_arg(args, "devicename");
++      // Anyone's request: the name is kept for minutes and shown in the app and on the web page, so it is cut to the length an
++      // operator's name may have (pin() refuses a longer one).
++      fresh_sess.async_insert_pin.device_name = prospero::exposure::cap_name(get_arg(args, "devicename"), MAX_PAIRING_CLIENT_NAME_SIZE);
+       fresh_sess.async_insert_pin.address = net::addr_to_normalized_string(request->remote_endpoint().address());
+       if (!pin_stdin) {
+         fresh_sess.async_insert_pin.response = response;
+@@ -2019,6 +2030,7 @@
+     https_server.config.reuse_address = true;
+     https_server.config.address = net::get_bind_address(address_family);
+     https_server.config.port = port_https;
++    https_server.config.max_request_streambuf_size = MAX_REQUEST_SIZE;
+ 
+     http_server.default_resource["GET"] = not_found<SimpleWeb::HTTP>;
+     http_server.resource["^/serverinfo$"]["GET"] = serverinfo<SimpleWeb::HTTP>;
+@@ -2029,6 +2041,7 @@
+     http_server.config.reuse_address = true;
+     http_server.config.address = net::get_bind_address(address_family);
+     http_server.config.port = port_http;
++    http_server.config.max_request_streambuf_size = MAX_REQUEST_SIZE;
+ 
+     auto accept_and_run = [&](auto *web_server) {
+       try {
+@@ -2045,6 +2058,14 @@
+         BOOST_LOG(fatal) << "Couldn't start http server on ports ["sv << port_https << ", "sv << port_https << "]: "sv << err.what();
+         shutdown_event->raise(true);
+         return;
++      } catch (std::exception &err) {
++        // Anything else out of the server's handlers (std::bad_alloc, say) would leave the thread and end the process with
++        // std::terminate, without a log line and with the streams and port mappings left as they were. Stop cleanly instead.
++        BOOST_LOG(fatal) << "HTTP server on port "sv << web_server->config.port << " failed: "sv << err.what();
++        shutdown_event->raise(true);
++      } catch (...) {
++        BOOST_LOG(fatal) << "HTTP server on port "sv << web_server->config.port << " failed"sv;
++        shutdown_event->raise(true);
+       }
+     };
+     std::jthread ssl {accept_and_run, &https_server};

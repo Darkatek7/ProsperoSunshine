@@ -9,16 +9,19 @@
 #include "control/http_guard.hpp"
 #include "control/uuid_lines.hpp"
 #include "host_control.hpp"
+#include "net/exposure.hpp"
 #include "sunshine/platform_ps5.hpp"
 #include "sunshine/video_ps5.hpp"
 #include "web/web_login.hpp"
 #include "platform/ps5/console_users.h"
 #include "src/logging.h"
+#include "src/network.h"
 #include "src/platform/common.h"
 #include "src/nvhttp.h"
 #include "src/process.h"
 #include "src/rtsp.h"
 #include <algorithm>
+#include <arpa/inet.h>
 #include <cerrno>
 #include <chrono>
 #include <filesystem>
@@ -120,7 +123,8 @@ std::string ControlServer::handle_locked(const std::string &line, Caller caller)
     if (command == "STATUS") {
         const auto pending = nvhttp::get_pending_pairings().size();
         std::string answer = "OK running="s + (proc::proc.running() > 0 ? "1" : "0") +
-                             " app=" + one_line(proc::proc.get_last_run_app_name()) + " pending=" + std::to_string(pending);
+                             " app=" + one_line(proc::proc.get_last_run_app_name()) + " pending=" + std::to_string(pending) +
+                             " lan=" + (open_to_lan_ ? "1" : "0");
         // The client of the live stream; the name comes last because it may contain spaces.
         const auto client = rtsp_stream::session_count() > 0 ? nvhttp::get_last_launch_client() : nvhttp::launch_client_t{};
         return answer + " address=" + client.address + " client=" + one_line(client.name);
@@ -465,12 +469,18 @@ void ControlServer::run_report(std::stop_token stop) {
     while (!stop.stop_requested()) {
         pollfd pfd{listener, POLLIN, 0};
         if (poll(&pfd, 1, 250) <= 0) continue;
-        const int client = accept(listener, nullptr, nullptr);
+        sockaddr_in peer{};
+        socklen_t peer_size = sizeof peer;
+        const int client = accept(listener, reinterpret_cast<sockaddr *>(&peer), &peer_size);
         if (client < 0) {
             std::this_thread::sleep_for(100ms);  // no busy loop on a socket lost to rest mode
             continue;
         }
-        if (std::chrono::steady_clock::now().time_since_epoch().count() < report_until_) {
+        // Only to the LAN and Tailscale, as the web page: the port isn't forwarded, but a DMZ or an open firewall reaches it,
+        // and a stranger's idle connection would hold up the owner's phone for its read wait.
+        char text[INET_ADDRSTRLEN] = {};
+        const bool home = inet_ntop(AF_INET, &peer.sin_addr, text, sizeof text) && net::from_address(text) != net::WAN;
+        if (exposure::report_allowed(home, std::chrono::steady_clock::now().time_since_epoch().count() < report_until_)) {
             setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one);
             // The request does not matter; reading it keeps the close from resetting the answer.
             pollfd cfd{client, POLLIN, 0};
@@ -511,7 +521,15 @@ void ControlServer::run(std::stop_token stop) {
         close(listener);
         return;
     }
-    BOOST_LOG(info) << "Control socket on port "sv << port << (lan ? " (LAN, development switch control_lan)"sv : " (local only)"sv);
+    open_to_lan_ = lan;
+    if (lan) {
+        BOOST_LOG(warning) << "Control socket on port "sv << port << " is open to the LAN (development switch "sv
+                           << (platf::appdata() / "control_lan").string()
+                           << "): anyone in the network can pair devices, change the web page's login and stop the host. "
+                              "Delete the file unless you develop on a network you trust."sv;
+    } else {
+        BOOST_LOG(info) << "Control socket on port "sv << port << " (local only)"sv;
+    }
     while (!stop.stop_requested()) {
         pollfd pfd{listener, POLLIN, 0};
         if (poll(&pfd, 1, 250) <= 0) continue;

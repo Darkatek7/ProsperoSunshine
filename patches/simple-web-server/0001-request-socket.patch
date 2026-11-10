@@ -1,0 +1,28 @@
+ProsperoSunshine: a request handler can reach the socket of its own connection
+
+Sunshine's GameStream HTTPS server decides per paired device what it may do (hidden apps, "PS5 Screen", profiles), by the
+client certificate. Request keeps its connection private, so Sunshine took the certificate from a process-wide value that the
+last TLS handshake set, which another client's handshake could overwrite before the request arrived. Request::socket() hands
+out the connection's socket (an SSL stream for HTTPS), so a handler reads the certificate of the connection its request came
+on. It shares ownership of the connection while held, like the session that runs the handler.
+
+--- a/server_http.hpp
++++ b/server_http.hpp
+@@ -271,6 +271,17 @@
+         return asio::ip::tcp::endpoint();
+       }
+ 
++      /// The socket of the connection this request came on, for what only the transport knows, such as the certificate a TLS
++      /// client presented in its handshake. The pointer keeps the connection alive while it is held; nullptr once the
++      /// connection is gone.
++      std::shared_ptr<socket_type> socket() const noexcept {
++        if(auto connection = this->connection.lock()) {
++          if(connection->socket)
++            return std::shared_ptr<socket_type>(connection, connection->socket.get());
++        }
++        return nullptr;
++      }
++
+       /// Deprecated, please use remote_endpoint().address().to_string() instead.
+       SW_DEPRECATED std::string remote_endpoint_address() const noexcept {
+         try {
