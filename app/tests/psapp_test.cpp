@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // PC tests for the app's pure parts: sunshine.conf edits, the Payload Manager's autoload list, the
-// diagnostic report and the web page's login.
+// diagnostic report, the web page's login and (settings_layout_test.cpp) the settings page's layout.
 #include "app/psapp/autoload.hpp"
 #include "app/psapp/conf.hpp"
 #include "app/psapp/diag.hpp"
@@ -10,27 +10,11 @@
 #include <cstdio>
 #include <string>
 
-static int failures = 0;
-#define CHECK(cond)                                                                                \
-    do                                                                                             \
-    {                                                                                              \
-        if (!(cond))                                                                               \
-        {                                                                                          \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);                            \
-            ++failures;                                                                            \
-        }                                                                                          \
-    } while (0)
-// CHECK, and the test function stops when it fails: for a pointer the next lines dereference.
-#define REQUIRE(cond)                                                                              \
-    do                                                                                             \
-    {                                                                                              \
-        if (!(cond))                                                                               \
-        {                                                                                          \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);                            \
-            ++failures;                                                                            \
-            return;                                                                                \
-        }                                                                                          \
-    } while (0)
+#include "check.hpp"
+
+// settings_layout_test.cpp
+void settings_layout_tests();
+bool write_settings_svg(const char *path);
 
 using namespace psapp;
 
@@ -107,6 +91,19 @@ static void conf_tests()
     CHECK(!option_value(Config::parse("port = 48000\n"), *pair));
     CHECK(option_value(Config::parse("pair_over_internet = enabled\n"), *pair) == std::optional<std::string>("1"));
     CHECK(option_value(Config::parse("pair_over_internet = 0\n"), *pair) == std::optional<std::string>("0"));
+    // fec_percentage: Sunshine's own key, a number up to 80 (above it Sunshine stops making room for it in the bitrate).
+    const OptionSpec *fec = find_option("fec_percentage");
+    REQUIRE(fec != nullptr);
+    CHECK(fec->kind == OptionKind::number);
+    CHECK(fec->fallback == 20 && std::string_view(fec->default_label) == "20 %");
+    CHECK(!validate(*fec, "0"));
+    CHECK(!validate(*fec, "20"));
+    CHECK(!validate(*fec, "80"));
+    CHECK(validate(*fec, "81"));
+    CHECK(validate(*fec, "-1"));
+    CHECK(option_value(Config::parse("fec_percentage = 35\n"), *fec) == std::optional<std::string>("35"));
+    CHECK(std::string_view(fec->unit) == "%");
+    CHECK(std::string_view(find_option("ping_timeout")->unit) == "ms");
     // Other options stay as they are in the file.
     CHECK(option_value(Config::parse("experimental_hevc = on\n"), *find_option("experimental_hevc")) == std::optional<std::string>("on"));
 }
@@ -718,12 +715,19 @@ static void web_tests()
     CHECK(!odd.ok && !odd.reason.empty());
 }
 
-int main()
+// With --svg <file>, also writes the settings page's layout as an SVG picture.
+int main(int argc, char **argv)
 {
     conf_tests();
     autoload_tests();
     diag_tests();
     web_tests();
+    settings_layout_tests();
+    if (argc == 3 && std::string(argv[1]) == "--svg" && !write_settings_svg(argv[2]))
+    {
+        std::printf("FAIL: could not write %s\n", argv[2]);
+        ++failures;
+    }
     std::printf("%s\n", failures == 0 ? "psapp tests passed" : "psapp tests FAILED");
     return failures == 0 ? 0 : 1;
 }

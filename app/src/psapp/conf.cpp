@@ -35,14 +35,17 @@ const std::vector<Choice> kEncryption = {
 } // namespace
 
 // Names, ranges and defaults from Sunshine a679b059 src/config.cpp; ping_timeout's default is the
-// host's own (src/sunshine/main_ps5.cpp sets 2 s before the file is read).
+// host's own (src/sunshine/main_ps5.cpp sets 2 s before the file is read). The order is the settings page's: Host,
+// Network, Playing, Experimental (settings_layout.cpp lays the groups out; the app's tests check every option has a tile).
 const std::vector<OptionSpec> &option_specs()
 {
+    using G = OptionGroup;
+    using I = icons::Icon;
     static const std::vector<OptionSpec> specs = [] {
         std::vector<OptionSpec> list = {
-        {"sunshine_name", "Host name", "The name Moonlight shows.", OptionKind::text,
+        {G::host, I::tag, "sunshine_name", "Host name", "The name Moonlight shows.", OptionKind::text,
          "network name", {}, 0, 0, 1, 0},
-        {"min_log_level", "Log level", "Detail in sunshine.log and the kernel log.", OptionKind::choice,
+        {G::host, I::log, "min_log_level", "Log level", "Detail in sunshine.log and the kernel log.", OptionKind::choice,
          kDebugBuild ? "Debug" : "Info",
          {{"verbose", "Verbose"},
           {"debug", "Debug"},
@@ -52,43 +55,50 @@ const std::vector<OptionSpec> &option_specs()
           {"fatal", "Fatal"},
           {"none", "None"}},
          0, 0, 1, 0},
-        {"ping_timeout", "Ping timeout (ms)",
-         "Ends a stream whose client went silent.",
-         OptionKind::number, "2000 ms", {}, 500, 60000, 500, 2000},
-        {"port", "Base port",
+        {G::network, I::plug, "port", "Base port",
          "Moonlight's ports count from here.",
          OptionKind::number, "47989", {}, 1025, 65514, 1, 47989},
-        {"lan_encryption_mode", "LAN encryption",
-         "Encrypts the stream in the local network.", OptionKind::choice, "Off",
-         kEncryption, 0, 0, 1, 0},
-        {"wan_encryption_mode", "Internet encryption",
-         "The same for clients outside it.", OptionKind::choice,
-         "Optional", kEncryption, 0, 0, 1, 0},
         // Sunshine's own key, read by the host (src/net/upnp_client.cpp). Off: the ports are forwarded by hand, if at all.
-        {"upnp", "UPnP port forwarding",
+        {G::network, I::wifi, "upnp", "UPnP port forwarding",
          "On: the host asks the router to forward Moonlight's ports, so devices outside your network can connect. The web page shows the result.",
          OptionKind::toggle, "Off", {}, 0, 0, 1, 0},
+        // Sunshine reads this one (patch 0030), like close_game_on_quit. Off, pairing works from the LAN and Tailscale only.
+        {G::network, I::link, "pair_over_internet", "Pair over the internet",
+         "Off: devices pair at home, on the same network or over Tailscale. On: also from the internet, where only the four-digit PIN guards it.",
+         OptionKind::toggle, "Off", {}, 0, 0, 1, 0},
+        {G::network, I::lock, "lan_encryption_mode", "LAN encryption",
+         "Encrypts the stream in the local network.", OptionKind::choice, "Off",
+         kEncryption, 0, 0, 1, 0},
+        {G::network, I::globe, "wan_encryption_mode", "Internet encryption",
+         "The same for clients outside it.", OptionKind::choice,
+         "Optional", kEncryption, 0, 0, 1, 0},
+        {G::network, I::timer, "ping_timeout", "Ping timeout (ms)",
+         "Ends a stream whose client went silent.",
+         OptionKind::number, "2000 ms", {}, 500, 60000, 500, 2000, "ms"},
         // Sunshine reads this one (patch 0010), as it does the options above.
-        {"close_game_on_quit", "Quit closes the game",
+        {G::playing, I::home, "close_game_on_quit", "Quit closes the game",
          "On: quitting in Moonlight also closes the game the stream started or found in front, and unsaved progress is lost.",
          OptionKind::toggle, "Off", {}, 0, 0, 1, 0},
         // The host reads this one (src/sunshine/platform_ps5.cpp). Off, only the host's controller has PS and Create.
-        {"ps_button_all_players", "PS for all players",
+        {G::playing, I::monitor, "ps_button_all_players", "PS for all players",
          "Off: only the host, who plays as the console's user, has PS and Create. On: every player has them, friends online too.",
          OptionKind::toggle, "Off", {}, 0, 0, 1, 0},
-        // Sunshine reads this one (patch 0030), like close_game_on_quit. Off, pairing works from the LAN and Tailscale only.
-        {"pair_over_internet", "Pair over the internet",
-         "Off: devices pair at home, on the same network or over Tailscale. On: also from the internet, where only the four-digit PIN guards it.",
-         OptionKind::toggle, "Off", {}, 0, 0, 1, 0},
+        // Sunshine's own key (src/config.cpp, 0 to 100, default 20), which the host leaves alone: stream.cpp adds that many
+        // Reed-Solomon packets per 100 video packets, and rtsp.cpp lowers the encoder's bitrate to make room for them, up to
+        // 80. Above 80 it stops lowering it and the stream outgrows the bitrate the client asked for, so the app stops there.
+        {G::playing, I::check, "fec_percentage", "Error correction (%)",
+         "Rebuilds lost video. More survives more packet loss but costs bitrate.",
+         OptionKind::number, "20 %", {}, 0, 80, 1, 20, "%"},
         };
         // The Experimental switches, which the host reads itself (src/sunshine/main_ps5.cpp), not Sunshine.
         for (int i = 0; i < PS_EXP_SWITCH_COUNT; ++i)
         {
             const ps_exp_switch_info *info = ps_exp_switch_at(i);
-            list.push_back({info->key, info->label, info->help, OptionKind::toggle, "Off", {}, 0, 0, 1, 0});
+            list.push_back({G::experimental, I::sliders, info->key, info->label, info->help, OptionKind::toggle, "Off", {}, 0, 0, 1, 0});
         }
-        // The host reads this one too (src/sunshine/platform_ps5.cpp). In the Experimental row, but no firmware check locks it.
-        list.push_back({"surround_sound", "Surround",
+        // The host reads this one too (src/sunshine/platform_ps5.cpp). Among the Experimental switches, but no firmware check
+        // locks it.
+        list.push_back({G::experimental, I::sliders, "surround_sound", "Surround",
                         "5.1 or 7.1 sound for devices that ask for it. The speaker order is not verified yet.",
                         OptionKind::toggle, "Off", {}, 0, 0, 1, 0});
         return list;
@@ -104,6 +114,16 @@ const OptionSpec *find_option(std::string_view key)
             return &spec;
     }
     return nullptr;
+}
+
+int experimental_switch(const OptionSpec &spec)
+{
+    for (int i = 0; i < PS_EXP_SWITCH_COUNT; ++i)
+    {
+        if (std::string_view(spec.key) == ps_exp_switch_at(i)->key)
+            return i;
+    }
+    return -1;
 }
 
 std::optional<std::string> validate(const OptionSpec &spec, std::string_view value)

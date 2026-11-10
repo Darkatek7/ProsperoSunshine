@@ -5,6 +5,8 @@
 // comments included. Pure code, tested on the PC (app/tests).
 #pragma once
 
+#include "app/psapp/icon_id.hpp"
+
 #include <optional>
 #include <string>
 #include <string_view>
@@ -21,6 +23,16 @@ enum class OptionKind
     toggle, // on ("1") or off: Cross flips it on the tile, and off removes the key
 };
 
+// The settings page's sections (settings_layout.hpp places them). Every option names its own, and its icon, as the first two
+// fields of its OptionSpec, so an option added without them does not compile.
+enum class OptionGroup
+{
+    host,         // the host's name and log
+    network,      // how clients reach it: ports, pairing, encryption, the ping timeout
+    playing,      // what a stream does on the console
+    experimental, // the firmware switches (experimental_list.h) and surround sound
+};
+
 struct Choice
 {
     const char *value; // as written to the file
@@ -29,6 +41,8 @@ struct Choice
 
 struct OptionSpec
 {
+    OptionGroup group;
+    icons::Icon icon;
     const char *key;
     const char *label;
     const char *help;
@@ -39,11 +53,14 @@ struct OptionSpec
     long max = 0;
     long step = 1;
     long fallback = 0; // the first number offered when the key is not set
+    const char *unit = ""; // after a number's value on its tile
 };
 
-// The options the app offers, in screen order.
+// The options the app offers, group by group in the settings page's order.
 const std::vector<OptionSpec> &option_specs();
 const OptionSpec *find_option(std::string_view key);
+// The option's place in experimental_list.h (ps_exp_switch_at), or -1 for an option that is no such switch.
+int experimental_switch(const OptionSpec &spec);
 
 // Checks a value for an option; an empty optional means "fine", else the reason.
 std::optional<std::string> validate(const OptionSpec &spec, std::string_view value);

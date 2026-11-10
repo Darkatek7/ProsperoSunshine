@@ -3,6 +3,7 @@
 
 #include "app/psapp/experimental_list.h"
 #include "app/psapp/icons.hpp"
+#include "app/psapp/settings_layout.hpp"
 #include "app/psapp/web.hpp"
 #include "platform/ps5/system.hpp"
 #include "ui/glyphs.hpp"
@@ -41,15 +42,17 @@ const Rect kPairedDevices{1220.0f, 740.0f, 604.0f, 172.0f};
 constexpr int kReportVisible = 19; // lines of the report on screen
 constexpr float kReportLine = 26.0f;
 
-const Icon kOptionIcons[] = {Icon::tag, Icon::log, Icon::timer, Icon::plug, Icon::lock, Icon::globe, Icon::sliders, Icon::home};
-// option_specs(): two rows of four, then a row with the Experimental switches
-constexpr int kRowLength = 4;
-constexpr int kFirstSwitch = 8;
-// The Experimental row: the firmware switches, then surround sound, which no firmware check locks.
-constexpr int kSwitchTiles = PS_EXP_SWITCH_COUNT + 1;
-constexpr int kTiles = kFirstSwitch + kSwitchTiles;
-// Under the tiles: Save, Save and restart, Revert, and at the right end the web page.
-constexpr int kSettingsActions = 4;
+// The settings page's tiles, one per option_specs() entry, and its actions under them (settings_layout.hpp): Save, Save
+// and restart, Revert, and at the right end the web page. The focus counts the tiles first, then the actions.
+namespace layout = settings_layout;
+int settings_tiles()
+{
+    return static_cast<int>(layout::page().tiles.size());
+}
+Rect rect_of(const layout::Box &box)
+{
+    return {box.x, box.y, box.w, box.h};
+}
 // The web page's sheet: its height, where its rows start in it, and their pitch.
 constexpr float kWebSheetHeight = 770.0f;
 constexpr float kWebRowsTop = 474.0f;
@@ -76,7 +79,8 @@ std::string shorten(const hui::ui::FontRef &font, const std::string &text, float
 
 } // namespace
 
-Screen::Screen(Host &host, const hui::ui::Fonts &fonts) : host_(host), fonts_(fonts)
+Screen::Screen(Host &host, const hui::ui::Fonts &fonts)
+    : host_(host), fonts_(fonts), tile_amount_(static_cast<std::size_t>(layout::page().items()), 0.0f)
 {
     style_.theme.focus = kAccent.with_alpha(0.3f);
     style_.theme.primary = kAccent;
@@ -106,8 +110,8 @@ std::string Screen::value_text(int index) const
 {
     const OptionSpec &spec = option_specs()[static_cast<std::size_t>(index)];
     if (switch_not_needed(index))
-        return diag::experimental_no_effect(snap_.firmware, spec.key) ? ps_exp_switch_at(index - kFirstSwitch)->no_effect_word
-                                                                      : "Verified here"; // five tiles leave no room for more
+        return diag::experimental_no_effect(snap_.firmware, spec.key) ? ps_exp_switch_at(experimental_switch(spec))->no_effect_word
+                                                                      : "Verified here"; // the narrow tiles leave no room for more
     const auto it = edits_.find(spec.key);
     if (it == edits_.end() || !it->second)
         return spec.default_label;
@@ -120,8 +124,8 @@ std::string Screen::value_text(int index) const
                 return choice.label;
         }
     }
-    if (spec.kind == OptionKind::number && std::string(spec.key) == "ping_timeout")
-        return value + " ms";
+    if (spec.kind == OptionKind::number && *spec.unit != '\0')
+        return value + " " + spec.unit;
     if (spec.kind == OptionKind::toggle)
         return value == "1" ? "On" : "Off";
     return value;
@@ -129,8 +133,10 @@ std::string Screen::value_text(int index) const
 
 bool Screen::switch_not_needed(int index) const
 {
-    return index >= kFirstSwitch && index < kFirstSwitch + PS_EXP_SWITCH_COUNT &&
-           !diag::experimental_needed(snap_.firmware, option_specs()[static_cast<std::size_t>(index)].key);
+    if (index < 0 || index >= settings_tiles())
+        return false;
+    const OptionSpec &spec = option_specs()[static_cast<std::size_t>(index)];
+    return experimental_switch(spec) >= 0 && !diag::experimental_needed(snap_.firmware, spec.key);
 }
 
 int Screen::visible_pairings() const
@@ -186,26 +192,12 @@ Rect Screen::device_row_rect(int visible) const
 
 Rect Screen::tile_rect(int index) const
 {
-    // The gap before the switches holds the section's caption.
-    if (index >= kFirstSwitch)
-    {
-        const float width = (1728.0f - 20.0f * static_cast<float>(kSwitchTiles - 1)) / static_cast<float>(kSwitchTiles);
-        return {96.0f + static_cast<float>(index - kFirstSwitch) * (width + 20.0f), 594.0f, width, 124.0f};
-    }
-    constexpr float kNarrow = (1728.0f - 3.0f * 24.0f) / 4.0f;
-    const int row = index / kRowLength, col = index % kRowLength;
-    return {96.0f + static_cast<float>(col) * (kNarrow + 24.0f), 276.0f + 138.0f * static_cast<float>(row), kNarrow, 124.0f};
+    return rect_of(layout::page().tiles[static_cast<std::size_t>(index)]);
 }
 
 Rect Screen::settings_action_rect(int index) const
 {
-    if (index == 3)
-        return {1824.0f - 360.0f, 736.0f, 360.0f, 84.0f}; // the web page, apart from the three about sunshine.conf
-    static const float widths[3] = {250.0f, 400.0f, 340.0f};
-    float x = 96.0f;
-    for (int i = 0; i < index; ++i)
-        x += widths[i] + 20.0f;
-    return {x, 736.0f, widths[index], 84.0f};
+    return rect_of(layout::page().actions[static_cast<std::size_t>(index)]);
 }
 
 Rect Screen::web_row_rect(int index) const
@@ -223,7 +215,7 @@ Rect Screen::focus_rect() const
                                                    : kPairedDevices;
     if (page_ == Page::diagnostics)
         return {96.0f, 836.0f, 340.0f, 76.0f};
-    return tile_ < kTiles ? tile_rect(tile_) : settings_action_rect(tile_ - kTiles);
+    return tile_ < settings_tiles() ? tile_rect(tile_) : settings_action_rect(tile_ - settings_tiles());
 }
 
 // ---- update and input -------------------------------------------------------------------------
@@ -335,8 +327,8 @@ void Screen::update(const hui::InputFrame &input, float dt, hui::ui::Feedback &f
     streams_amount_ = approach(streams_amount_,
                                page_ == Page::home && home_row_ == 1 && streams_shown() && home_card_ == visible_pairings() ? 1.0f : 0.0f,
                                dt, 14.0f);
-    for (int i = 0; i < kTiles + kSettingsActions; ++i)
-        tile_amount_[i] = approach(tile_amount_[i], page_ == Page::settings && tile_ == i ? 1.0f : 0.0f, dt, 14.0f);
+    for (std::size_t i = 0; i < tile_amount_.size(); ++i)
+        tile_amount_[i] = approach(tile_amount_[i], page_ == Page::settings && tile_ == static_cast<int>(i) ? 1.0f : 0.0f, dt, 14.0f);
     report_amount_ = approach(report_amount_, page_ == Page::diagnostics ? 1.0f : 0.0f, dt, 14.0f);
     const float tab_target = static_cast<float>(static_cast<int>(page_));
     tab_x_ = tab_x_ < 0.0f ? tab_target : approach(tab_x_, tab_target, dt, 16.0f);
@@ -472,38 +464,12 @@ void Screen::handle_settings(const hui::InputFrame &input, hui::ui::Feedback &fe
     case Direction::down:
     case Direction::left:
     case Direction::right: {
-        int next = tile_;
-        if (tile_ < kTiles)
-        {
-            const bool switches = tile_ >= kFirstSwitch, second = !switches && tile_ >= kRowLength;
-            const int col = switches ? tile_ - kFirstSwitch : tile_ % kRowLength;
-            // Up and down go to the nearest tile: the two rows of four line up; the switches' row has its own count.
-            const int last_switch = kSwitchTiles - 1;
-            const int to_switch = kFirstSwitch + (col * last_switch + (kRowLength - 1) / 2) / (kRowLength - 1);
-            const int from_switch = kRowLength + (col * (kRowLength - 1) + last_switch / 2) / std::max(last_switch, 1);
-            if (input.nav == Direction::left)
-                next = col > 0 ? tile_ - 1 : -1;
-            else if (input.nav == Direction::right)
-                next = col < (switches ? last_switch : kRowLength - 1) ? tile_ + 1 : -1;
-            else if (input.nav == Direction::up)
-                next = switches ? from_switch : second ? tile_ - kRowLength : -1;
-            else
-                next = switches ? kTiles + (col == last_switch ? 3 : std::min(col, 2))
-                       : second ? std::min(to_switch, kFirstSwitch + last_switch)
-                                : tile_ + kRowLength;
-        }
-        else
-        {
-            const int index = tile_ - kTiles;
-            if (input.nav == Direction::left)
-                next = index > 0 ? tile_ - 1 : -1;
-            else if (input.nav == Direction::right)
-                next = index < kSettingsActions - 1 ? tile_ + 1 : -1;
-            else if (input.nav == Direction::up)
-                next = kFirstSwitch + (index == 3 ? kSwitchTiles - 1 : std::min(index, kSwitchTiles - 1));
-            else
-                next = -1;
-        }
+        // Rows and columns come from the tiles' places (settings_layout.cpp), which the app's tests walk.
+        const layout::Move move = input.nav == Direction::up     ? layout::Move::up
+                                  : input.nav == Direction::down ? layout::Move::down
+                                  : input.nav == Direction::left ? layout::Move::left
+                                                                 : layout::Move::right;
+        const int next = layout::next(layout::page(), tile_, move);
         if (next < 0)
         {
             if (!input.nav_repeat)
@@ -519,9 +485,9 @@ void Screen::handle_settings(const hui::InputFrame &input, hui::ui::Feedback &fe
     }
     if (input.is_pressed(InputAction::confirm))
     {
-        if (tile_ >= kTiles)
+        if (tile_ >= settings_tiles())
         {
-            run(static_cast<Action>(static_cast<int>(Action::save) + tile_ - kTiles), feedback);
+            run(static_cast<Action>(static_cast<int>(Action::save) + tile_ - settings_tiles()), feedback);
         }
         else if (switch_not_needed(tile_))
         {
@@ -539,7 +505,7 @@ void Screen::handle_settings(const hui::InputFrame &input, hui::ui::Feedback &fe
             feedback.play(hui::audio::Cue::modal_open);
         }
     }
-    if (input.is_pressed(InputAction::west) && tile_ < kTiles && !switch_not_needed(tile_))
+    if (input.is_pressed(InputAction::west) && tile_ < settings_tiles() && !switch_not_needed(tile_))
     {
         const OptionSpec &spec = option_specs()[static_cast<std::size_t>(tile_)];
         if (edits_[spec.key])
@@ -1758,21 +1724,39 @@ void Screen::draw_settings(hui::gfx::DrawList &list, std::uint32_t glass) const
     list.pop_transform();
     list.pop_opacity();
 
-    // The Experimental section's caption, in the gap above its row.
-    a = appear(8);
-    list.push_opacity(a);
-    list.rounded_rect({96.0f, 566.0f, 40.0f, 3.0f}, 1.5f, kAccent);
-    const float caption = hui::ui::text(list, fonts_.semibold, "EXPERIMENTAL", 152.0f, 576.0f, 22.0f, kAccent, Align::left, 4.0f);
-    const std::string where = snap_.firmware != 0 ? "Firmware " + diag::firmware_text(snap_.firmware) : std::string("this firmware");
-    bool any_needed = false;
-    for (int i = kFirstSwitch; i < kTiles; ++i)
-        any_needed = any_needed || !switch_not_needed(i);
-    const std::string note = any_needed ? "For what is untested on " + where + ". Off by default; what fails turns itself off."
-                                        : "Nothing to switch on " + where + ": all of this is verified there.";
-    hui::ui::text(list, fonts_.regular, note, 176.0f + caption, 576.0f, 22.0f, kMuted);
-    list.pop_opacity();
+    // The parts come in from the top left, row by row.
+    const auto order = [](const layout::Box &box) {
+        return 1 + static_cast<int>((box.y - layout::kTop) / 100.0f) + static_cast<int>((box.x - layout::kLeft) / 300.0f);
+    };
+    const layout::Layout &page = layout::page();
+    const int tiles = settings_tiles();
 
-    for (int i = 0; i < kTiles; ++i)
+    // A caption over each group; the Experimental one says what its switches are for on this firmware.
+    const std::string where = snap_.firmware != 0 ? "Firmware " + diag::firmware_text(snap_.firmware) : std::string("this firmware");
+    for (const layout::Caption &caption : page.captions)
+    {
+        a = appear(order(caption.box));
+        list.push_opacity(a);
+        const Rect r = rect_of(caption.box);
+        list.rounded_rect({r.x, r.y + 6.0f, 40.0f, 3.0f}, 1.5f, kAccent);
+        const float caption_w = hui::ui::text(list, fonts_.semibold, caption.text, r.x + 56.0f, r.y + 16.0f, 22.0f, kAccent, Align::left, 4.0f);
+        if (caption.group == OptionGroup::experimental)
+        {
+            bool any_needed = false;
+            for (int i = 0; i < tiles; ++i)
+            {
+                const OptionSpec &spec = option_specs()[static_cast<std::size_t>(i)];
+                any_needed = any_needed || (experimental_switch(spec) >= 0 && !switch_not_needed(i));
+            }
+            const std::string note = any_needed ? "For what is untested on " + where + ". Off by default; what fails turns itself off."
+                                                : "Nothing to switch on " + where + ": all of this is verified there.";
+            hui::ui::text(list, fonts_.regular, shorten(fonts_.regular, note, 22.0f, r.w - caption_w - 80.0f), r.x + 80.0f + caption_w,
+                          r.y + 16.0f, 22.0f, kMuted);
+        }
+        list.pop_opacity();
+    }
+
+    for (int i = 0; i < tiles; ++i)
     {
         const OptionSpec &spec = option_specs()[static_cast<std::size_t>(i)];
         const bool toggle = spec.kind == OptionKind::toggle;
@@ -1783,41 +1767,46 @@ void Screen::draw_settings(hui::gfx::DrawList &list, std::uint32_t glass) const
                              edited->second != saved->second;
         const bool is_default = edited == edits_.end() || !edited->second;
         const bool on = toggle && !is_default && *edited->second == "1";
-        const float f = tile_amount_[i];
-        a = appear(1 + i);
+        const float f = tile_amount_[static_cast<std::size_t>(i)];
+        a = appear(order(page.tiles[static_cast<std::size_t>(i)]));
         const Rect base = tile_rect(i);
         list.push_opacity(a);
         list.push_transform(1.0f + 0.02f * f, base.cx(), base.cy(), 0.0f, 30.0f * (1.0f - a));
         if (f > 0.01f)
             list.glow(base, 24.0f, 26.0f, kAccent.with_alpha(0.28f * f));
         glass_card(list, glass, base, 24.0f, f);
-        // The switches' row is narrower: the same parts closer together, with the switch on the value's line.
-        const bool narrow = i >= kFirstSwitch;
-        const float text_x = base.x + (narrow ? 62.0f : 90.0f);
-        icons::draw(list, narrow ? Icon::sliders : kOptionIcons[i], base.x + (narrow ? 34.0f : 46.0f), base.cy(), narrow ? 30.0f : 34.0f,
-                    inert ? kFaint : kAccent);
-        hui::ui::text(list, fonts_.semibold, narrow ? shorten(fonts_.semibold, spec.label, 26.0f, base.w - 80.0f) : std::string(spec.label),
-                      text_x, base.y + 52.0f, narrow ? 26.0f : 30.0f, inert ? kMuted : kInk);
-        hui::ui::text(list, fonts_.semibold, shorten(fonts_.semibold, value_text(i), 25.0f, base.w - (inert ? 80.0f : 230.0f)), text_x,
-                      base.y + 94.0f, 25.0f, is_default || inert ? kMuted : mix(kInk, kAccent, 0.35f));
+        const float text_x = base.x + layout::kTextX;
+        icons::draw(list, spec.icon, base.x + layout::kIconX, base.cy(), 30.0f, inert ? kFaint : kAccent);
+        hui::ui::text(list, fonts_.semibold,
+                      shorten(fonts_.semibold, spec.label, layout::kLabelSize, base.w - layout::kTextX - layout::kTextRight), text_x,
+                      base.y + 37.0f, layout::kLabelSize, inert ? kMuted : kInk);
+        // The value's line: the value, then default or changed, then a switch's track. Where the value would not fit
+        // beside it, the tag stays out: a default value shows in its muted colour, and the Save button shows a change.
+        const Rect track{base.x + base.w - 84.0f, base.y + 46.0f, 64.0f, 32.0f};
+        const float end = toggle && !inert ? track.x - 12.0f : base.x + base.w - layout::kTextRight;
+        const std::string value = value_text(i);
+        std::string tag = inert ? "" : changed ? "UNSAVED" : is_default && !toggle ? "DEFAULT" : "";
+        float tag_w = tag.empty() ? 0.0f : fonts_.semibold.measure(tag, 15.0f) + 30.0f;
+        if (!tag.empty() && text_x + fonts_.semibold.measure(value, layout::kValueSize) > end - tag_w - 12.0f)
+        {
+            tag.clear();
+            tag_w = 0.0f;
+        }
+        const float value_end = tag.empty() ? end : end - tag_w - 12.0f;
+        hui::ui::text(list, fonts_.semibold, shorten(fonts_.semibold, value, layout::kValueSize, value_end - text_x), text_x,
+                      base.y + 70.0f, layout::kValueSize, is_default || inert ? kMuted : mix(kInk, kAccent, 0.35f));
         if (toggle && !inert)
         {
-            const Rect track{base.x + base.w - 96.0f, base.y + 68.0f, 76.0f, 38.0f};
-            list.rounded_rect(track, 19.0f, on ? kAccent : Color::rgb(0x3a4363));
+            list.rounded_rect(track, 16.0f, on ? kAccent : Color::rgb(0x3a4363));
             if (on)
-                list.glow(track, 19.0f, 12.0f, kAccent.with_alpha(0.35f));
-            list.circle(on ? track.x + track.w - 19.0f : track.x + 19.0f, track.cy(), 15.0f, Color::rgb(0xffffff));
+                list.glow(track, 16.0f, 12.0f, kAccent.with_alpha(0.35f));
+            list.circle(on ? track.x + track.w - 16.0f : track.x + 16.0f, track.cy(), 13.0f, Color::rgb(0xffffff));
         }
-        // On the value's line: default or changed. A switch shows that it is off by itself, and the narrow row has no room
-        // for the tag: the Save button shows a change there.
-        const std::string tag = narrow ? "" : changed ? "UNSAVED" : is_default && !toggle ? "DEFAULT" : "";
         if (!tag.empty())
         {
-            const float w = fonts_.semibold.measure(tag, 16.0f) + 34.0f;
-            const Rect t{base.x + base.w - w - (toggle ? 108.0f : 22.0f), base.y + 72.0f, w, 32.0f};
-            list.rounded_rect(t, 16.0f, changed ? kAccent.with_alpha(0.22f) : Color::rgb(0xffffff, 0.07f));
-            hui::ui::text(list, fonts_.semibold, tag, t.cx(), t.cy() + 6.0f, 16.0f, changed ? kAccent : kMuted,
-                          Align::center, 2.0f);
+            const Rect t{end - tag_w, base.y + 48.0f, tag_w, 28.0f};
+            list.rounded_rect(t, 14.0f, changed ? kAccent.with_alpha(0.22f) : Color::rgb(0xffffff, 0.07f));
+            hui::ui::text(list, fonts_.semibold, tag, t.cx(), t.cy() + 5.5f, 15.0f, changed ? kAccent : kMuted, Align::center, 2.0f);
         }
         list.pop_transform();
         list.pop_opacity();
@@ -1827,36 +1816,38 @@ void Screen::draw_settings(hui::gfx::DrawList &list, std::uint32_t glass) const
     list.push_opacity(a);
     list.push_transform(1.0f, 0.0f, 0.0f, 0.0f, 30.0f * (1.0f - a));
     const bool enabled = !busy();
+    const auto action_focus = [&](int action) { return tile_amount_[static_cast<std::size_t>(tiles + action)]; };
     draw_button(list, glass, settings_action_rect(0), static_cast<int>(Icon::save), dirty() ? "Save" : "Saved",
-                dirty(), tile_amount_[kTiles], enabled && dirty());
+                dirty(), action_focus(0), enabled && dirty());
     draw_button(list, glass, settings_action_rect(1), static_cast<int>(Icon::restart), "Save and restart host", false,
-                tile_amount_[kTiles + 1], enabled);
+                action_focus(1), enabled);
     draw_button(list, glass, settings_action_rect(2), static_cast<int>(Icon::undo), "Revert changes", false,
-                tile_amount_[kTiles + 2], dirty());
+                action_focus(2), dirty());
     const bool web_on = snap_.web_known && snap_.web_enabled;
     draw_button(list, glass, settings_action_rect(3), static_cast<int>(Icon::globe),
-                !snap_.web_known ? "Web page" : web_on ? "Web page: on" : "Web page: off", false, tile_amount_[kTiles + 3], true);
+                !snap_.web_known ? "Web page" : web_on ? "Web page: on" : "Web page: off", false, action_focus(3), true);
 
     // What the focused part does.
     std::string help;
     std::string extra;
-    if (tile_ < kTiles && switch_not_needed(tile_))
+    if (tile_ < tiles && switch_not_needed(tile_))
     {
-        help = diag::experimental_no_effect(snap_.firmware, option_specs()[static_cast<std::size_t>(tile_)].key)
-                   ? std::string(ps_exp_switch_at(tile_ - kFirstSwitch)->no_effect_help)
+        const OptionSpec &spec = option_specs()[static_cast<std::size_t>(tile_)];
+        help = diag::experimental_no_effect(snap_.firmware, spec.key)
+                   ? std::string(ps_exp_switch_at(experimental_switch(spec))->no_effect_help)
                    : "Verified on " + where + ": it is there without a switch, and this switch changes nothing.";
     }
-    else if (tile_ < kTiles)
+    else if (tile_ < tiles)
     {
         const OptionSpec &spec = option_specs()[static_cast<std::size_t>(tile_)];
         help = spec.help;
         extra = std::string("Default: ") + spec.default_label;
     }
-    else if (tile_ == kTiles)
+    else if (tile_ == tiles)
         help = "Writes the changes to sunshine.conf. They apply when the host starts next.";
-    else if (tile_ == kTiles + 1)
+    else if (tile_ == tiles + 1)
         help = "Writes the changes and restarts the host, which ends a running stream.";
-    else if (tile_ == kTiles + 2)
+    else if (tile_ == tiles + 2)
         help = "Puts back what sunshine.conf holds now.";
     else
     {
@@ -1868,10 +1859,14 @@ void Screen::draw_settings(hui::gfx::DrawList &list, std::uint32_t glass) const
                 : snap_.web_user.empty() ? std::string("Off: no login")
                                          : "Off, login " + snap_.web_user + " kept";
     }
-    const Rect bar{96.0f, 840.0f, 1728.0f, 64.0f};
+    const Rect bar = rect_of(layout::kHelpBar);
     glass_card(list, glass, bar, 18.0f, 0.0f);
     list.circle(bar.x + 32.0f, bar.cy(), 6.0f, kAccent);
-    hui::ui::text(list, fonts_.regular, help, bar.x + 56.0f, bar.cy() + 8.0f, 24.0f, kInk);
+    // The help and the default side by side; a long help gets the smaller size before it is cut.
+    const float extra_w = extra.empty() ? 0.0f : fonts_.regular.measure(extra, 22.0f) + 30.0f;
+    const float room = bar.w - 56.0f - 30.0f - extra_w;
+    const float help_size = fonts_.regular.measure(help, layout::kHelpSize) <= room ? layout::kHelpSize : layout::kHelpSmallSize;
+    hui::ui::text(list, fonts_.regular, shorten(fonts_.regular, help, help_size, room), bar.x + 56.0f, bar.cy() + 8.0f, help_size, kInk);
     if (!extra.empty())
         hui::ui::text(list, fonts_.regular, extra, bar.x + bar.w - 30.0f, bar.cy() + 8.0f, 22.0f, kMuted, Align::right);
     list.pop_transform();
@@ -1946,7 +1941,7 @@ void Screen::draw_page(hui::gfx::DrawList &list, std::uint32_t glass) const
     if (sheet_ == Sheet::none)
     {
         const Rect h = highlight_.rect(time_);
-        const bool pill = page_ == Page::home ? home_row_ == 0 : page_ == Page::diagnostics || tile_ >= kTiles;
+        const bool pill = page_ == Page::home ? home_row_ == 0 : page_ == Page::diagnostics || tile_ >= settings_tiles();
         const float radius = pill ? h.h / 2.0f + 6.0f : 30.0f;
         const float breathe = 0.75f + 0.25f * std::sin(time_ * 3.0f);
         list.bordered_rect(h.inset(-6.0f), radius, kClear, 3.0f, kAccent.with_alpha(0.95f * breathe));
@@ -2053,7 +2048,7 @@ void Screen::draw_sheet(hui::gfx::DrawList &list, std::uint32_t glass) const
     const Icon icon = sheet_drawn_ == Sheet::pin || sheet_drawn_ == Sheet::deny_pairing ? Icon::link
                       : web_sheet                ? Icon::globe
                       : device_sheet             ? Icon::monitor
-                      : spec != nullptr          ? kOptionIcons[std::min<std::size_t>(6, static_cast<std::size_t>(spec - option_specs().data()))]
+                      : spec != nullptr          ? spec->icon
                                                  : Icon::link; // the device's name when pairing
     icons::draw(list, icon, card.cx(), card.y + 62.0f, 40.0f, kAccent);
     hui::ui::text(list, fonts_.display, sheet_title_, card.cx(), card.y + 140.0f, 46.0f, kInk, Align::center);
