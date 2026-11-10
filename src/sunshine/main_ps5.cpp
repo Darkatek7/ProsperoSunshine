@@ -6,6 +6,7 @@
 #include "control/control_server.hpp"
 #include "control/listener_watch.hpp"
 #include "control/stream_list.hpp"
+#include "diag/thread_load.hpp"
 #include "input/title_profile.hpp"
 #include "log/log_filter.hpp"
 #include "log/remote_log.hpp"
@@ -14,6 +15,7 @@
 #include "sunshine/self_check.hpp"
 #include "sunshine/video_ps5.hpp"
 #include "platform/ps5/mdns_responder.hpp"
+#include "platform/ps5/thread_counters.hpp"
 #include "web/web_server.hpp"
 #include "platform/ps5/capture.h"
 #include "platform/ps5/experimental.h"
@@ -148,12 +150,24 @@ void log_stream_stats(std::stop_token stop) {
         int recoveries = 0, missing = 0;
     };
     std::map<std::string, Last> last;
+    prospero::load::ThreadLoad load;
+    bool load_unavailable = false;
     auto next = std::chrono::steady_clock::now() + 5s;
     while (!stop.stop_requested()) {
         std::this_thread::sleep_for(250ms);
         const auto now = std::chrono::steady_clock::now();
         if (now < next) continue;
         next = now + 5s;
+        // What the host costs the console: its threads' CPU, wakeups and page faults since the last line, and its memory
+        // (docs: the performance report). Only at debug level, in both flavors, one sysctl every 5 s.
+        if (config::sunshine.min_log_level <= 1) {
+            prospero::load::Snapshot snapshot;
+            if (prospero::load::read_snapshot(snapshot)) {
+                if (const auto interval = load.update(snapshot, now)) BOOST_LOG(debug) << prospero::load::load_line(*interval);
+            } else if (!std::exchange(load_unavailable, true)) {
+                BOOST_LOG(debug) << "Host load: the console gives no thread counters"sv;
+            }
+        }
         const auto sessions = config::sunshine.min_log_level <= 1 ? rtsp_stream::session_infos()
                                                                   : std::vector<rtsp_stream::session_info_t>{};
         std::vector<prospero::CaptureFacts> captures;

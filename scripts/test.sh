@@ -67,3 +67,4 @@ run_test app_access_test
 run_test web_plain_test
 run_test log_throttle_test
 run_test exposure_test
+run_test thread_load_test
