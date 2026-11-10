@@ -93,7 +93,7 @@ Issue 36“) und ein Debug-Build in jedem Release („Debug-Build (PR 29) zusamm
 
 ## Neuere Nachweise
 
-### Profil nach 45 s zurück, Issue 52 (2026-11-10, 13.00, Testclient, nicht veröffentlicht)
+### Profil nach 45 s zurück, Issue 52 (2026-11-10, 13.00 und 10.20, in `main`, nicht veröffentlicht)
 
 Testgerät mit einem Profil (ein zweites Konsolenprofil, vorher abgemeldet), `--no-script`, Home-Bildschirm:
 
@@ -106,6 +106,17 @@ Testgerät mit einem Profil (ein zweites Konsolenprofil, vorher abgemeldet), `--
 - Ein kurzer PS-Druck (Kontrollzentrum) brachte das Profil auf 13.00 nicht nach vorne; es wurde nach 45 s abgemeldet.
 
 Unit-Tests (`profile_rules_test`) und Host-Build ohne Warnung. Danach wieder 0.6.0 über `host_restart.elf`.
+
+Auf 10.20 vom Melder bestätigt (PS5 Pro, Test-Build `test-0.6.0-i52-1`, Host `f463b8cb`, Gerät mit einem Profil, anfangs
+niemand angemeldet):
+
+- 55 s nach dem Streamende neu verbunden: nach 45 s „stays signed in, it is in front on the console“, das Pad saß sofort
+  wieder im Profil („bound after 0 ms“).
+- Der echte Fall: GTA III auf dem Profil gestartet, Stream ohne Quit beendet, 3 Minuten später neu verbunden. Das Spiel war
+  noch offen und das Pad saß sofort im Profil.
+- Nach Quit blieb das Profil wieder angemeldet. Im Konsolenmenü abgemeldet: „a profile the host kept signed in was signed
+  out on the console“.
+- Die Zeile „signed in on the console by someone else“ kam nirgends vor.
 
 ### Release 0.6.0 auf der Konsole (2026-11-09, 13.00)
 
