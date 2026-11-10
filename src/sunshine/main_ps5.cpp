@@ -11,7 +11,6 @@
 #include "log/log_filter.hpp"
 #include "log/remote_log.hpp"
 #include "net/upnp_client.hpp"
-#include "probe_scrub.hpp"
 #include "sunshine/self_check.hpp"
 #include "sunshine/video_ps5.hpp"
 #include "platform/ps5/mdns_responder.hpp"
@@ -63,21 +62,28 @@ constexpr bool kDebugBuild = true;
 constexpr bool kDebugBuild = false;
 #endif
 
-// What reaches sunshine.log and the kernel log (log/log_filter.hpp): secrets are hidden in every build; the debug build
-// also masks addresses and holds back floods of similar lines. One filter per sink, as each counts what it wrote.
+// What reaches sunshine.log, the kernel log and host_diag.log (log/log_filter.hpp): secrets are hidden and public addresses
+// masked in every build; the debug build also masks the addresses and names of the home and holds back floods of similar lines.
+// One masker for all of them, so that one address has one tag in every file of the run. One filter per sink, as each counts
+// what it wrote.
+const std::shared_ptr<psapp::mask::Masker> &log_masker() {
+    static const auto masker = std::make_shared<psapp::mask::Masker>(kDebugBuild ? psapp::mask::Scope::all : psapp::mask::Scope::internet);
+    return masker;
+}
 prospero::logs::Options log_options() {
     prospero::logs::Options options;
     options.mask_addresses = kDebugBuild;
     options.limit = kDebugBuild;
     return options;
 }
-prospero::logs::Filter file_filter(log_options()), klog_filter(log_options());
+prospero::logs::Filter file_filter(log_options(), log_masker()), klog_filter(log_options(), log_masker());
 // The debug build's remote log, only when sunshine.conf names an address (log/remote_log.hpp).
 prospero::logs::RemoteLog remote_log;
 
-// host_diag.log in the debug build: addresses masked as in sunshine.log, and each line to the remote log.
+// host_diag.log: masked like sunshine.log (in the normal build only what is public), and in the debug build each line to the
+// remote log.
 size_t mask_diag_line(char *line, size_t length, size_t capacity) {
-    const std::string masked = probe::scrub(std::string(line, length));
+    const std::string masked = log_masker()->apply(std::string_view(line, length));
     const size_t kept = std::min(masked.size(), capacity - 1);
     std::memcpy(line, masked.data(), kept);
     return kept;
@@ -264,10 +270,8 @@ int main(int argc, char *argv[]) {
     ps_diag_set_timestamps(setting("diag_timestamps") != "0");
     const std::string remote = setting("remote_log");
     const auto remote_address = prospero::logs::parse_remote(remote);
-    if (kDebugBuild) {
-        ps_diag_set_filter(mask_diag_line);
-        if (remote_address && remote_log.open(*remote_address)) ps_diag_set_tap(send_diag_line);
-    }
+    ps_diag_set_filter(mask_diag_line);
+    if (kDebugBuild && remote_address && remote_log.open(*remote_address)) ps_diag_set_tap(send_diag_line);
     logging::set_record_hook([](int severity, std::string message) {
         std::vector<std::pair<int, std::string>> lines;
         for (auto &line : file_filter.take(severity, std::move(message), std::chrono::steady_clock::now())) {

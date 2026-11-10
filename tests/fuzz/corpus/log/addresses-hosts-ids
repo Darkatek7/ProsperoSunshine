@@ -1,0 +1,6 @@
+Host -- deck.local:47984
+uniqueid -- FEDCBA9876543210
+devicename -- Deck
+Received ping [v2] from 2001:db8::5:50035 [0100]
+target :: rtsp://[2001:db8::1]:48010
+X-SS-Ping-Payload: 4341

@@ -53,6 +53,7 @@ run_test hdr10_metadata_test
 run_test titles_test "$root/src/apps/titles.cpp"
 run_test mdns_test "$root/src/net/mdns.cpp"
 run_test ra_choose_test
+run_test mask_test
 run_test probe_scrub_test
 run_test log_filter_test
 run_test remote_log_test
@@ -69,3 +70,9 @@ run_test web_plain_test
 run_test log_throttle_test
 run_test exposure_test
 run_test thread_load_test
+# The report's scrub (diag.cpp) includes itself as "app/psapp/...", as in app/tests/run.sh.
+mkdir -p "$root/out/include/app"
+ln -sfn "$root/app/src/psapp" "$root/out/include/app/psapp"
+run_test privacy_leak_test "$root/app/src/psapp/diag.cpp" -I "$root/out/include"
+# A new or changed log statement that can hold an address or a name must be looked at (and have a sample in privacy_leak_test).
+bash "$root/scripts/check_log_sites.sh"

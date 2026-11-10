@@ -2,6 +2,7 @@
 #include "app/psapp/diag.hpp"
 
 #include "app/psapp/experimental_list.h"
+#include "app/psapp/mask.hpp"
 
 #include <algorithm>
 #include <cerrno>
@@ -45,56 +46,42 @@ bool is_hex(char c)
     return is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
 }
 
-// Replaces dotted quads in `text`.
-std::string without_addresses(const std::string &text)
+// The first four hex digits of a uuid, in lower case: what ties its tag to the tag of the device's name.
+std::string uuid_tag(const std::string &uuid)
 {
-    std::string out;
-    std::size_t i = 0;
-    while (i < text.size())
+    std::string tag;
+    for (const char c : uuid)
     {
-        if (is_digit(text[i]) && (i == 0 || !(is_digit(text[i - 1]) || text[i - 1] == '.')))
-        {
-            std::size_t at = i;
-            int parts = 0;
-            for (;;)
-            {
-                std::size_t digits = 0;
-                while (at < text.size() && is_digit(text[at]) && digits < 4)
-                {
-                    ++at;
-                    ++digits;
-                }
-                if (digits == 0 || digits > 3)
-                    break;
-                ++parts;
-                if (parts == 4 || at >= text.size() || text[at] != '.')
-                    break;
-                ++at;
-            }
-            if (parts == 4 && (at >= text.size() || !is_digit(text[at])))
-            {
-                out += "<address>";
-                i = at;
-                continue;
-            }
-        }
-        out += text[i++];
+        if (!is_hex(c))
+            continue;
+        tag += static_cast<char>(c >= 'A' && c <= 'F' ? c - 'A' + 'a' : c);
+        if (tag.size() == 4)
+            break;
     }
-    return out;
+    return tag;
 }
 
-std::string without_long_hex(const std::string &text)
+// A run of 16 or more hex digits and dashes with at least 12 digits: a client's id, a uuid, a key, a certificate's fingerprint. A
+// uuid keeps the first four characters in its tag (<uuid-3fa2>), as the name of the device that owns it does (<device-3fa2>);
+// the rest is <id-N>, the same for the same value. A firmware code or an address (up to 15 characters) stays, and so does a line
+// of dashes.
+std::string without_long_hex(mask::Masker &masker, const std::string &text)
 {
-    constexpr std::size_t kLongest = 16; // a firmware code or an address stays
+    constexpr std::size_t kLongest = 16;
     std::string out;
     std::size_t i = 0;
     while (i < text.size())
     {
         std::size_t end = i;
+        std::size_t digits = 0;
         while (end < text.size() && (is_hex(text[end]) || text[end] == '-'))
-            ++end;
-        if (end - i >= kLongest)
-            out += "<id>";
+            digits += text[end++] == '-' ? 0 : 1;
+        if (end - i >= kLongest && digits >= 12)
+        {
+            const std::string run = text.substr(i, end - i);
+            const bool uuid = run.size() == 36 && run[8] == '-' && run[13] == '-' && run[18] == '-' && run[23] == '-';
+            out += uuid ? "<uuid-" + uuid_tag(run) + ">" : masker.stand_in("id", run);
+        }
         else
             out.append(text, i, end - i);
         if (end < text.size())
@@ -688,17 +675,94 @@ std::string suggested_device_name(const std::string &name, const std::vector<std
     }
 }
 
+Scrubber::Scrubber() : masker_(mask::Scope::all) {}
+
+void Scrubber::add(const std::string &name, const std::string &tag)
+{
+    // Too short to tell from other text ("PC" in "PCM"); the same name is hidden once, the first tag stays.
+    if (name.size() < 3)
+        return;
+    for (const auto &known : names_)
+        if (known.first == name)
+            return;
+    names_.emplace_back(name, tag);
+    // The longest first, so that "Tom" doesn't leave "'s iPhone" of "Tom's iPhone" behind.
+    std::stable_sort(names_.begin(), names_.end(), [](const auto &a, const auto &b) { return a.first.size() > b.first.size(); });
+}
+
+void Scrubber::add_device(const std::string &name, const std::string &uuid)
+{
+    const std::string tag = uuid_tag(uuid);
+    add(name, tag.empty() ? masker_.stand_in("name", name) : "<device-" + tag + ">");
+}
+
+void Scrubber::add_console(const std::string &name)
+{
+    // "PS5" is what the host calls itself when the console has no name of its own: nothing to hide, and the word is in every line.
+    if (name == "PS5")
+        return;
+    add(name, "<console-name>");
+}
+
+void Scrubber::add_name(const std::string &name)
+{
+    if (name.size() >= 3)
+        add(name, masker_.stand_in("name", name));
+}
+
+std::string Scrubber::apply(const std::string &whole, bool names)
+{
+    // A certificate or a key is never posted (the host hides them as it writes, an older host's log may still hold one).
+    const std::string text = mask::hide_pem(whole);
+    masker_.reserve(text);
+    std::string out;
+    if (names && !names_.empty())
+    {
+        // One pass over the text, ignoring case (a host name is often written in lower case), so that no tag is searched again.
+        const auto lower = [](char c) { return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c; };
+        std::size_t i = 0;
+        while (i < text.size())
+        {
+            bool hit = false;
+            for (const auto &known : names_)
+            {
+                const std::string &name = known.first;
+                if (i + name.size() > text.size() || lower(text[i]) != lower(name[0]))
+                    continue;
+                std::size_t k = 1;
+                while (k < name.size() && lower(text[i + k]) == lower(name[k]))
+                    ++k;
+                if (k == name.size())
+                {
+                    out += known.second;
+                    i += name.size();
+                    hit = true;
+                    break;
+                }
+            }
+            if (!hit)
+                out += text[i++];
+        }
+    }
+    else
+    {
+        out = text;
+    }
+    return without_titles(without_long_hex(masker_, masker_.apply(out)));
+}
+
+std::string Scrubber::tail(const std::string &text, std::size_t count, std::size_t width)
+{
+    // Scrubbed before it is cut: a cut in the middle of an address would leave the half of it that the scrub no longer knows.
+    return diag::tail(apply(diag::tail(text, count, 4096)), count, width);
+}
+
 std::string scrub(const std::string &text, const std::vector<std::string> &names)
 {
-    std::string out = text;
+    Scrubber scrubber;
     for (const std::string &name : names)
-    {
-        if (name.size() < 3)
-            continue;
-        for (std::size_t at = out.find(name); at != std::string::npos; at = out.find(name, at + 6))
-            out.replace(at, name.size(), "<name>");
-    }
-    return without_titles(without_long_hex(without_addresses(out)));
+        scrubber.add_name(name);
+    return scrubber.apply(text);
 }
 
 std::string tail(const std::string &text, std::size_t count, std::size_t width)

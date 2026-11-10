@@ -7,6 +7,7 @@
 #include "control/stream_list.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <vector>
 
 using namespace psapp;
@@ -29,10 +30,43 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     {
         const std::string name = in.ConsumeRandomLengthString(12);
         const std::string scrubbed = diag::scrub(log + " " + name, {name, "ab"});
-        if (name.size() >= 3 && name.find("<name>") == std::string::npos && log.find("<name>") == std::string::npos)
-            FUZZ_CHECK(scrubbed.find(name) == std::string::npos || name.find_first_of("<>") != std::string::npos || log.find('<') != std::string::npos ||
-                       scrubbed.find("<name>") != std::string::npos);
+        if (name.size() >= 3 && name.find("<") == std::string::npos && log.find('<') == std::string::npos && name.find('\0') == std::string::npos && name.find('\1') == std::string::npos) {
+            // The name is hidden whatever its case, except where the scrub's own tags (<lan-1>, <name-1>, ...) happen to spell it.
+            std::string lower, wanted = name;
+            bool in_tag = false;
+            for (const char c : scrubbed) {
+                if (c == '<') in_tag = true;
+                if (!in_tag) lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                if (c == '>' && in_tag) {
+                    in_tag = false;
+                    lower += '\1';  // a tag is a gap: what stands on both sides of it is not one word
+                }
+            }
+            for (char &c : wanted) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            FUZZ_CHECK(lower.find(wanted) == std::string::npos);
+        }
         FUZZ_CHECK(diag::scrub("host 192.168.1.77 and " + std::string(40, 'a'), {}).find("192.168.1.77") == std::string::npos);
+    }
+    // One Scrubber for a whole report: an address of any kind is gone from the text, from its tail cut to any width, and the
+    // same address has the same tag in the next call.
+    {
+        diag::Scrubber scrubber;
+        const std::string device = in.ConsumeRandomLengthString(10);
+        scrubber.add_device(device, in.ConsumeRandomLengthString(40));
+        scrubber.add_console(in.ConsumeRandomLengthString(10));
+        std::string before = in.ConsumeRandomLengthString(30), after = in.ConsumeRandomLengthString(30);
+        for (std::string *piece : {&before, &after})
+            for (std::string::size_type at; (at = piece->find("203.0.113")) != std::string::npos;) piece->erase(at, 1);
+        const std::string text = before + "\nfrom 203.0.113.9 and [2001:db8:aa::7]:50123 and 00:11:22:33:44:55 then\n" + after;
+        const std::string out = scrubber.apply(text);
+        FUZZ_CHECK(out.find("203.0.113.9") == std::string::npos && out.find("2001:db8:aa::7") == std::string::npos &&
+                   out.find("00:11:22:33:44:55") == std::string::npos);
+        const std::size_t width = in.ConsumeIntegralInRange<std::size_t>(0, 60);
+        const std::string cut = scrubber.tail(text, in.ConsumeIntegralInRange<std::size_t>(1, 6), width);
+        FUZZ_CHECK(cut.find("203.0.113.9") == std::string::npos);
+        FUZZ_CHECK(cut.empty() || cut.back() == '\n');
+        FUZZ_CHECK(scrubber.apply("x 203.0.113.9 y") == scrubber.apply("x 203.0.113.9 y"));
+        FUZZ_CHECK(scrubber.apply("x 203.0.113.9 y", false).find("203.0.113.9") == std::string::npos);
     }
     const std::string cut = diag::tail(log, in.ConsumeIntegralInRange<std::size_t>(0, 5), in.ConsumeIntegralInRange<std::size_t>(0, 30));
     FUZZ_CHECK(cut.empty() || cut.back() == '\n');

@@ -160,20 +160,25 @@ std::string build_report(ControlServer &control) {
     for (const auto &[key, value] : settings) {
         // The console's name stays out; the other options say nothing about anyone.
         if (!value) continue;
-        out += "  " + key + " = " + (key == "sunshine_name" ? std::string("<name>") : *value) + "\n";
+        out += "  " + key + " = " + (key == "sunshine_name" ? std::string("<console-name>") : *value) + "\n";
         any = true;
     }
     if (!any) out += "  none\n";
 
-    // Everything that names someone: the paired devices, the console, the streaming client and those waiting to pair.
-    std::vector<std::string> names;
-    for (const std::string &device_line : devices) names.push_back(device(device_line)["name"]);
-    if (const auto it = settings.find("sunshine_name"); it != settings.end() && it->second) names.push_back(*it->second);
-    names.push_back(config::nvhttp.sunshine_name);
-    names.push_back(state_value("client"));
+    // Everything that names someone goes through one scrubber, so that the same address or device has the same tag in every
+    // section: the console, the paired devices (with their uuids, so a tag matches the uuid's in the logs), the streaming client
+    // and those waiting to pair.
+    psapp::diag::Scrubber scrubber;
+    if (const auto it = settings.find("sunshine_name"); it != settings.end() && it->second) scrubber.add_console(*it->second);
+    scrubber.add_console(config::nvhttp.sunshine_name);
+    for (const std::string &device_line : devices) {
+        Record record = device(device_line);
+        scrubber.add_device(record["name"], record["uuid"]);
+    }
+    scrubber.add_name(state_value("client"));
     for (const std::string &pairing_line : pairings) {
         const std::string name = pairing(pairing_line)["name"];
-        if (psapp::diag::pairing_label(name) != "Moonlight") names.push_back(name);
+        if (psapp::diag::pairing_label(name) != "Moonlight") scrubber.add_name(name);
     }
     std::vector<std::string> switches;
     for (int i = 0; i < PS_EXP_SWITCH_COUNT; ++i) {
@@ -182,17 +187,18 @@ std::string build_report(ControlServer &control) {
         if (it != settings.end() && it->second && *it->second == "1") switches.push_back(key);
     }
     out += "\nExperimental switches:\n";
-    out += psapp::diag::scrub(psapp::diag::experimental_report(host_log, switches), names);
+    out += scrubber.apply(psapp::diag::experimental_report(host_log, switches));
     out += "\nHost breadcrumbs (host_diag.log):\n";
-    out += host_file ? psapp::diag::scrub(psapp::diag::tail(*host_file, 120), names) : no_file(diag_path);
+    out += host_file ? scrubber.tail(*host_file, 120) : no_file(diag_path);
     if (older_host_file) {
         // How the last run ended, or how a long run started (the app's report has the same section).
         out += "\nOlder breadcrumbs (host_diag.log.1: the last run, or the lines before the newest), last lines:\n";
-        out += psapp::diag::scrub(psapp::diag::tail(*older_host_file, 60), names);
+        out += scrubber.tail(*older_host_file, 60);
     }
     out += "\nsunshine.log, last lines:\n";
-    out += log_file ? psapp::diag::scrub(psapp::diag::tail(*log_file, 80), names) : no_file(log_path);
-    return out;
+    out += log_file ? scrubber.tail(*log_file, 80) : no_file(log_path);
+    // The lines above hold no one's name, but a line added there later might hold an address: they get the same pass.
+    return scrubber.apply(out, false);
 }
 
 }  // namespace prospero::web

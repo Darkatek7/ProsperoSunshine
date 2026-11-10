@@ -4,8 +4,11 @@
 // report fit to post in a public issue.
 #pragma once
 
+#include "app/psapp/mask.hpp"
+
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace psapp::diag
@@ -162,8 +165,34 @@ std::string stream_network(const Stream &stream);
 // "45 s", "12 min", "1 h 05 min".
 std::string duration_text(long long seconds);
 
-// The log with what could identify someone taken out: IPv4 addresses, `names` (paired devices and the
-// console's name) and long hex runs (client ids, keys). Other text stays.
+// What the report hides, so that it fits a public issue (app/src/psapp/mask.hpp has the stand-ins and why): addresses of every kind
+// (<lan-1>, <tailscale-1>, <link-1>, <public-1>, and <mac-1>; the same address has the same tag in the whole report), host names
+// of URLs and Host headers, the names of the paired devices and the console (<device-3fa2> from the first characters of the
+// device's uuid, <console-name>, <name-N>), client ids and uuids (<id-N>, <uuid-3fa2>), and game titles (<title>). Other text
+// stays: the report is for finding a bug.
+// One Scrubber per report, for all of its sections.
+class Scrubber
+{
+public:
+    Scrubber();
+    Scrubber(const Scrubber &) = delete;
+    Scrubber &operator=(const Scrubber &) = delete;
+    // A paired device; with its uuid (as DEVICES lists it) its tag matches the uuid's.
+    void add_device(const std::string &name, const std::string &uuid = {});
+    void add_console(const std::string &name);
+    // Anyone else: the client that streams, a request waiting to pair.
+    void add_name(const std::string &name);
+    // `names` false: only what has a shape (addresses, ids, titles), for text that holds no one's name.
+    std::string apply(const std::string &text, bool names = true);
+    // The last `count` lines, scrubbed and then cut to `width` bytes each (cut first, a cut address would escape the scrub).
+    std::string tail(const std::string &text, std::size_t count, std::size_t width = 200);
+
+private:
+    void add(const std::string &name, const std::string &tag);
+    mask::Masker masker_;
+    std::vector<std::pair<std::string, std::string>> names_; // name and its tag, the longest name first
+};
+// A Scrubber for one text, with `names` as plain names.
 std::string scrub(const std::string &text, const std::vector<std::string> &names);
 // The last `count` lines, each cut to `width` bytes.
 std::string tail(const std::string &text, std::size_t count, std::size_t width = 200);
