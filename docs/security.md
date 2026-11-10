@@ -42,8 +42,8 @@ Basisport 47989 (in der App „Base port“; alle Sunshine-Ports verschieben sic
 | TCP 9021 | ELF-Loader | – | LAN | **nicht Teil des Hosts**: führt jedes ELF aus | keine |
 
 Ausgehend, ohne eigenen offenen Port: UPnP (SSDP-Suche und SOAP an den Router, `src/net/upnp_client.cpp`), in der
-Debug-Fassung `remote_log` (UDP-Syslog an die Adresse aus `sunshine.conf`), und der Host selbst an den ELF-Loader
-(„Restart host“, `PROBE`).
+Debug-Fassung `remote_log` (UDP-Syslog an die Adresse aus `sunshine.conf`; gesendet werden die schon maskierten Zeilen),
+und der Host selbst an den ELF-Loader („Restart host“, `PROBE`).
 
 ### Was UPnP weiterleitet
 
@@ -96,7 +96,7 @@ CVE-2024-45407 sind in diesem Stand behoben, `nvhttp.cpp` `getservercert` bis `c
 
 **Koppeln nur zu Hause.** `/pair` (auf 47989 und 47984) beantwortet der Host nur LAN- und Tailscale-Adressen (Patch 0030,
 `src/net/exposure.hpp`). Eine Internet-Adresse bekommt 403 mit „This host pairs only at home: …“, und es erscheint keine
-Karte; das Log nennt die Adresse höchstens einmal in zehn Minuten. Die Einstellung „Pair over the internet“
+Karte; das Log nennt sie als `<public-N>` höchstens einmal in zehn Minuten. Die Einstellung „Pair over the internet“
 (`pair_over_internet = 1`, Standard aus) hebt das auf; dann sagt eine Warnung im Log beim Start, dass die Kopplung auch
 dem Internet antwortet. Gekoppelte Geräte streamen unabhängig davon auch über das Internet.
 
@@ -205,6 +205,34 @@ Die Rechte sind auf der Konsole fast bedeutungslos: Jeder Payload läuft mit vol
 über den ELF-Loader einen schicken. Sie sind trotzdem so eng wie möglich, falls die Dateien kopiert oder in eine Sicherung
 gelegt werden. Diese Dateien gehören nie in einen Fehlerbericht; der Bericht der App lässt sie aus.
 
+## Was Log und Bericht über Besitzer verraten
+
+Nutzer posten `diagnostics.txt`, `sunshine.log`, `host_diag.log` und den Bericht der Firmware-Probe in öffentlichen
+Issues. Alles Folgende ist aus dem Code gelesen und von Tests geprüft (`app/src/psapp/mask.hpp`,
+`src/log/log_filter.hpp`, `src/probe_scrub.hpp`, `app/src/psapp/diag.cpp`; `tests/mask_test.cpp`,
+`tests/privacy_leak_test.cpp`); auf der Konsole gemessen ist davon nichts.
+
+- **Immer verborgen** (beide Fassungen): Schlüssel und Kopplungsdaten der Anfragen (`rikey`, `salt`, `clientcert`, …),
+  PIN, Passwort, Cookies, Zertifikate und Schlüssel (PEM) und die Werte, die UDP-Pakete einem Stream zuordnen
+  (`X-SS-Ping-Payload`, `X-SS-Connect-Data`, die Nutzlast von „Received ping“): Wer sie in einem geposteten Log eines
+  laufenden Streams liest, könnte dessen Video auf sich umleiten. **Öffentliche Adressen** (IPv4 und IPv6, die Adresse
+  des Routers nach außen aus UPnP, ein Fremder, der koppeln will) werden zu `<public-N>`.
+- **Debug-Fassung und Bericht zusätzlich:** Adressen des Zuhauses (`<lan-N>`, `<tailscale-N>`, `<link-N>`),
+  MAC-Adressen, Hostnamen aus URLs und `Host`-Köpfen (ein DDNS- oder MagicDNS-Name verrät das Zuhause so gut wie die
+  Adresse), `uniqueid`, `uuid` und `devicename` aus Sunshines Ausgabe der Anfragen. Dieselbe Adresse hat im ganzen Lauf
+  dieselbe Marke, und die Marke sagt, welche Art Adresse es war. `127.0.0.1`, `0.0.0.0`, Multicast und `::1` bleiben:
+  Sie nennen niemanden, und der Host liest sie selbst.
+- **Nur der Bericht:** Namen der gekoppelten Geräte (`<device-xxxx>`, die vier Zeichen sind der Anfang der UUID des
+  Geräts), der Name der Konsole, Spieltitel und Title-IDs.
+- **Bleibt in `sunshine.log` der normalen Fassung** (das Log des Besitzers): Adressen im Heimnetz und Spieltitel. Wer
+  die Datei selbst postet, gibt sie preis; die Web-Seite zeigt und lädt die Rohdatei.
+- **Nie geloggt:** Benutzername und Passwort der Web-Seite, Namen und IDs der Konsolenprofile, PSN-Konten,
+  Seriennummern, Konsolen-ID, WLAN-Name, Modell des Routers (nur seine Adresse).
+- **Grenzen:** Namen werden nur erkannt, wenn sie in der Liste des Berichts stehen und unverändert geschrieben sind
+  (mindestens 3 Zeichen); Hostnamen nur in URLs und `Host`-Köpfen; `100.64.0.0/10` heißt `tailscale`, auch wenn ein
+  Provider-NAT den Bereich nutzt. `scripts/check_log_sites.sh` hält eine neue Log-Zeile an, die eine Adresse oder einen
+  Namen enthalten kann, bis sie geprüft ist.
+
 ## Härtung des Programms
 
 Gemessen am ausgelieferten `prospero_sunshine.elf` (`readelf`, `objdump`):
@@ -268,6 +296,9 @@ Gemessen am ausgelieferten `prospero_sunshine.elf` (`readelf`, `objdump`):
   mitten in einem Stück endete, ließ den Host abstürzen; dafür brauchte es keine Kopplung. Die beiden Server nehmen jetzt
   keinen Inhalt mehr an und bedienen nach einem Fehler auf einer Verbindung weiter (Patch 0032,
   `patches/simple-web-server/0002-error-callback-and-no-content.patch`).
+- **Logs:** Die normale Fassung schrieb öffentliche Adressen im Klartext (die Außenadresse des Routers aus UPnP, einen
+  Fremden, der koppeln wollte), der Bericht maskierte keine IPv6-Adresse, und die Werte, die UDP-Pakete einem Stream
+  zuordnen, standen im Debug-Log (Abschnitt „Was Log und Bericht über Besitzer verraten“).
 - **Kleineres:** `/cancel` eines beliebigen gekoppelten Geräts schloss mit `close_game_on_quit = 1` das Spiel, das ein
   anderes gestartet hatte; der Bericht auf 47996 antwortete jeder Adresse; `serverinfo` über HTTP nannte dem Internet das
   laufende Spiel und die LAN-Adresse; `/appasset` lieferte Bilder verborgener Apps; Modus 2 ließ Clients ohne

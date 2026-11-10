@@ -520,8 +520,10 @@ What the debug build adds:
 - **A stats line per stream every 5 seconds** in `sunshine.log`: the codec and mode delivered, the bit rate asked for and sent,
   the round-trip time, the recoveries and the frames the client reported missing, without who it is. The normal build writes
   it too with `min_log_level = debug`.
-- **Addresses masked and floods held back:** IPv4, IPv6 and MAC addresses become `<ip>` and `<mac>` in `host_diag.log`,
-  `sunshine.log` and the kernel log. A kind of line that repeats (the same text with other numbers) is written 10 times in
+- **The home masked and floods held back:** in `host_diag.log`, `sunshine.log` and the kernel log, addresses become
+  `<lan-1>`, `<tailscale-1>`, `<link-1>` or `<public-1>` and MAC addresses `<mac-1>` (see "What the files hide" below),
+  host names in URLs and `Host` headers `<host-1>`, and the ids and the device name a client sends `<id-1>` and
+  `<name-1>`. A kind of line that repeats (the same text with other numbers) is written 10 times in
   10 seconds, then the next line says how many were held back and shows the last one.
 - **Line numbers for crashes:** CI keeps the debug host with its line info (`prospero_sunshine.debug.elf`) and the link map
   as a workflow artifact, `prosperosunshine-debug-symbols-<commit>`, not in the zip. The host in the zip has the same code,
@@ -537,7 +539,16 @@ In every build:
 - **No secret reaches the logs.** At debug level Sunshine logs the arguments of each request, among them the stream's
   encryption key and the pairing handshake, and the client's certificate: their values are written as `<hidden>` and
   `<certificate>`. The PIN, the web page's login, certificates and keys are never logged, and nothing is uploaded: the logs
-  stay on the console until you share them.
+  stay on the console until you share them. The values that tie a stream's UDP packets to it (`X-SS-Ping-Payload`,
+  `X-SS-Connect-Data`, the payload of "Received ping") are hidden as well.
+- **What the files hide.** The report (`diagnostics.txt`, the page on port 47996, the web page's report) hides what could
+  name you: addresses become `<lan-1>`, `<tailscale-1>`, `<link-1>` or `<public-1>`, MAC addresses `<mac-1>`, host names
+  `<host-1>`, device names `<device-3fa2>` (the four characters are the start of the device's uuid, which shows as
+  `<uuid-3fa2>`), the console's name `<console-name>`, client ids `<id-1>` and game titles `<title>`. The same value has
+  the same tag throughout, so you can still follow one client; `127.0.0.1` and `0.0.0.0` stay. The debug build masks its
+  log files the same way as it writes them. The normal build's `sunshine.log` stays readable for you, with the addresses
+  of your home network and the names of games in it, but never holds a public address (`<public-1>`): post the report,
+  not the raw files. `<tailscale-N>` is the range 100.64.0.0/10, which some providers' NAT uses too.
 - **`host_diag.log` lines start with the milliseconds since the host started**, and the first line names the time it
   started, so they line up with `sunshine.log` and the kernel log. `diag_timestamps = 0` in `sunshine.conf` turns that off.
 - **`host_diag.log` keeps the start of a problem:** up to 1 MiB, then it moves to `host_diag.log.1` and starts again with its

@@ -64,8 +64,9 @@ Der Bericht ist dafür gedacht, ihn so, wie er ist, in einem Issue zu posten:
   und am Ende, und ob sich das geändert hat), die Ergebnisse jeder Phase.
 - **Nicht drin:** welcher Titel im Vordergrund ist (die Title-ID wird nur verglichen, nie geschrieben), MAC- und
   IP-Adressen, Konto, Benutzername, Konsolen-ID, Seriennummer, `sunshine.conf` (dort steht der Name, den der Nutzer dem
-  Host gab). Als Rückfallebene maskiert `src/probe_scrub.hpp` jede Zeile, die wie eine IPv4- oder MAC-Adresse aussieht
-  (`tests/probe_scrub_test.cpp`).
+  Host gab). Als Rückfallebene maskiert `src/probe_scrub.hpp` (derselbe Maskierer wie Bericht und Debug-Log,
+  `app/src/psapp/mask.hpp`) alles, was wie eine IPv4-, IPv6- oder MAC-Adresse aussieht, als `<lan-1>`, `<public-1>`,
+  `<mac-1>` usw. (`tests/probe_scrub_test.cpp`).
 
 ## Video- und Audio-Proben
 
