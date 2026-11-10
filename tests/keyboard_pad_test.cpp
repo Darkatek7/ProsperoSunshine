@@ -716,9 +716,38 @@ int main() {
         assert(press(ps, esc, t) == moonlight::home);
         ps.key(0x5B, true, t);
         ps.clear();
+
+        // Windows+Shift+Esc holds PS for ps_long_hold however short the tap of Esc (the iPhone's bar taps it for 50 ms),
+        // and next_change says when it comes up, so the caller sends it. Shift and Ctrl don't count while Windows is down
+        // (Shift is ○ in action): only PS goes out.
+        for (const Profile profile : {Profile::standard, Profile::action, Profile::shooter}) {
+            ps.set_profile(profile);
+            ps.key(0x5B, false, t);
+            assert(!ps.key(0xA0, false, t) && ps.state(t).buttons == 0);
+            assert(ps.key(esc, false, t));
+            assert(ps.key(esc, true, t + 50ms));  // true: the state changes on its own later
+            assert(ps.state(t + 50ms).buttons == moonlight::home);
+            assert(ps.next_change(t + 50ms) == t + ps_long_hold);
+            assert(ps.state(t + ps_long_hold - 1ms).buttons == moonlight::home);
+            assert(ps.state(t + ps_long_hold).buttons == 0);
+            assert(!ps.next_change(t + ps_long_hold));
+            ps.key(0xA0, true, t + ps_long_hold);
+            ps.key(0x5B, true, t + ps_long_hold);
+            // Esc held longer than ps_long_hold: PS comes up with it.
+            ps.key(0x5B, false, t);
+            ps.key(0x10, false, t);
+            ps.key(esc, false, t);
+            assert(ps.state(t + 2s).buttons == moonlight::home);
+            assert(ps.key(esc, true, t + 2s) && ps.state(t + 2s).buttons == 0);
+            ps.key(0x10, true, t + 2s);
+            ps.key(0x5B, true, t + 2s);
+            // Shift counts again once Windows is up (○ in action).
+            if (profile == Profile::action) assert(press(ps, 0xA0, t) == moonlight::b);
+        }
+        ps.clear();
     }
 
     std::cout << "PASS: keyboard pad (keys, sticks, shortcuts, mouse, wheel taps, seven profiles, easing, vehicle layer, "
                  "what adds the pad, sensitivity per client, settings, Ctrl+Backspace switches the profile, "
-                 "Windows+Esc is PS)\n";
+                 "Windows+Esc is PS, Windows+Shift+Esc holds it)\n";
 }

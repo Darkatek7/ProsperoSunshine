@@ -269,12 +269,13 @@ console asks "Who's using this controller?".
 | Tab | touchpad (the map or inventory in most games) |
 | F1 / F2 | PS / Create, the host only (as on every controller, see above) |
 | Windows+Esc | PS, as F1 |
+| Windows+Shift+Esc | PS held (650 ms), for the screens that ask to hold PS |
 
 **Moonlight for iPhone and iPad** has no PS button, and its on-screen keyboard has no F1. Touch the screen with three
-fingers for the keyboard, then tap Win, Esc and Win again: Win stays down until it is tapped again. Windows+Esc is PS on
-the keys of a device with a controller too (its on-screen controller, say): it presses that controller's PS, with the
-same rules for who may. When a controller of Moonlight for iPhone or iPad joins that may press PS and has no PS button of
-its own, the console says how, once per device.
+fingers for the keyboard. For PS, tap Win, Esc and Win again; to hold PS, tap Win, Shift, Esc, Shift and Win: Win and
+Shift stay down until they are tapped again. Both work on the keys of a device with a controller too (its on-screen
+controller, say): they press that controller's PS, with the same rules for who may. When a controller of Moonlight for
+iPhone or iPad joins that may press PS and has no PS button of its own, the console says how, once per device.
 
 The rest depends on the profile, `keyboard_mouse_profile` in `sunshine.conf` (`standard` unless set). They follow the
 keyboard layouts of PC games of each kind; [docs/keyboard-profiles.md](docs/keyboard-profiles.md) has every table and why.

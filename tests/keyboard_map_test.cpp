@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "input/keyboard_map.hpp"
 #include <cassert>
+#include <chrono>
 #include <iostream>
 using namespace prospero;
 
@@ -100,7 +101,24 @@ int main() {
         chord.key(0x5B, false);
         assert(chord.key(0x1B, false) == A::pass);
         assert(chord.key(0x1B, true) == A::pass);
+        // Windows+Shift+Esc holds PS (either Shift, generic or sided); Shift alone with Esc is Esc.
+        static_assert(ps_long_chord(0x1B, 0x0A) && ps_long_chord(0x1B, 0xA0) && !ps_long_chord(0x1B, 0x08));
+        static_assert(!ps_long_chord(0x1B, 0x02) && !ps_long_chord(0x70, 0x0A));
+        static_assert(ps_long_hold >= std::chrono::milliseconds(650));
+        for (const uint16_t shift : {uint16_t(0x10), uint16_t(0xA0), uint16_t(0xA1)}) {
+            chord.key(0x5B, false);
+            assert(chord.key(shift, false) == A::pass);
+            assert(chord.key(0x1B, false) == A::press_long && chord.key(0x1B, false) == A::swallow);
+            assert(chord.key(0x1B, true) == A::release);
+            assert(chord.key(shift, true) == A::pass);
+            assert(chord.key(0x1B, false) == A::press && chord.key(0x1B, true) == A::release);  // Shift up: a press again
+            chord.key(0x5B, true);
+        }
+        chord.key(0xA0, false);
+        assert(chord.key(0x1B, false) == A::pass && chord.key(0x1B, true) == A::pass);
+        chord.key(0xA0, true);
         // Nothing to press PS on: cancel, and Esc and its release go on as Esc.
+        chord.key(0x5B, false);
         assert(chord.key(0x1B, false) == A::press);
         chord.cancel();
         assert(chord.key(0x1B, true) == A::pass);
