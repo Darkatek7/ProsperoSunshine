@@ -594,8 +594,9 @@ struct input_raw_t {
     std::array<bool, MAX_GAMEPADS> switch_done{};
     std::array<prospero::SwitchBudget, MAX_GAMEPADS> switch_budget{};  // a round of switches, then switch_cooldown
     // The profiles this host signed in: it signs each out again once none of its pads sits in it (release_profile), so
-    // the console's four sessions don't fill up with players who left.
-    std::vector<uint32_t> host_signed_in;
+    // the console's four sessions don't fill up with players who left, except those in front then (prospero::HostProfiles).
+    prospero::HostProfiles host_profiles;
+    std::chrono::steady_clock::time_point kept_checked;  // forget_signed_out
     // The console's menus (control/menu_access.hpp): what decides each pad's PS and Create, looked up at most once a second
     // and anew when it opens or switches profile; whether its input waits, as no game is in front and its profile doesn't
     // reach the menus; and when its player was last told so.
@@ -808,11 +809,12 @@ void freeInput(input_raw_t *input) {
     // The profiles it signed in go with it, also those still in their grace (prospero::sign_out decides; no pad is left).
     // If the console doesn't say which one is in front, they all stay: signing out the one someone plays as is worse than
     // leaving one signed in.
-    if (!input->host_signed_in.empty()) {
+    // Those kept as they were in front stay signed in, as they would without the host.
+    if (!input->host_profiles.signed_in.empty()) {
         uint32_t front = 0;
         const bool known = ps_profile_foreground(&front) == 0;
         if (!known) BOOST_LOG(warning) << "PS5 input: the console didn't say which profile is in front; the host's profiles stay signed in"sv;
-        for (const uint32_t user : input->host_signed_in) {
+        for (const uint32_t user : input->host_profiles.signed_in) {
             const prospero::SignOutFacts facts{true, false,
                                                !known ? prospero::Answer::unknown : front == user ? prospero::Answer::yes : prospero::Answer::no,
                                                prospero::Answer::no};
@@ -933,10 +935,9 @@ bool seat_taken(const input_raw_t &input, int nr, uint32_t user) {
 // What the host knows of a profile for pad nr (prospero::join_block decides). Asks the console whether it is signed in.
 prospero::ProfileUse profile_use(const input_raw_t &input, int nr, uint32_t user) {
     const int signed_in = ps_profile_signed_in(user);
-    const auto &mine = input.host_signed_in;
     return {seat_taken(input, nr, user),
             signed_in < 0 ? prospero::Answer::unknown : signed_in ? prospero::Answer::yes : prospero::Answer::no,
-            std::find(mine.begin(), mine.end(), user) != mine.end()};
+            input.host_profiles.knows(user)};
 }
 
 // A limited device never gets the console's question: whoever answers it can pick any profile, and picking one in use
@@ -964,8 +965,7 @@ static void greet_spectator(const std::string &cert) {
 // console's four sessions: sign_out_grace after its last pad left, so that a Moonlight client that reconnects finds it as
 // it was (sign_out_due). Caller holds input.mutex.
 static void release_profile(input_raw_t &input, uint32_t user) {
-    const auto &mine = input.host_signed_in;
-    if (!user || std::find(mine.begin(), mine.end(), user) == mine.end()) return;
+    if (!user || !input.host_profiles.signed_in_by_host(user)) return;
     for (int m = 0; m < MAX_GAMEPADS; ++m)
         if (input.pads[m] && input.seat[m] == user) return;
     const auto at = std::chrono::steady_clock::now() + prospero::sign_out_grace;
@@ -994,12 +994,26 @@ static prospero::Answer unseated_pad_plays_as(const input_raw_t &input, uint32_t
     return answer;
 }
 
-// The profiles whose time came (release_profile) are signed out, if prospero::sign_out says so: not one someone at the TV
-// has in front, nor one a controller the console asked about plays as, and nothing while the console doesn't say. One
-// that a pad joined again stays the host's. Caller holds input.mutex.
+// The kept profiles (prospero::HostProfiles) that are no longer signed in, someone signed them out on the console, are
+// forgotten: signed in again later, by someone else, they are theirs. Once a second. Caller holds input.mutex.
+static void forget_signed_out(input_raw_t &input, std::chrono::steady_clock::time_point now) {
+    if (input.host_profiles.kept.empty() || now - input.kept_checked < 1s) return;
+    input.kept_checked = now;
+    const auto kept = input.host_profiles.kept;
+    for (const uint32_t user : kept)
+        if (ps_profile_signed_in(user) == 0) {
+            input.host_profiles.forget(user);
+            BOOST_LOG(info) << "PS5 input: a profile the host kept signed in was signed out on the console"sv;
+        }
+}
+
+// The profiles whose time came (release_profile) are signed out, if prospero::sign_out says so: not one in front, nor one
+// a controller the console asked about plays as, and nothing while the console doesn't say. One in front is kept: it
+// stays signed in, and its device may join it again (GitHub issue 52). One that a pad joined again stays the host's.
+// Caller holds input.mutex.
 static void sign_out_due(input_raw_t &input) {
     const auto now = std::chrono::steady_clock::now();
-    auto &mine = input.host_signed_in;
+    forget_signed_out(input, now);
     for (auto it = input.sign_out_at.begin(); it != input.sign_out_at.end();) {
         if (now < it->at) {
             ++it;
@@ -1007,7 +1021,7 @@ static void sign_out_due(input_raw_t &input) {
         }
         const uint32_t user = it->user;
         prospero::SignOutFacts facts;
-        facts.host_signed_in = std::find(mine.begin(), mine.end(), user) != mine.end();
+        facts.host_signed_in = input.host_profiles.signed_in_by_host(user);
         for (int m = 0; m < MAX_GAMEPADS && !facts.seated; ++m) facts.seated = input.pads[m] && input.seat[m] == user;
         if (facts.seated) {
             it = input.sign_out_at.erase(it);
@@ -1023,14 +1037,17 @@ static void sign_out_due(input_raw_t &input) {
                 const int rc = ps_profile_sign_out(user);
                 note_credential_restore();
                 BOOST_LOG(info) << "PS5 input: a profile the host signed in was signed out, its last pad left ("sv << rc << ')';
-                std::erase(mine, user);
+                input.host_profiles.forget(user);
                 it = input.sign_out_at.erase(it);
                 break;
             }
+            case prospero::SignOut::kept:
+                BOOST_LOG(info) << "PS5 input: a profile the host signed in stays signed in, it is in front on the console; "
+                                   "its device may join it again"sv;
+                input.host_profiles.keep(user);
+                it = input.sign_out_at.erase(it);
+                break;
             case prospero::SignOut::never:
-                if (facts.in_front == prospero::Answer::yes)
-                    BOOST_LOG(info) << "PS5 input: a profile the host signed in stays signed in, it is in front on the console"sv;
-                std::erase(mine, user);
                 it = input.sign_out_at.erase(it);
                 break;
             case prospero::SignOut::later:
@@ -1124,7 +1141,7 @@ static pad_open open_pad(input_raw_t &input, int nr, bool host) {
                     continue;
                 }
                 BOOST_LOG(info) << "PS5 virtual pad "sv << nr << ": its profile was signed in"sv;
-                input.host_signed_in.push_back(candidate);
+                input.host_profiles.add(candidate);
             }
             user = candidate;
             break;
@@ -1173,6 +1190,7 @@ static pad_open open_pad(input_raw_t &input, int nr, bool host) {
             return pad_open::watching;
         }
         input.seat[nr] = user;
+        input.host_profiles.seat(user);  // a kept profile is the host's again
         BOOST_LOG(info) << "PS5 virtual pad "sv << nr << " attached in its device's profile"sv << (host ? " as the host's controller"sv : ""sv)
                         << " (bound after "sv << bind_ms << " ms)"sv;
         // With more profiles to switch to, the notification tells how, so nobody has to have read the web page's help.
@@ -1233,7 +1251,7 @@ static bool switch_seat(input_raw_t &input, int nr, std::size_t &round) {
             ps_notify((profile_name(next) + " couldn't be signed in for " + who).c_str());
             return false;
         }
-        input.host_signed_in.push_back(next);
+        input.host_profiles.add(next);
     }
     ps_pad_close(input.pads[nr]);
     removed_device();
@@ -1267,6 +1285,7 @@ static bool switch_seat(input_raw_t &input, int nr, std::size_t &round) {
         }
     }
     input.seat[nr] = seated;
+    input.host_profiles.seat(seated);
     input.menu_checked[nr] = {};  // the new profile may reach the console's menus, or not
     input.held_back[nr] = false;
     request_motion(input, nr);

@@ -191,7 +191,9 @@ is free.
 signed in watches, and the console says why; a press tries again. The host signs out the profiles it signed in 45 seconds
 after their last controller left, so a Moonlight client that reconnects finds the profile, and the game it was in, as they
 were, and when it stops. It leaves signed in the profile in front on the console, one that a controller which got it from
-the console's question plays as, and any while the console doesn't answer.
+the console's question plays as, and any while the console doesn't answer. A profile left signed in because it was in
+front, most often because its player's game is still open, stays the device's: it can come back to it at any time, also
+after the 45 seconds, until someone signs it out on the console.
 
 **Guests:** the host can't add a Quick Play guest yet; the web page shows it greyed out. Until it can, create guest
 profiles on the console, up to four ("Guest 1" to "Guest 4"), as the console takes four controllers at once, and give

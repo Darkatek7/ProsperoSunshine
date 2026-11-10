@@ -63,17 +63,56 @@ struct SignOutFacts {
     Answer owns_unseated_pad = Answer::unknown;  // a controller of the host that the console asked about belongs to it
 };
 
-// now: sign it out. later: ask again in a while. never: it stays signed in, and the host forgets it signed it in.
-enum class SignOut { now, later, never };
+// now: sign it out. later: ask again in a while. kept: it stays signed in, and a device that has it may join it again
+// (HostProfiles). never: there is nothing to sign out, it isn't the host's or a controller of it sits in it.
+enum class SignOut { now, later, kept, never };
 
 inline SignOut sign_out(const SignOutFacts &facts) {
     if (!facts.host_signed_in || facts.seated) return SignOut::never;
-    // Someone at the TV uses the profile in front: it is theirs from now on.
-    if (facts.in_front == Answer::yes) return SignOut::never;
+    // The profile in front stays: someone at the TV may play as it. Most often it is in front because the game its player
+    // left is still open there, and that player wants to come back to it (GitHub issue 52).
+    if (facts.in_front == Answer::yes) return SignOut::kept;
     // A controller that got the profile from the console's question still plays as it, or the console didn't say.
     if (facts.in_front == Answer::unknown || facts.owns_unseated_pad != Answer::no) return SignOut::later;
     return SignOut::now;
 }
+
+// The profiles the host signed in. signed_in: each is signed out again sign_out_grace after its last controller left
+// (sign_out). kept: those that stayed signed in because they were in front then. The host doesn't sign those out, not
+// even when it stops, but a device that has one may join it again as a profile the host signed in, at any time; once a
+// controller sits in it, it is the host's again. One that someone signs out on the console is forgotten (forget).
+struct HostProfiles {
+    std::vector<uint32_t> signed_in, kept;
+
+    bool knows(uint32_t user) const { return has(signed_in, user) || has(kept, user); }
+    bool signed_in_by_host(uint32_t user) const { return has(signed_in, user); }
+
+    // The host signed it in for a controller.
+    void add(uint32_t user) {
+        std::erase(kept, user);
+        if (!has(signed_in, user)) signed_in.push_back(user);
+    }
+    // Its time came while it was in front (SignOut::kept).
+    void keep(uint32_t user) {
+        if (!has(signed_in, user)) return;
+        std::erase(signed_in, user);
+        if (!has(kept, user)) kept.push_back(user);
+    }
+    // A controller of the host sits in it: a kept one is the host's again, to be signed out once that one leaves.
+    void seat(uint32_t user) {
+        if (has(kept, user)) add(user);
+    }
+    // It was signed out: by the host, or a kept one on the console.
+    void forget(uint32_t user) {
+        std::erase(signed_in, user);
+        std::erase(kept, user);
+    }
+
+private:
+    static bool has(const std::vector<uint32_t> &list, uint32_t user) {
+        return std::find(list.begin(), list.end(), user) != list.end();
+    }
+};
 
 // --- Keyboard and mouse ---
 
