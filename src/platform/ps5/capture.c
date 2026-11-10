@@ -586,6 +586,7 @@ static int open_slot(int slot, ps_capture **out)
         if (!kernel_dynlib_handle(-1, kernels[i], &h) && h)
             load = (load_fn)kernel_dynlib_dlsym(-1, h, "sceKernelLoadStartModule");
     }
+    if (!load) SLOG(slot, "no sceKernelLoadStartModule in libkernel_web, libkernel_sys or libkernel\n");
     if (!load || !module(load, "libSceIpmi.sprx")) goto fail;
     uint32_t av = module(load, "libSceAvcap2.sprx");
     uint32_t ra = module(load, "libSceResourceArbitrator.sprx");
@@ -603,7 +604,10 @@ static int open_slot(int slot, ps_capture **out)
     step = "ResourceArbitrator";
     if (ra_state < 0) { error = PS_CAPTURE_FIRMWARE; goto fail; }
     intptr_t base = kernel_dynlib_mapbase_addr(-1, ra);
-    if (!base) goto fail;
+    if (!base) {
+        SLOG(slot, "no map base for libSceResourceArbitrator.sprx\n");
+        goto fail;
+    }
     int (*reg)(int, void *, void *) = (void *)(base + ra_calls.offset[PS_RA_REGISTER]);
     s->unregister = (void *)(base + ra_calls.offset[PS_RA_UNREGISTER]);
     s->request = (void *)(base + ra_calls.offset[PS_RA_REQUEST]);
@@ -614,7 +618,11 @@ static int open_slot(int slot, ps_capture **out)
     // Stay well below the 2 s a client waits for the stream.
     for (int attempt = 0;; attempt++) {
         if (!attempt) ps_diag_trace("capture%s ResourceArbitrator list\n", slot ? "2" : "");
-        if (list(active)) goto fail;
+        const int list_rc = list(active);
+        if (list_rc) {
+            SLOG(slot, "ResourceArbitrator list rc=%#x\n", list_rc);
+            goto fail;
+        }
         int listed = 0;
         for (size_t i = 0; i < 32; i++) if (active[i] == s->resource) listed = 1;
         if (!listed) {
@@ -642,8 +650,21 @@ static int open_slot(int slot, ps_capture **out)
     s->open_audio = (void *)SYM("sceAvcap2OpenAudio");
     s->read_audio = (void *)SYM("sceAvcap2ReadAudio");
 #undef SYM
-    if (!init || !mode || !open_video || !start || !s->terminate || !s->stop || !s->close || !s->headers || !s->read)
+    if (!init || !mode || !open_video || !start || !s->terminate || !s->stop || !s->close || !s->headers || !s->read) {
+        // Which ones: the export list differs between firmwares (9.60 has five fewer than 13.00), and a port starts there.
+        const struct { const char *name; int found; } needed[] = {
+            {"Initialize", init != NULL}, {"GetVideoOutMode", mode != NULL}, {"OpenVideo", open_video != NULL},
+            {"Start", start != NULL}, {"Terminate", s->terminate != NULL}, {"Stop", s->stop != NULL},
+            {"Close", s->close != NULL}, {"GetNonVclNalUnitStream", s->headers != NULL}, {"ReadVideo", s->read != NULL},
+        };
+        char missing[320] = "";
+        size_t used = 0;
+        for (size_t i = 0; i < sizeof needed / sizeof needed[0]; i++)
+            if (!needed[i].found && used < sizeof missing)
+                used += (size_t)snprintf(missing + used, sizeof missing - used, " sceAvcap2%s", needed[i].name);
+        SLOG(slot, "Avcap2 exports missing on firmware %#x:%s\n", kernel_get_fw_version(), missing);
         goto fail;
+    }
     step = "register";
     ps_diag_trace("capture%s ResourceArbitrator register resource=%d\n", slot ? "2" : "", s->resource);
     int rc = reg(s->resource, (void *)resource_event, NULL);
@@ -693,7 +714,11 @@ static int open_slot(int slot, ps_capture **out)
     // While a title comes up the output has no mode (0) for about a second, and the service refuses a config whose mode isn't
     // the current one. Stay below the 2 s a client waits for the stream.
     for (int attempt = 0; attempt < 50; attempt++) {
-        if (mode(&output)) goto fail;
+        const int mode_rc = mode(&output);
+        if (mode_rc) {
+            SLOG(slot, "GetVideoOutMode rc=%#x\n", mode_rc);
+            goto fail;
+        }
         if (output) {
             if (attempt) SLOG(slot, "video out mode appeared after %d ms\n", attempt * 20);
             break;

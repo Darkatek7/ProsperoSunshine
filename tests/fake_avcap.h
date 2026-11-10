@@ -52,8 +52,10 @@ static int fake_request(int id, const char *state, void *data, int pid)
     return 0;
 }
 static int32_t fake_active[2];  // the others on the arbitrator's list
+static int fake_list_rc;        // what list() returns; 0 = the list below
 static int fake_list(int32_t *active)
 {
+    if (fake_list_rc) return fake_list_rc;
     memset(active, 0, 32 * sizeof *active);
     memcpy(active, fake_active, sizeof fake_active);
     return 0;
@@ -80,7 +82,8 @@ static int fake_initialize(void) { ++fake_initialized; return 0; }
 static int fake_terminate(void) { ++fake_terminated; return 0; }
 // The output's mode; 0 = none, as while a title starts or closes.
 static int fake_output = 0x13c;
-static int fake_mode(int *mode) { *mode = fake_output; return 0; }
+static int fake_mode_rc;  // what GetVideoOutMode returns
+static int fake_mode(int *mode) { *mode = fake_output; return fake_mode_rc; }
 static int fake_open_video(intptr_t *handle, const void *config, uint8_t flag)
 {
     (void)flag;
@@ -121,9 +124,14 @@ int kernel_dynlib_handle(pid_t pid, const char *basename, uint32_t *handle)
     *handle = 1;
     return 0;
 }
+// Exports a firmware lacks: dlsym finds none of the names listed here, separated by spaces.
+static const char *fake_missing = "";
 intptr_t kernel_dynlib_dlsym(pid_t pid, uint32_t handle, const char *symbol)
 {
     (void)pid; (void)handle;
+    const size_t length = strlen(symbol);
+    for (const char *at = strstr(fake_missing, symbol); at; at = strstr(at + 1, symbol))
+        if ((at == fake_missing || at[-1] == ' ') && (at[length] == ' ' || !at[length])) return 0;
     const struct { const char *name; intptr_t address; } table[] = {
         {"sceKernelLoadStartModule", (intptr_t)fake_load},
         {"sceAvcap2Initialize", (intptr_t)fake_initialize},

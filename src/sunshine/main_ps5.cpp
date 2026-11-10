@@ -105,15 +105,25 @@ boost::shared_ptr<klog_sink> add_klog_sink() {
 }
 
 using Ports = std::array<uint16_t, 3>;
+// What the app waits for and Moonlight needs, by name for host_diag.log (prospero::ports_where).
+using ServicePorts = std::array<prospero::ServicePort, 4>;
 
 // Returns false when the host was told to stop, true when rest mode has taken its ports: the process runs on, but
 // nothing answers until the services start anew (STATUS.md). RELISTEN on the control socket tests that path.
 bool wait_or_ports_lost(const std::shared_ptr<safe::event_t<bool>> &shutdown_event, const Ports &ports,
-                        prospero::ControlServer &control) {
-    bool up = false;
+                        const ServicePorts &services, prospero::ControlServer &control) {
+    bool up = false, checked = false;
     int refused = 0;
     while (!shutdown_event->view(5s)) {
         if (control.take_relisten()) return true;
+        // Once per start: a bind that failed is otherwise only in sunshine.log, and the app only sees that the host
+        // never came up (GitHub issue 51).
+        if (!checked) {
+            checked = true;
+            if (const auto down = prospero::ports_where(services, prospero::port_refused); !down.empty())
+                ps_diag_log("ProsperoSunshine: host not listening 5 s after the start: %s (sunshine.log has the bind error)\n",
+                            down.c_str());
+        }
         if (std::none_of(ports.begin(), ports.end(), prospero::port_refused)) {
             up = true;
             refused = 0;
@@ -121,6 +131,11 @@ bool wait_or_ports_lost(const std::shared_ptr<safe::event_t<bool>> &shutdown_eve
             return true;
         }
     }
+    // A stop before that first check: Sunshine stops the host when it can't bind HTTP(S) or RTSP. After the check a stop is
+    // the owner's, and the services may have closed their ports already.
+    if (!checked)
+        if (const auto down = prospero::ports_where(services, prospero::port_refused); !down.empty())
+            ps_diag_log("ProsperoSunshine: host stopping within 5 s of the start, not listening: %s\n", down.c_str());
     return false;
 }
 
@@ -305,6 +320,14 @@ int main(int argc, char *argv[]) {
 
     const Ports ports{net::map_port(nvhttp::PORT_HTTP), net::map_port(nvhttp::PORT_HTTPS),
                       net::map_port(rtsp_stream::RTSP_SETUP_PORT)};
+    const ServicePorts services{{{ports[0], "HTTP"}, {ports[1], "HTTPS"}, {ports[2], "RTSP"},
+                                 {prospero::ControlServer::port, "control"}}};
+    // Another host or payload on these ports makes the binds below fail. Before any of ours listens, a port that doesn't
+    // refuse a connection is someone else's.
+    if (const auto taken = prospero::ports_where(services, [](uint16_t port) { return !prospero::port_refused(port); });
+        !taken.empty())
+        ps_diag_log("ProsperoSunshine: host ports taken before the services start: %s (another host or payload?)\n",
+                    taken.c_str());
     prospero::ControlServer control(shutdown_event);
     prospero::web::WebServer web(control, shutdown_event);
     for (bool again = true; again;) {
@@ -331,7 +354,7 @@ int main(int argc, char *argv[]) {
         }
         ps_diag_log("ProsperoSunshine: host ready control_port=%u\n", prospero::ControlServer::port);
 
-        again = wait_or_ports_lost(shutdown_event, ports, control);
+        again = wait_or_ports_lost(shutdown_event, ports, services, control);
         if (again) {
             // The log files stop taking lines after rest mode; the old sunshine.log stays as its rotated copy.
             ps_diag_reopen();

@@ -24,6 +24,7 @@ run_capture_test capture_records_test "-DGOLDEN=\"$root/tests/capture_records.go
 run_capture_test capture_open_test
 run_capture_test capture_slots_test
 run_capture_test probe_record_test
+run_capture_test capture_firmware_test
 run_capture_test diag_test
 run_capture_test diag_test -DPROSPERO_DEBUG=1
 run_test experimental_test

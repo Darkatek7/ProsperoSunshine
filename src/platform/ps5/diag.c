@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "diag.h"
+#include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <stdarg.h>
@@ -80,8 +81,11 @@ void ps_diag_open(const char *path, const char *header)
         written = 0;
         append(first_line, strlen(first_line));
     }
+    const int open_error = fd < 0 ? (errno ? errno : -1) : 0;
     pthread_mutex_unlock(&lock);
     klog_printf("%s", first_line);
+    // Then nothing of this run reaches the file the app's report reads, and the kernel log is the only trace of the start.
+    if (open_error) klog_printf("ProsperoSunshine: diag file %s not opened, errno %d: these lines reach the kernel log only\n", path, open_error);
 }
 
 void ps_diag_reopen(void)

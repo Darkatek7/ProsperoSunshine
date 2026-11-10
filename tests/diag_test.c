@@ -107,6 +107,22 @@ int main(void)
     assert(strstr(text, "] ProsperoSunshine: after the turn\n"));
     assert(strstr(slurp(older), "version=1.2.4"));
 
+    // A file that can't be opened (no such folder): the kernel log says so, with the errno, and the lines still reach it.
+    char nowhere[300];
+    snprintf(nowhere, sizeof nowhere, "%s/missing/host_diag.log", dir);
+    klog[0] = 0;
+    ps_diag_open(nowhere, "ProsperoSunshine: host version=1.2.5 commit=ghi firmware=0x11200000 known=0");
+    ps_diag_log("ProsperoSunshine: host ready control_port=47995\n");
+    char expected[400];
+    snprintf(expected, sizeof expected, "ProsperoSunshine: diag file %s not opened, errno %d: these lines reach the kernel log only\n",
+             nowhere, ENOENT);
+    assert(strstr(klog, "ProsperoSunshine: host version=1.2.5") && strstr(klog, expected));
+    assert(strstr(klog, "ProsperoSunshine: host ready control_port=47995\n"));
+    // A file that opens: no such line.
+    klog[0] = 0;
+    ps_diag_open(path, "ProsperoSunshine: host version=1.2.6 commit=jkl firmware=0x13000040 known=1");
+    assert(strstr(klog, "version=1.2.6") && !strstr(klog, "not opened"));
+
     remove(path);
     remove(older);
     rmdir(dir);
