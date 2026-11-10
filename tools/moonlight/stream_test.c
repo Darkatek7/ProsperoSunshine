@@ -17,6 +17,7 @@
 //       [--timing-log file.csv] [--ui-ticks N [--tick-interval-ms 1500] [--tick-hold-ms 120]
 //       [--tick-kind dpad|ps|back] [--tick-seq right,cross,...] [--tick-start S]] [--no-script] [--hevc] [--hevc10] [--surround 51|71]
 //       [--touch-motion] [--kbm-seq step,step,... [--tick-start S] [--tick-interval-ms N] [--tick-hold-ms N]]
+//       [--packet-size N]
 //
 // --touch-motion announces a controller with touchpad and sensors and, from 3 s on, moves two fingers without a click and
 // sends a few seconds of motion. Whatever is in front on the console receives this as input.
@@ -406,6 +407,7 @@ int main(int argc, char **argv) {
                  // a client without a controller (its keys and mouse then make the host's keyboard pad)
   int surround = 0;  // --surround 51|71: ask for 5.1 or 7.1 sound instead of stereo
   int tick_pad = 0;  // --tick-pad N: the UI ticks come from controller N (with --pads above N)
+  int packet_size = 1024;  // --packet-size N: video packet payload; Moonlight asks 1392 on a LAN, 1024 over the internet
 
   static const struct option opts[] = {
     {"addr", 1, 0, 'a'},     {"rtsp-url", 1, 0, 'r'},   {"rikey", 1, 0, 'k'},    {"rikeyid", 1, 0, 'i'},
@@ -415,7 +417,7 @@ int main(int argc, char **argv) {
     {"ui-ticks", 1, 0, 'U'}, {"tick-interval-ms", 1, 0, 'T'}, {"tick-start", 1, 0, 'S'}, {"tick-kind", 1, 0, 'K'},
     {"timing-log", 1, 0, 'L'}, {"no-script", 0, 0, 'N'}, {"tick-hold-ms", 1, 0, 'M'}, {"tick-seq", 1, 0, 'Q'},
     {"hevc", 0, 0, 'E'},     {"hevc10", 0, 0, 'X'},     {"touch-motion", 0, 0, 'Y'}, {"kbm-seq", 1, 0, 'Z'},
-    {"pads", 1, 0, 'P'}, {"tick-pad", 1, 0, 'J'}, {"surround", 1, 0, 'R'},
+    {"pads", 1, 0, 'P'}, {"tick-pad", 1, 0, 'J'}, {"surround", 1, 0, 'R'}, {"packet-size", 1, 0, 'G'},
     {0, 0, 0, 0}};
   int c;
   while ((c = getopt_long(argc, argv, "", opts, NULL)) != -1) {
@@ -451,8 +453,13 @@ int main(int argc, char **argv) {
       case 'P': pads = atoi(optarg); break;
       case 'J': tick_pad = atoi(optarg); break;
       case 'R': surround = atoi(optarg); break;
+      case 'G': packet_size = atoi(optarg); break;
       default: return 2;
     }
+  }
+  if (packet_size < 256 || packet_size > 1500) {
+    fprintf(stderr, "--packet-size must be 256..1500\n");
+    return 2;
   }
   if (pads < 0 || pads > 16) {
     fprintf(stderr, "--pads must be 0..16\n");
@@ -509,7 +516,7 @@ int main(int argc, char **argv) {
   sc.height = h;
   sc.fps = fps;
   sc.bitrate = bitrate;
-  sc.packetSize = 1024;
+  sc.packetSize = packet_size;
   sc.streamingRemotely = STREAM_CFG_LOCAL;
   sc.audioConfiguration = surround == 71 ? AUDIO_CONFIGURATION_71_SURROUND
                            : surround == 51 ? AUDIO_CONFIGURATION_51_SURROUND
