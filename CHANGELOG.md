@@ -62,8 +62,8 @@
   Tailscale, every large frame lost its end on the way, the client asked for a new picture, and that one was lost too:
   up to five a second, at two to three times the bitrate the client chose. To a client over the internet the host now
   sends large frames, such as a new picture, spread over up to 100 ms at no more than four times the stream's bitrate,
-  in bursts of at most 32 kB. When the new pictures keep failing for a device it sends them less often, down to one
-  every 2 s, while a single loss still gets its new picture at once. On a LAN every frame goes out as before.
+  in bursts of at most 32 kB. When the new pictures keep failing for a device it sends them less often, at most two
+  a second, while a single loss still gets its new picture at once. On a LAN every frame goes out as before.
 - A stream that ended while its last frames were still on their way to the network could make the host use memory it
   had already freed.
 - A send that failed on the console no longer sends the same video packets twice or holds up every stream for up to a

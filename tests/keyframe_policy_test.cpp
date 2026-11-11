@@ -163,7 +163,7 @@ int main() {
     // A real request that only looks blind: ENet's round trip stuck at 110 ms on a path of 55 ms (the host measures it
     // only from acknowledgements of its own reliable messages). Every request about a lost IDR then falls into the
     // window. It is answered blind_hold later instead of when the client gives up after 120 frames (4 s at 30 fps), and
-    // when every IDR is lost, the blind requests still count as failures: the IDRs thin out to one in 2 s.
+    // when every IDR is lost, the blind requests still count as failures: the IDRs thin out to two a second (max_gap).
     {
         KeyframePolicy::Client stale = phone;
         stale.rtt = 110ms;
@@ -192,7 +192,7 @@ int main() {
             if (ch.idrs != before) {
                 if (last_idr) {
                     longest = std::max(longest, now - *last_idr);
-                    if (now - *last_idr >= 2s) ++late_gaps;
+                    if (now - *last_idr >= KeyframePolicy::max_gap) ++late_gaps;
                 }
                 last_idr = now;
                 next_ask = now + spread + 10ms + 55ms;
@@ -203,13 +203,13 @@ int main() {
             }
         }
         assert(ch.policy.level(stale.id, now) == KeyframePolicy::max_level);
-        assert(ch.idrs < 20 && late_gaps >= 10 && longest <= 2100ms);
+        assert(ch.idrs < 62 && late_gaps >= 40 && longest <= KeyframePolicy::max_gap + 100ms);
         assert(ch.policy.take_counts().blind == ch.idrs);
     }
 
     // Issue 37's loop: every IDR fails. The client asks once a P-frame lost while the IDR is on its way, once it sees
     // that the IDR was lost (its spread, the round trip and a frame after it left), and every 150 ms while it waits, as
-    // in the log. Today that made up to five IDRs a second; the hold-off brings it down to one in 2 s.
+    // in the log. In 0.6.0 that made up to five IDRs a second; the hold-off brings it down to two (max_gap).
     {
         LoopClient client{phone, true, {}, {}, 0};
         Channel ch{KeyframePolicy{}, phone_idr, {}, 0};
@@ -230,19 +230,18 @@ int main() {
         }
         assert(client.requests > 100);
         // The first request is answered at once (the encoder delivers 2 frames later), and so is the second, since one
-        // failure alone may be chance. Then the gaps double from twice the airtime (160 kB at 3.4 Mbit/s: 0.37 s) to 2 s.
+        // failure alone may be chance. From then on the gap is max_gap: twice the airtime (160 kB at 3.4 Mbit/s: 0.37 s)
+        // is already more.
         assert(first_idr && *first_idr - t0 < 50ms);
         assert(gaps.size() >= 8);
         assert(gaps[0] < 400ms);
-        assert(gaps[1] >= 740ms && gaps[1] < 850ms);
-        assert(gaps[2] >= 1490ms && gaps[2] < 1600ms);
-        for (std::size_t i = 3; i < gaps.size(); ++i) assert(gaps[i] >= 2s && gaps[i] <= 2100ms);
-        assert(ch.idrs < 14);
+        for (std::size_t i = 1; i < gaps.size(); ++i) assert(gaps[i] >= KeyframePolicy::max_gap && gaps[i] <= KeyframePolicy::max_gap + 100ms);
+        assert(ch.idrs < 42);
         assert(ch.policy.level(phone.id, now) == KeyframePolicy::max_level);
         // The requests for P-frames lost while an IDR was on its way look blind; those after it merge into the IDR that
         // waits for its hold-off.
         const auto counts = ch.policy.take_counts();
-        assert(counts.blind > 0 && counts.merged > counts.requests / 2 && counts.longest_wait <= 2s);
+        assert(counts.blind > 0 && counts.merged > counts.requests / 2 && counts.longest_wait <= KeyframePolicy::max_gap);
 
         // The path recovers (the pacer gets the IDRs through): the IDR the client waits for holds, the client is quiet,
         // and its level falls by one every 2 s from then on; while it waited it didn't fall. 8 s later a loss gets its IDR
@@ -304,8 +303,9 @@ int main() {
             now = idr + policy.blind_window(phone) + 20ms;
         }
         assert(policy.level(phone.id, now) == 3);
-        // The fifth held: the next request comes a second after it.
-        assert(policy.request(idr + 1s, phone) == Outcome::waits);
+        // The fifth held: the next request comes a second after it. That is past the hold-off (max_gap), so it is answered
+        // at once, and the level is one lower.
+        assert(policy.request(idr + 1s, phone) == Outcome::now);
         assert(policy.level(phone.id, idr + 1s) == 2);
     }
 

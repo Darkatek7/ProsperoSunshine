@@ -80,7 +80,8 @@ EOF
 }
 
 # Someone may be streaming: go on only while the host is free.
-if ! python3 tools/moonlight/pair.py --host "$HOST" info 2>&1 | grep -q "state = SUNSHINE_SERVER_FREE"; then
+# (Not grep -q: it would stop reading at the state line, pair.py then dies of SIGPIPE and pipefail calls the host busy.)
+if ! python3 tools/moonlight/pair.py --host "$HOST" info 2>&1 | grep "state = SUNSHINE_SERVER_FREE" >/dev/null; then
   echo "the host is not free (someone streams, or it doesn't answer); stopping"
   exit 1
 fi

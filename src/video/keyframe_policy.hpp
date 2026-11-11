@@ -49,16 +49,21 @@
 //     encoder's own IDRs and those for others aren't judged, so a loss right after one of them is no sign that IDRs fail
 //     on this client's path. At level 0 the request is answered at once: a single loss on a healthy link gets its IDR as
 //     fast as before, and so does the first request after a quiet time. At level L an IDR for that client follows the last
-//     one no sooner than min(2 s, base x 2^(L-1)), base = max(100 ms, 2 x airtime), airtime = the last IDR's bytes on the
-//     wire / the client's bitrate: how long the link the client chose needs for one IDR. So its IDRs take at most half
-//     that link at level 1, a quarter at level 2, an eighth at level 3; 2 s is how long the client itself waits before it
-//     asks again on its own at 60 fps. A request that waits is answered when its time comes, or by any IDR before (the
-//     encoder's own every 10 s, one for another client or a joining device). Random loss with room to spare keeps the
-//     level low: an IDR fails only when the next loss happens to fall within H. A blind request waits for the later of
-//     blind_hold and the hold-off.
+//     one no sooner than min(max_gap, base x 2^(L-1)), base = max(100 ms, 2 x airtime), airtime = the last IDR's bytes on
+//     the wire / the client's bitrate: how long the link the client chose needs for one IDR. So its IDRs take at most half
+//     that link at level 1 and less above, down to two a second. A request that waits is answered when its time comes,
+//     or by any IDR before (the encoder's own every 10 s, one for another client or a joining device). Random loss with
+//     room to spare keeps the level low: an IDR fails only when the next loss happens to fall within H. A blind request
+//     waits for the later of blind_hold and the hold-off.
+//     max_gap is 500 ms, measured on the console (2026-11-11, 3.4 Mbit/s, 1024-byte packets): with 2 s, and 10 % of the
+//     packets lost in bursts, an IDR held back for 1.9 s was lost as well and the next one held back again, and the
+//     picture stood for up to 4.5 s, where answering every request at once (0.6.0) left it broken for 0.5 s. Issue 37's
+//     loop was over without the hold-off: once large frames were paced (frame_pacing.hpp), the same stream through a
+//     buffer of 39 packets asked for one IDR in 30 s. So the hold-off is only the limit for a path where paced IDRs still
+//     fail, and it must not cost more than it saves: at most two IDRs a second for such a client, instead of up to five.
 //     Issue 37's stream (3.4 Mbit/s, about 160 kB per IDR on the wire): airtime 380 ms, so while every IDR fails, IDRs at
-//     most every 0.75 s, 1.5 s, then 2 s, instead of up to five a second. A LAN stream at 20 Mbit/s with 300 kB IDRs on the
-//     wire (240 kB, the largest the repository measured, frame_pacing.hpp): 0.24 s, 0.48 s, 0.96 s, 1.9 s.
+//     most every 0.5 s from level 1 on. A LAN stream at 20 Mbit/s with 300 kB IDRs on the wire (240 kB, the largest the
+//     repository measured, frame_pacing.hpp): 0.24 s, 0.48 s, then 0.5 s.
 //     The level is each client's own, so that a device on a bad link doesn't hold back the IDRs of one on a good link
 //     that joined the same channel; the hold-off counts from the last IDR of the channel, whoever it was for.
 //  4. A device that joins a running channel needs an IDR to start: forced, only rule 1 applies.
@@ -88,7 +93,7 @@ public:
     static constexpr ms quiet{2000};
     static constexpr int max_level = 4;
     static constexpr ms min_base{100};
-    static constexpr ms max_gap{2000};
+    static constexpr ms max_gap{500};
     static constexpr ms forget_after{60'000};
 
     // The client that asks: who it is (any number that tells the streams of the channel apart), its control

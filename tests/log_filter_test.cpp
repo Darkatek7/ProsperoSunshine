@@ -40,7 +40,10 @@ int main() {
     {
         psapp::mask::Masker masker;
         assert(hide_identifiers(masker, "uniqueid -- 0123456789ABCDEF") == "uniqueid -- <id-1>");
-        assert(hide_identifiers(masker, "UUID -- 1b4e28ba-2fa1-11d2-883f-0016d3cca427") == "UUID -- <id-2>");
+        // The id of a request is new each time: hidden without a number, and it takes no place in the masker's table.
+        assert(hide_identifiers(masker, "UUID -- 1b4e28ba-2fa1-11d2-883f-0016d3cca427") == "UUID -- <request>");
+        assert(hide_identifiers(masker, "uuid -- 6f1c0d3e-9a2b-4c5d-8e7f-a1b2c3d4e5f6") == "uuid -- <request>");
+        assert(hide_identifiers(masker, "uniqueid -- FEDCBA9876543210") == "uniqueid -- <id-2>");
         assert(hide_identifiers(masker, "uniqueid -- 0123456789ABCDEF") == "uniqueid -- <id-1>");
         assert(hide_identifiers(masker, "x\ndevicename -- Deck\ny") == "x\ndevicename -- <name-1>\ny");
         assert(hide_identifiers(masker, "devicename :: Deck") == "devicename :: <name-1>");

@@ -83,18 +83,21 @@ inline std::string hide_secrets(std::string message) {
 
 // What a client calls itself, in the arguments Sunshine dumps at debug level: the id its app made up (a Moonlight app keeps one
 // for good), the id of the request and the name of the device in a pairing (often a person's name). The debug build hides
-// them behind tags that stay the same for the same value, so "one client asked five times" still shows.
-inline const char *identifier_category(std::string_view name) {
-    struct Entry {
-        std::string_view name;
-        const char *category;
-    };
-    static constexpr Entry entries[] = {{"uniqueid", "id"}, {"uuid", "id"}, {"devicename", "name"}};
-    for (const Entry &entry : entries) {
+// them behind tags that stay the same for the same value, so "one client asked five times" still shows. The id of a request
+// is new with every request and gets a tag without a number: numbered, it used up the masker's table (254 ids after 25
+// minutes of stream tests on the console), and from then on no client could be told from another.
+struct Identifier {
+    std::string_view name;
+    const char *category;
+    bool numbered;
+};
+inline const Identifier *identifier(std::string_view name) {
+    static constexpr Identifier entries[] = {{"uniqueid", "id", true}, {"uuid", "request", false}, {"devicename", "name", true}};
+    for (const Identifier &entry : entries) {
         if (name.size() != entry.name.size()) continue;
         bool same = true;
         for (size_t i = 0; i < name.size() && same; i++) same = std::tolower(static_cast<unsigned char>(name[i])) == entry.name[i];
-        if (same) return entry.category;
+        if (same) return &entry;
     }
     return nullptr;
 }
@@ -111,9 +114,11 @@ inline std::string hide_identifiers(psapp::mask::Masker &masker, const std::stri
             if (sep == std::string::npos) continue;
             size_t first = 0;
             while (first < sep && std::isspace(static_cast<unsigned char>(line[first]))) first++;
-            if (const char *category = identifier_category(std::string_view(line).substr(first, sep - first))) {
+            if (const Identifier *found = identifier(std::string_view(line).substr(first, sep - first))) {
                 const std::string value = line.substr(sep + separator.size());
-                if (!value.empty()) line = line.substr(0, sep + separator.size()) + masker.stand_in(category, value);
+                if (!value.empty())
+                    line = line.substr(0, sep + separator.size()) +
+                           (found->numbered ? masker.stand_in(found->category, value) : "<" + std::string(found->category) + ">");
                 break;
             }
         }
