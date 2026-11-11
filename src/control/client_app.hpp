@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Which Moonlight a client is, from the User-Agent of its last launch or resume (patch 0026). Moonlight for iPhone and
+// Which Moonlight a client is, from the User-Agent of its last launch or resume (patch 0033). Moonlight for iPhone and
 // iPad sets none of its own, so Apple's networking sends its default, "<app>/<build> CFNetwork/<version> Darwin/<version>"
 // ("Moonlight/..."); its Apple TV build is "Moonlight%20TV/..." and has no on-screen keyboard. Moonlight for PC (Qt) and
 // for Android (OkHttp) send their own. Portable, tested in tests/client_app_test.cpp.
