@@ -712,15 +712,17 @@ static int open_slot(int slot, ps_capture **out)
     step = "video out mode";
     int output = 0;
     // While a title comes up the output has no mode (0) for about a second, and the service refuses a config whose mode isn't
-    // the current one. Stay below the 2 s a client waits for the stream.
-    for (int attempt = 0; attempt < 50; attempt++) {
+    // the current one. Stay below the 2 s a client waits for the stream. mode_waits: what is left of that second, in steps
+    // of 20 ms, for an output that loses its mode only after it was read (below).
+    int mode_waits = 50;
+    for (; mode_waits > 0; mode_waits--) {
         const int mode_rc = mode(&output);
         if (mode_rc) {
             SLOG(slot, "GetVideoOutMode rc=%#x\n", mode_rc);
             goto fail;
         }
         if (output) {
-            if (attempt) SLOG(slot, "video out mode appeared after %d ms\n", attempt * 20);
+            if (mode_waits < 50) SLOG(slot, "video out mode appeared after %d ms\n", (50 - mode_waits) * 20);
             break;
         }
         usleep(20000);
@@ -774,6 +776,25 @@ static int open_slot(int slot, ps_capture **out)
             SLOG(slot, "video out mode now %#x\n", output);
             changed = 1;
             u32(config, 0x2a0 + record_shift(), (uint32_t)output);
+        }
+        // The output lost its mode after it was read above: a title is coming up, and no open can succeed until its mode
+        // is there. That wait gets the time the wait above didn't use, and doesn't count as repeats. Seen on 13.00 with a
+        // game started behind the console's welcome screen: the welcome screen's mode was read, then the output had none
+        // for about 1.2 s, the 25 repeats (1 s) were over 0.15 s before the game's mode appeared, and the stream ended at
+        // its start, two times of three.
+        if (!output && mode_waits > 0) {
+            const int had = mode_waits;
+            while (!output && mode_waits > 0 && !atomic_load(&revoked[slot])) {
+                usleep(20000);
+                mode_waits--;
+                int current = 0;
+                if (mode(&current) == 0) output = current;
+            }
+            if (output) {
+                SLOG(slot, "video out mode back after %d ms: %#x\n", (had - mode_waits) * 20, output);
+                changed = 1;
+                u32(config, 0x2a0 + record_shift(), (uint32_t)output);
+            }
         }
     }
     atomic_store(&unsettled[slot], rc && (changed || !output));

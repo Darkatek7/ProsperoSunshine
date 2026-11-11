@@ -83,7 +83,16 @@ static int fake_terminate(void) { ++fake_terminated; return 0; }
 // The output's mode; 0 = none, as while a title starts or closes.
 static int fake_output = 0x13c;
 static int fake_mode_rc;  // what GetVideoOutMode returns
-static int fake_mode(int *mode) { *mode = fake_output; return fake_mode_rc; }
+// Called before each GetVideoOutMode with how many came before it, to change fake_output over time.
+static void (*fake_mode_changes)(int reads);
+static int fake_mode_reads;
+static int fake_mode(int *mode)
+{
+    if (fake_mode_changes) fake_mode_changes(fake_mode_reads);
+    ++fake_mode_reads;
+    *mode = fake_output;
+    return fake_mode_rc;
+}
 static int fake_open_video(intptr_t *handle, const void *config, uint8_t flag)
 {
     (void)flag;
