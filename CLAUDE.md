@@ -137,6 +137,11 @@ Toolchain: PS5 Payload SDK v0.45 in the Docker image `prosperosunshine-sdk:v0.45
   `PROBE` sends `/data/prosperosunshine/firmware_probe.elf` to the ELF loader unless a stream runs (`docs/firmware-probe.md`).
 - Before touching the console, check `http://<console>:47989/serverinfo`: go on only at `SUNSHINE_SERVER_FREE`, someone may
   be streaming. Don't take screenshots during a stream.
+- To try a host without installing it, run it from memory: `QUIT` on the control socket (with `control_lan`), wait until
+  port 47989 is closed (a second host started while one runs logs `host ready` without holding a port), then send the ELF
+  to the loader; `out/host_restart.elf` starts the installed one again. Builds to compare take turns that way, several
+  rounds each: the Mario 64 demo's picture changes over its loop (the encoder sent 1.0 to 2.7 Mbit/s at the same cap), and a
+  single run of `loss_matrix.sh` says little (the longest gap of one build spread from 0.6 to 1.8 s over six runs).
 - Logs: `sunshine.log` (older ones `.1`, `.2`, ...; `min_log_level = debug` in `sunshine.conf` also logs motors, light bar
   and trigger blocks), and `host_diag.log`, which the app's diagnostic report reads. The host reads `sunshine.conf` at
   start; to restart it, use "Restart host" in the app.
