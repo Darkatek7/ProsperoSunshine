@@ -126,7 +126,8 @@ gemodel() {
 
 # Asks STREAMS every 2 s while the client runs and writes "<seconds since the last poll> <the stream's line>".
 poll_streams() {
-  local last=$(date +%s.%N) now
+  local last now
+  last=$(date +%s.%N)
   while :; do
     sleep 2
     now=$(date +%s.%N)
