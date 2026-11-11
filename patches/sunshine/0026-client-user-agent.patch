@@ -1,0 +1,74 @@
+ProsperoSunshine: remember each client's User-Agent
+
+Moonlight for iPhone and iPad has no PS button: neither its on-screen controller nor the bar above its on-screen keyboard
+has one. The PS5 host makes Windows+Esc PS and tells such a client's players so once their controller joins
+(platform_ps5.cpp). Only the HTTP requests say which Moonlight it is: Apple's networking adds "CFNetwork/" and "Darwin/"
+to the User-Agent of Moonlight for iPhone and iPad. /launch and /resume keep it per client certificate.
+
+--- a/src/nvhttp.h
++++ b/src/nvhttp.h
+@@ -275,6 +275,17 @@
+   launch_client_t get_last_launch_client();
+ 
+   /**
++   * @brief The User-Agent of the last launch or resume request of the client with this certificate.
++   *
++   * ProsperoSunshine: Moonlight for iPhone and iPad has no PS button, and the PS5 host tells its players how to press PS
++   * from the keyboard (platform_ps5.cpp).
++   *
++   * @param client_cert The client's certificate (PEM).
++   * @return Empty when the client sent none or hasn't launched or resumed since the host started.
++   */
++  std::string get_client_user_agent(const std::string &client_cert);
++
++  /**
+    * @brief Cancel a pairing request that is waiting for operator approval.
+    *
+    * @param pairing_id Unguessable approval identifier returned by @ref get_pending_pairings.
+--- a/src/nvhttp.cpp
++++ b/src/nvhttp.cpp
+@@ -712,6 +712,15 @@
+     std::mutex launch_client_mutex;
+     launch_client_t last_launch_client;
+     std::function<void(const launch_client_t &)> launch_listener;
++    std::unordered_map<std::string, std::string> client_user_agents;  ///< By client certificate, under launch_client_mutex.
++
++    void remember_user_agent(const std::string &client_cert, const req_https_t &request) {
++      const auto header = request->header.find("User-Agent");
++      // Bounded: a client sends what it likes, and only the start says which app it is.
++      std::string agent = header == request->header.end() ? std::string {} : header->second.substr(0, 256);
++      std::scoped_lock lock {launch_client_mutex};
++      client_user_agents[client_cert] = std::move(agent);
++    }
+ 
+     std::string uuid_of_cert(const std::string &cert) {
+       std::lock_guard lock {client_auth_mutex()};
+@@ -742,6 +751,12 @@
+     launch_listener = std::move(listener);
+   }
+ 
++  std::string get_client_user_agent(const std::string &client_cert) {
++    std::scoped_lock lock {launch_client_mutex};
++    const auto it = client_user_agents.find(client_cert);
++    return it == client_user_agents.end() ? std::string {} : it->second;
++  }
++
+   launch_client_t get_last_launch_client() {
+     std::scoped_lock lock {launch_client_mutex};
+     return last_launch_client;
+@@ -1498,6 +1513,7 @@
+     host_audio = util::from_view(get_arg(args, "localAudioPlayMode"));
+     auto launch_session = make_launch_session(host_audio, args);
+     remember_launch_client(*launch_session, net::addr_to_normalized_string(request->remote_endpoint().address()));
++    remember_user_agent(launch_session->client_cert, request);
+ 
+     if (rtsp_stream::session_count() == 0) {
+       // The display should be restored in case something fails as there are no other sessions.
+@@ -1649,6 +1665,7 @@
+     }
+     const auto launch_session = make_launch_session(host_audio, args);
+     remember_launch_client(*launch_session, net::addr_to_normalized_string(request->remote_endpoint().address()));
++    remember_user_agent(launch_session->client_cert, request);
+ 
+     if (no_active_sessions) {
+       // We want to prepare display only if there are no active sessions at

@@ -28,6 +28,8 @@ it on a PC), and the key right of the space bar is for menus, below.
 | Esc | Options (pause) |
 | Tab | touchpad (the map or inventory in most games); L1 in `platformer` |
 | F1 / F2 | PS / Create, the host only unless `ps_button_all_players = 1` |
+| Windows+Esc | PS, as F1 (Moonlight for iPhone and iPad has Win and Esc above its on-screen keyboard, but no F1) |
+| Windows+Shift+Esc | PS held for 650 ms (on 10.20, PS held 450 ms or more from a game went home every time) |
 
 A key gives full deflection, two keys on one stick a diagonal, and opposite keys cancel out, also on the D-pad.
 

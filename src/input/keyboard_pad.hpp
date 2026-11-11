@@ -44,10 +44,11 @@ inline constexpr uint64_t half = 1ull << 42;
 }
 
 // One profile per way of playing, so a game feels the way it does with keyboard and mouse on a PC. Every profile keeps
-// Enter ✕, Backspace ○, Esc Options (pause), Tab the touchpad (map and inventory in most PS5 games), F1 PS and F2
-// Create, and Ctrl+Backspace switches the pad to its device's next profile (gamepad_map.hpp, switch_seat). None
-// uses Alt, so no profile can form Moonlight's Ctrl+Alt+Shift shortcuts. The key right of the space bar
-// held gives the menu keys (standard's with W A S D on the D-pad), for a game's menus.
+// Enter ✕, Backspace ○, Esc Options (pause), Tab the touchpad (map and inventory in most PS5 games), F1 PS (Windows+Esc
+// too, and Windows+Shift+Esc holds it, keyboard_map.hpp's ps_chord) and F2 Create, and Ctrl+Backspace switches the pad to
+// its device's next profile (gamepad_map.hpp, switch_seat). None uses Alt, so no profile can form Moonlight's
+// Ctrl+Alt+Shift shortcuts. The key right of the space bar held gives the menu keys (standard's with W A S D on the
+// D-pad), for a game's menus.
 enum class Profile : uint8_t { standard, action, shooter, driving, fighting, platformer, sports };
 
 inline constexpr std::array<std::string_view, 7> profile_names = {"standard", "action",     "shooter", "driving",
@@ -455,7 +456,8 @@ public:
     }
     bool in_vehicle() const { return vehicle_; }
 
-    // Returns whether it changed what the pad holds. Keys that are not the pad's change nothing.
+    // Returns whether it changed what the pad holds, or will on its own (next_change). Keys that are not the pad's
+    // change nothing.
     // extended: the client marked the key extended (Moonlight's MODIFIER_EXTENDED), as Windows marks right Alt.
     bool key(uint16_t vk, bool release, clock::time_point now = {}, bool extended = false) {
         const auto index = static_cast<uint8_t>(vk);
@@ -493,6 +495,9 @@ public:
                 return changed;
             }
             if (!release && (bit & 0x33) && left_alt_unbound()) return false;
+            // Windows is no profile's key: held, the player is reaching for Windows+Shift+Esc (PS held), so Shift and
+            // Ctrl don't count until it is up again, or a profile's Shift (○ in action, L3 in shooter) would press too.
+            if (!release && (bit & 0x33) && ((generic_modifiers_ | sided_modifiers_) & 0x88)) return false;
         }
         if (vk == vehicle_key && has_vehicle_layer(profile_)) {
             if (release || in_menu()) return false;
@@ -503,8 +508,15 @@ public:
             return true;
         }
         if (release) {
+            // Windows+Shift+Esc's PS stays down until ps_long_hold is over: true, so the caller asks next_change when
+            // to send the state again, and state lets it go then.
+            if (held_[index] && release_at_[index] > now) {
+                released_[index] = true;
+                return true;
+            }
             const bool held = held_[index] != 0;
             held_[index] = 0;
+            release_at_[index] = {};
             return held;
         }
         // Ctrl+Backspace switches the pad to its device's next profile (gamepad_map.hpp, switch_seat): with a Ctrl held,
@@ -513,6 +525,16 @@ public:
             if (held_[index]) return false;
             held_[index] = moonlight::switch_seat;
             since_[index] = now;
+            return true;
+        }
+        // Windows+Esc is PS, as F1 is, in every profile and in the menu keys, whatever a profile of one's own gives Esc:
+        // Moonlight for iPhone and iPad has Windows and Esc above its on-screen keyboard, but no F1.
+        if (const uint8_t modifiers = generic_modifiers_ | sided_modifiers_; ps_chord(vk, modifiers)) {
+            if (held_[index]) return false;
+            held_[index] = moonlight::home;
+            since_[index] = now;
+            release_at_[index] = ps_long_chord(vk, modifiers) ? now + ps_long_hold : clock::time_point{};
+            released_[index] = false;
             return true;
         }
         const uint64_t control = key_control(map_, vk);
@@ -567,6 +589,11 @@ public:
                 if (control & 1) level[bit] = std::max(level[bit], amount);
         };
         for (int vk = 0; vk < 256; vk++) {
+            if (released_[vk] && now >= release_at_[vk]) {
+                held_[vk] = 0;
+                released_[vk] = false;
+                release_at_[vk] = {};
+            }
             if (!held_[vk]) continue;
             double amount = 1.0;
             if (map_.ease && (held_[vk] & eased))
@@ -621,6 +648,8 @@ public:
         if (motion_count_) earliest(motion_[motion_start_].at + mouse_window);
         earliest(vertical_.next_change(now));
         earliest(horizontal_.next_change(now));
+        for (int vk = 0; vk < 256; vk++)
+            if (released_[vk]) earliest(std::max(now, release_at_[vk]));
         if (map_.ease) {
             for (int vk = 0; vk < 256; vk++)
                 if ((held_[vk] & eased) && now < since_[vk] + ease_time - ease_step)
@@ -658,6 +687,8 @@ private:
     // Everything held lets go, as with a new profile, but the modifiers held stay known.
     void let_go() {
         held_ = {};
+        release_at_ = {};
+        released_ = {};
         buttons_ = {};
         motion_count_ = 0;
         vertical_.clear();
@@ -739,6 +770,9 @@ private:
     std::bitset<256> menu_keys_held_;
     std::array<uint64_t, 256> held_{};  // what each held key does, fixed when it went down
     std::array<clock::time_point, 256> since_{};
+    // Windows+Shift+Esc's PS: held at least until then, and whether its key already came up.
+    std::array<clock::time_point, 256> release_at_{};
+    std::bitset<256> released_;
     std::array<bool, 6> buttons_{};
     uint8_t generic_modifiers_ = 0, sided_modifiers_ = 0;
     std::array<Motion, 64> motion_{};

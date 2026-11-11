@@ -13,6 +13,7 @@
 #include "platform/ps5/profile_seat.h"
 #include "platform/ps5/shared_capture.hpp"
 #include "platform/ps5/title_launch.h"
+#include "control/client_app.hpp"
 #include "control/device_profiles.hpp"
 #include "control/menu_access.hpp"
 #include "sunshine/platform_ps5.hpp"
@@ -37,8 +38,10 @@
 #include <cstring>
 #include <mutex>
 #include <cstdio>
+#include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -603,6 +606,17 @@ struct input_raw_t {
     std::array<prospero::MenuAccess, MAX_GAMEPADS> menu_access{};
     std::array<std::chrono::steady_clock::time_point, MAX_GAMEPADS> menu_checked{}, held_told{};
     std::array<bool, MAX_GAMEPADS> held_back{};
+    // Windows+Esc on the keys of a device that has a controller is that controller's PS (keyboard_map.hpp, PsChord): each
+    // pad's last state from its client, so that PS goes down and up on top of what it holds, and whether a key holds PS on
+    // it; per device (by its certificate) the chord and the pad its PS went down on, -1 for none.
+    std::array<gamepad_state_t, MAX_GAMEPADS> last_state{};
+    std::array<bool, MAX_GAMEPADS> keyboard_ps{};
+    // Windows+Shift+Esc: its PS stays down until then at least, and whether Esc already came up (poll_pad_output lets go).
+    std::array<std::chrono::steady_clock::time_point, MAX_GAMEPADS> keyboard_ps_until{};
+    std::array<bool, MAX_GAMEPADS> keyboard_ps_up{};
+    std::map<std::string, std::pair<prospero::PsChord, int>> ps_chords;
+    // The devices told how to press PS from the keyboard (hint_ps_keys), once while streams go on.
+    std::set<std::string> ps_hint_told;
     bool game_in_front = true;  // refreshed every half second by poll_pad_output
     bool ps_all_players = false;  // ps_button_all_players: every pad may press PS and Create, not only the host's
     prospero::PadRoles<MAX_GAMEPADS> roles;  // who is the host: a paired device, not a slot (GitHub issue 15)
@@ -676,6 +690,8 @@ constexpr auto owner_check = 100ms;
 static void keep_owners(input_raw_t &input);
 static void sign_out_due(input_raw_t &input);
 
+static void release_keyboard_ps(input_raw_t &input);
+
 static void poll_pad_output(std::stop_token stop, input_raw_t *input) {
     std::array<bool, MAX_GAMEPADS> failed{};
     auto next_owner_check = std::chrono::steady_clock::now();
@@ -688,6 +704,7 @@ static void poll_pad_output(std::stop_token stop, input_raw_t *input) {
             if (front) input->game_in_front = *front;
             any_pad = std::any_of(input->pads.begin(), input->pads.end(), [](const ps_pad *pad) { return pad != nullptr; });
             check_seat_switches(*input);
+            release_keyboard_ps(*input);
             if (const auto now = std::chrono::steady_clock::now(); now >= next_owner_check) {
                 next_owner_check = now + owner_check;
                 keep_owners(*input);
@@ -1099,7 +1116,7 @@ static void keep_owners(input_raw_t &input) {
 enum class pad_open { opened, watching, failed };
 
 // Caller holds input.mutex. No device names or profile ids in the log: it goes into the report people post.
-static pad_open open_pad(input_raw_t &input, int nr, bool host) {
+static pad_open add_pad(input_raw_t &input, int nr, bool host) {
     auto *&pad = input.pads[nr];
     input.seat[nr] = 0;
     input.menu_checked[nr] = {};  // its menus go by the profile it gets
@@ -1212,6 +1229,32 @@ static pad_open open_pad(input_raw_t &input, int nr, bool host) {
                              : input.roles.host_away() ? ", the console asks who uses it; the host is away and keeps the role"sv
                                                        : ", the console asks who uses it"sv);
     return pad_open::opened;
+}
+
+static prospero::MenuAccess pad_menu_access(input_raw_t &input, int nr);
+
+// Moonlight for iPhone and iPad has no PS button: neither its on-screen controller nor the bar above its on-screen keyboard
+// has one, nor F1, but the bar has Windows and Esc (keyboard_map.hpp, ps_chord). Once a controller of such a device joins
+// that may press PS, the console says how, once per device while streams go on, whatever buttons the controller reports:
+// with a Bluetooth controller connected to an iPhone, the one tried gave PS only by a held Select, which can't hold PS.
+// Caller holds input.mutex.
+static void hint_ps_keys(input_raw_t &input, int nr) {
+    const std::string &cert = input.owner[nr];
+    if (cert.empty() || input.ps_hint_told.contains(cert)) return;
+    if (!prospero::touch_apple_client(nvhttp::get_client_user_agent(cert))) return;
+    const auto role = input.roles.is_host(nr) ? prospero::PadRole::host : prospero::PadRole::guest;
+    if (!prospero::has_menu_buttons(role, input.ps_all_players, pad_menu_access(input, nr))) return;
+    input.ps_hint_told.insert(cert);
+    BOOST_LOG(info) << "PS5 virtual pad "sv << nr << ": its device is Moonlight for iPhone or iPad, the console says how to press PS"sv;
+    // Win and Shift of that bar stay down until tapped again.
+    ps_notify("No PS button? Three fingers for the keyboard. PS: Win, Esc, Win. Hold PS: Win, Shift, Esc, Shift, Win");
+}
+
+// add_pad, then the hint for a device without a PS button.
+static pad_open open_pad(input_raw_t &input, int nr, bool host) {
+    const pad_open opened = add_pad(input, nr, host);
+    if (opened == pad_open::opened) hint_ps_keys(input, nr);
+    return opened;
 }
 
 // Moves a seated pad to its device's next free profile, signing it in when needed: the pad is added anew in it, which a
@@ -1459,6 +1502,9 @@ void free_gamepad(input_t &input, int nr) {
     input->combo[nr] = {};
     input->held_back[nr] = false;
     input->menu_checked[nr] = {};
+    input->last_state[nr] = {};
+    input->keyboard_ps[nr] = input->keyboard_ps_up[nr] = false;
+    input->keyboard_ps_until[nr] = {};
     BOOST_LOG(info) << "PS5 virtual pad "sv << nr << " detached ("sv << rc << ')'
                     << (was_host ? (input->roles.host_away() ? ", the host's device keeps the role"sv : ", the host role is free"sv) : ""sv);
     release_profile(*input, seated);
@@ -1514,9 +1560,10 @@ static void hold_back(input_raw_t &input, int nr, const gamepad_state_t &state) 
     }
 }
 
-void gamepad_update(input_t &input, int nr, const gamepad_state_t &state) {
-    if (nr < 0 || nr >= MAX_GAMEPADS) return;
-    std::lock_guard lock(input->mutex);
+// A client's controller state, with PS held on top while its device's keys hold it (keyboard_ps). Caller holds input.mutex.
+static void apply_gamepad(input_raw_t *input, int nr, const gamepad_state_t &client_state) {
+    gamepad_state_t state = client_state;
+    if (input->keyboard_ps[nr]) state.buttonFlags |= HOME;
     if (input->waiting[nr]) {
         if (!prospero::wakes_pad(state.buttonFlags, state.lt, state.rt, state.lsX, state.lsY, state.rsX, state.rsY)) return;
         // A device that may only watch tries again at most once a second while it presses.
@@ -1597,6 +1644,13 @@ void gamepad_update(input_t &input, int nr, const gamepad_state_t &state) {
     input->active[nr] = active;
 }
 
+void gamepad_update(input_t &input, int nr, const gamepad_state_t &state) {
+    if (nr < 0 || nr >= MAX_GAMEPADS) return;
+    std::lock_guard lock(input->mutex);
+    input->last_state[nr] = state;
+    apply_gamepad(&*input, nr, state);
+}
+
 void gamepad_touch(input_t &input, const gamepad_touch_t &touch) {
     const int nr = touch.id.globalIndex;
     if (nr < 0 || nr >= MAX_GAMEPADS) return;
@@ -1655,7 +1709,11 @@ public:
 
     ~client_session() override {
         std::lock_guard lock(input_->mutex);
-        if (--input_->sessions == 0) close_keyboard_mouse(*input_);
+        if (--input_->sessions == 0) {
+            close_keyboard_mouse(*input_);
+            input_->ps_chords.clear();
+            input_->ps_hint_told.clear();
+        }
     }
 
 private:
@@ -1892,8 +1950,66 @@ void hscroll(input_t &input, int distance) {
     if (const int8_t steps = kbm->tilt.add(distance)) send_mouse(*kbm, mouse, 0, 0, 0, steps);
 }
 
+// Lets go of a keyboard's PS once its Esc came up and, for Windows+Shift+Esc, ps_long_hold is over. Every 10 ms from
+// poll_pad_output, and at once when Esc comes up. Caller holds input.mutex.
+static void release_keyboard_ps(input_raw_t &input) {
+    const auto now = std::chrono::steady_clock::now();
+    for (int nr = 0; nr < MAX_GAMEPADS; ++nr) {
+        if (!input.keyboard_ps[nr] || !input.keyboard_ps_up[nr] || now < input.keyboard_ps_until[nr]) continue;
+        input.keyboard_ps[nr] = input.keyboard_ps_up[nr] = false;
+        input.keyboard_ps_until[nr] = {};
+        if (input.pads[nr]) apply_gamepad(&input, nr, input.last_state[nr]);
+    }
+}
+
+// Windows+Esc on the keys of a device that has a controller (the on-screen one of Moonlight for iPhone and iPad, say):
+// PS on its first controller, held while Esc is (Windows+Shift+Esc: ps_long_hold at least), with that controller's rules
+// for PS (its role, the console's menus), and Esc doesn't reach the keyboard. Without a controller of the device Esc goes
+// on as Esc. Returns whether the key was the chord's. Caller holds input.mutex.
+static bool keyboard_ps(input_t &input, uint16_t vk, bool release) {
+    const std::string cert = input_owner && *input_owner ? gamepad_owner(*input_owner) : std::string();
+    if (cert.empty()) return false;
+    auto &[chord, nr] = input->ps_chords.try_emplace(cert, prospero::PsChord{}, -1).first->second;
+    const auto action = chord.key(vk, release);
+    switch (action) {
+        case prospero::PsChord::Action::pass:
+            return false;
+        case prospero::PsChord::Action::swallow:
+            return true;
+        case prospero::PsChord::Action::press:
+        case prospero::PsChord::Action::press_long: {
+            const bool held = action == prospero::PsChord::Action::press_long;
+            for (int m = 0; m < MAX_GAMEPADS && nr < 0; ++m)
+                if (input->pads[m] && input->owner[m] == cert) nr = m;
+            if (nr < 0) {
+                chord.cancel();
+                return false;
+            }
+            BOOST_LOG(info) << "PS5 virtual pad "sv << nr << ": Windows+"sv << (held ? "Shift+"sv : ""sv)
+                            << "Esc on its device's keyboard, PS"sv << (held ? " held"sv : ""sv);
+            input->keyboard_ps[nr] = true;
+            input->keyboard_ps_up[nr] = false;
+            input->keyboard_ps_until[nr] = held ? std::chrono::steady_clock::now() + prospero::ps_long_hold
+                                                : std::chrono::steady_clock::time_point{};
+            apply_gamepad(&*input, nr, input->last_state[nr]);
+            return true;
+        }
+        case prospero::PsChord::Action::release:
+            // The pad went meanwhile (free_gamepad let go of its PS), or another took its slot: nothing to let go. A held
+            // PS whose time isn't over yet goes with release_keyboard_ps.
+            if (nr >= 0 && input->keyboard_ps[nr] && input->owner[nr] == cert) {
+                input->keyboard_ps_up[nr] = true;
+                release_keyboard_ps(*input);
+            }
+            nr = -1;
+            return true;
+    }
+    return false;
+}
+
 void keyboard_update(input_t &input, uint16_t modcode, bool release, uint8_t, bool) {
     std::lock_guard lock(input->mutex);
+    if (keyboard_ps(input, modcode, release)) return;
     kbm_t *kbm = kbm_for_input(*input, release, modcode);
     if (!kbm) return;
     // Only a key that changes what is held asks for the keyboard (an unmapped key or a repeat adds none).

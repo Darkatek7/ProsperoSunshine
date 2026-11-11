@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Added
+
+- **PS and a held PS from Moonlight on iPhone and iPad**, which has no PS button: neither its on-screen controller nor
+  the bar above its on-screen keyboard (three fingers on the screen) has one, nor F1. Windows+Esc is PS and
+  Windows+Shift+Esc holds it for 650 ms, for the screens that ask to hold PS. They work with the keyboard as a controller
+  and on the device's own controller (on-screen or Bluetooth), with the same rules for who may press PS. When a
+  controller of Moonlight for iPhone or iPad joins that may press PS, the console says how, once per device. The host
+  tells it by the User-Agent of its launch (Sunshine patch 0026). See "Keyboard and mouse as a controller" in the README.
+
 ### Fixed
 
 - **A device gets its profile back after 45 s** (issue 52). When a player left and their profile stayed signed in because
