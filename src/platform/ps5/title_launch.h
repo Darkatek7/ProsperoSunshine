@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #ifndef PROSPERO_TITLE_LAUNCH_H
 #define PROSPERO_TITLE_LAUNCH_H
+#include <stdint.h>
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -11,8 +12,12 @@ int ps_title_running(char title_id[16]);
 // negative if the system can't tell. The control center over a game leaves it the screen. Goes by the event flag the console keeps for the
 // focused app, "SceShellCoreUtilAppFocus" (low 32 bits: its app id), which ShadowMountPlus and ps5upload read too.
 int ps_title_focused(void);
-// Starts a title for the user in front. The new app's ID, or a negative error code from the system.
-int ps_title_launch(const char *title_id);
+// Starts a title for the user in front, or for user when it isn't 0. The new app's ID, or a negative error code from the
+// system.
+int ps_title_launch(const char *title_id, uint32_t user);
+// Whether a process of title_id runs, in front or not, from the console's process list (sysctl) and each process's
+// title (sceKernelGetAppInfo): 1, 0 if none, or negative if the list can't be read.
+int ps_title_open(const char *title_id);
 // Closes title_id through the system, as from the home screen, if it is the title in front: 1 once it has ended, 0 if it
 // isn't in front, or a negative error code from the system. Its unsaved progress is lost.
 int ps_title_close(const char *title_id);

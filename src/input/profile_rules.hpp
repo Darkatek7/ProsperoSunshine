@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 namespace prospero {
@@ -49,6 +50,62 @@ inline std::vector<uint32_t> join_order(const ProfileSet &set, uint32_t last) {
     return order;
 }
 
+// --- Starting a game ---
+
+// A game starts for the profile in front. With nobody in front it has no clear owner: with nobody signed in launchApp
+// fails with 0x8094000A ("!isBigApp() || usercount > 0", seen on 10.20), and with someone signed in but not in front (a
+// profile the host keeps for its grace, say) it starts for no profile of the device's. So while nobody is in front, a
+// device with its own profiles starts the game for the first of its profiles it may join, signed in first if it isn't, as
+// its first controller would be a moment later. Nothing changes for a device that can choose freely, isn't set or only
+// watches (the console asks for its controller, as before), nor while someone is in front: the game starts for them.
+// someone_in_front: unknown when the console didn't say.
+enum class LaunchSignIn { no, yes, unknown };
+
+inline LaunchSignIn launch_sign_in(const std::optional<ProfileSet> &set, Answer someone_in_front) {
+    if (!set || set->free || set->users.empty()) return LaunchSignIn::no;
+    if (someone_in_front == Answer::unknown) return LaunchSignIn::unknown;
+    return someone_in_front == Answer::no ? LaunchSignIn::yes : LaunchSignIn::no;
+}
+
+// --- The console's welcome screen over that game ---
+
+// A profile signed in that way is not put in front: while nobody is in front, the console's welcome screen ("Press the PS
+// button", SceShellUI) keeps the screen and the game runs behind it. PS from the host's pad doesn't close it, but X does
+// once a profile is signed in (LoginMgr: "entry=login&operatedByCec=true", then removeWelcomeScreen), and the game comes
+// to the front (measured on 10.20, 2026-11-10). While SceShellUI has the screen an X goes to it, not to the game. The host
+// presses X once on the device's pad, when that pad has sat in the profile for welcome_settle (the login manager has
+// taken it), the game runs but doesn't have the screen, and nobody is in front. It gives up welcome_window after the pad
+// sat in the profile.
+constexpr std::chrono::seconds welcome_window{30};
+constexpr std::chrono::milliseconds welcome_settle{1000};
+
+struct WelcomeFacts {
+    bool settled = false;                   // a pad of the device has sat in the profile for welcome_settle
+    Answer game_running = Answer::unknown;  // a big app runs
+    Answer game_focused = Answer::unknown;  // it has the screen
+    Answer someone_in_front = Answer::unknown;
+};
+
+// wait: look again later. press: X on the device's pad. done: nothing to do any more.
+enum class WelcomeStep { wait, press, done };
+
+inline WelcomeStep welcome_step(const WelcomeFacts &facts) {
+    // The game has the screen, or someone is in front: the console shows what they chose.
+    if (facts.game_focused == Answer::yes || facts.someone_in_front == Answer::yes) return WelcomeStep::done;
+    if (!facts.settled || facts.game_running != Answer::yes || facts.game_focused != Answer::no ||
+        facts.someone_in_front != Answer::no)
+        return WelcomeStep::wait;
+    return WelcomeStep::press;
+}
+
+// A device with profiles of its own that starts streaming is greeted with "Welcome, <profile>! Press any button to
+// start" when no other device streams and nobody is in front: the case where the welcome screen may cover the game and a
+// client without a PS button (on-screen controls) only adds its controller at the first press. With a profile in front
+// there is no welcome screen, or someone plays at the TV.
+inline bool welcome_greeting(bool streams_alone, Answer someone_in_front) {
+    return streams_alone && someone_in_front == Answer::no;
+}
+
 // --- Signing out ---
 
 // How long a profile the host signed in stays signed in after its last controller left: a Moonlight client that
@@ -61,6 +118,7 @@ struct SignOutFacts {
     bool seated = false;                         // one of the host's controllers sits in it
     Answer in_front = Answer::unknown;           // it is the profile in front on the console
     Answer owns_unseated_pad = Answer::unknown;  // a controller of the host that the console asked about belongs to it
+    Answer owns_open_game = Answer::no;          // a game the host started for it (launch_sign_in) is still open
 };
 
 // now: sign it out. later: ask again in a while. kept: it stays signed in, and a device that has it may join it again
@@ -74,6 +132,10 @@ inline SignOut sign_out(const SignOutFacts &facts) {
     if (facts.in_front == Answer::yes) return SignOut::kept;
     // A controller that got the profile from the console's question still plays as it, or the console didn't say.
     if (facts.in_front == Answer::unknown || facts.owns_unseated_pad != Answer::no) return SignOut::later;
+    // The game the host started for it is still open, as when a stream ends without Quit: signed out, the system would
+    // suspend it, and a suspended game blocks starting any other (seen on 10.20, 2026-11-10). It waits until the game is
+    // closed.
+    if (facts.owns_open_game != Answer::no) return SignOut::later;
     return SignOut::now;
 }
 

@@ -17,6 +17,7 @@
 #include "control/menu_access.hpp"
 #include "sunshine/platform_ps5.hpp"
 #include "src/nvhttp.h"
+#include "src/rtsp.h"
 #include "src/config.h"
 #include "src/file_handler.h"
 #include "src/logging.h"
@@ -582,6 +583,19 @@ struct input_raw_t {
         bool told;  // the log said it waits
     };
     std::vector<pending_sign_out_t> sign_out_at;
+    // The console's welcome screen over a game the host started for a profile it signed in (close_welcome): for each pad,
+    // the profile it sits in, since when, and whether that seating was looked at already; the pad pressing X until when.
+    struct pad_welcome_t {
+        uint32_t seat = 0;
+        std::chrono::steady_clock::time_point since{};
+        bool done = false;
+    };
+    std::array<pad_welcome_t, MAX_GAMEPADS> welcome{};
+    int welcome_pressed = -1;
+    std::chrono::steady_clock::time_point welcome_release{}, welcome_check{};
+    // The title the host last started for each profile it signed in (sign_in_for_launch, note_launch): while it is open,
+    // the profile isn't signed out (prospero::sign_out).
+    std::vector<std::pair<uint32_t, std::string>> launched;
     std::vector<std::unique_ptr<kbm_t>> own;  // one per device with its own profiles that used them
     int sessions = 0;
     uint32_t user = 0;
@@ -675,6 +689,8 @@ static bool game_in_front() {
 constexpr auto owner_check = 100ms;
 static void keep_owners(input_raw_t &input);
 static void sign_out_due(input_raw_t &input);
+static void close_welcome(input_raw_t &input);
+static prospero::Answer launched_open(input_raw_t &input, uint32_t user, bool forget = true);
 
 static void poll_pad_output(std::stop_token stop, input_raw_t *input) {
     std::array<bool, MAX_GAMEPADS> failed{};
@@ -693,6 +709,7 @@ static void poll_pad_output(std::stop_token stop, input_raw_t *input) {
                 keep_owners(*input);
                 sign_out_due(*input);
             }
+            close_welcome(*input);
             for (int nr = 0; nr < MAX_GAMEPADS; ++nr) {
                 if (!input->pads[nr]) {
                     failed[nr] = false;
@@ -817,7 +834,7 @@ void freeInput(input_raw_t *input) {
         for (const uint32_t user : input->host_profiles.signed_in) {
             const prospero::SignOutFacts facts{true, false,
                                                !known ? prospero::Answer::unknown : front == user ? prospero::Answer::yes : prospero::Answer::no,
-                                               prospero::Answer::no};
+                                               prospero::Answer::no, launched_open(*input, user)};
             if (prospero::sign_out(facts) == prospero::SignOut::now) ps_profile_sign_out(user);
         }
         note_credential_restore();
@@ -956,9 +973,27 @@ seat_plan_t seat_plan(const input_raw_t &input, int nr, const std::string &uuid)
 static void greet_spectator(const std::string &cert) {
     const auto device = paired_device(cert);
     const auto set = profiles_of(device.uuid);
-    if (!set || set->free || !set->users.empty()) return;
-    BOOST_LOG(info) << "PS5 input: a device that may only watch started streaming"sv;
-    ps_notify(((device.name.empty() ? "This device"s : device.name) + " joined as a spectator (no profile to play as)").c_str());
+    if (!set || set->free) return;
+    if (set->users.empty()) {
+        BOOST_LOG(info) << "PS5 input: a device that may only watch started streaming"sv;
+        ps_notify(((device.name.empty() ? "This device"s : device.name) + " joined as a spectator (no profile to play as)").c_str());
+        return;
+    }
+    // A device with profiles of its own that streams alone while nobody is in front (prospero::welcome_greeting): until its
+    // controller is added, the console may show its welcome screen ("Press the PS button"), and a client without a PS
+    // button (Moonlight's on-screen controls) only adds the controller at its first press. Any button starts it, and
+    // close_welcome takes it from there.
+    uint32_t front = 0;
+    const int front_rc = ps_profile_foreground(&front);
+    const auto someone_in_front = front_rc != 0 ? prospero::Answer::unknown : front ? prospero::Answer::yes : prospero::Answer::no;
+    if (!prospero::welcome_greeting(rtsp_stream::session_count_except_cert(cert) == 0, someone_in_front)) return;
+    std::lock_guard live(live_input_mutex);
+    if (!live_input) return;
+    std::lock_guard lock(live_input->mutex);
+    const auto order = prospero::join_order(*set, seats().get(device.uuid, 0));
+    if (order.empty()) return;
+    BOOST_LOG(info) << "PS5 input: a device with profiles of its own started streaming alone; it was welcomed"sv;
+    ps_notify(("Welcome, " + profile_name(order.front()) + "! Press any button to start").c_str());
 }
 
 // A profile this host signed in is signed out again once none of its pads sits in it, so players who left don't keep the
@@ -992,6 +1027,24 @@ static prospero::Answer unseated_pad_plays_as(const input_raw_t &input, uint32_t
             return prospero::Answer::yes;
     }
     return answer;
+}
+
+// Whether the title the host started for this profile is still open: the system's running game, or else a process of
+// that title, behind the console's screens. Not by the running game alone: one opened before the console's
+// ProsperoSunshine app stays open behind it, and once that app is closed it stays open without being the running game
+// (process_ps5.cpp, seen on 10.20). Not by /mnt/sandbox either: a title's folder there can keep its contents after the
+// title closed (seen on 10.20 after Quit, 2026-11-10), and the profile would then stay signed in for good. Forgets the
+// title once it is closed. Caller holds input.mutex.
+static prospero::Answer launched_open(input_raw_t &input, uint32_t user, bool forget) {
+    const auto it = std::find_if(input.launched.begin(), input.launched.end(), [&](const auto &l) { return l.first == user; });
+    if (it == input.launched.end()) return prospero::Answer::no;
+    char running[16];
+    if (ps_title_running(running) > 0 && it->second == running) return prospero::Answer::yes;
+    const int open = ps_title_open(it->second.c_str());
+    if (open < 0) return prospero::Answer::unknown;
+    if (open) return prospero::Answer::yes;
+    if (forget) input.launched.erase(it);
+    return prospero::Answer::no;
 }
 
 // The kept profiles (prospero::HostProfiles) that are no longer signed in, someone signed them out on the console, are
@@ -1032,6 +1085,7 @@ static void sign_out_due(input_raw_t &input) {
                          : front == user                 ? prospero::Answer::yes
                                                           : prospero::Answer::no;
         facts.owns_unseated_pad = unseated_pad_plays_as(input, user);
+        facts.owns_open_game = launched_open(input, user);
         switch (prospero::sign_out(facts)) {
             case prospero::SignOut::now: {
                 const int rc = ps_profile_sign_out(user);
@@ -1051,7 +1105,9 @@ static void sign_out_due(input_raw_t &input) {
                 it = input.sign_out_at.erase(it);
                 break;
             case prospero::SignOut::later:
-                if (!it->told)
+                if (!it->told && facts.owns_open_game == prospero::Answer::yes)
+                    BOOST_LOG(info) << "PS5 input: a profile the host signed in waits to be signed out: the game started for it is still open"sv;
+                else if (!it->told)
                     BOOST_LOG(info) << "PS5 input: a profile the host signed in waits to be signed out: a controller may play as it, "
                                        "or the console didn't say"sv;
                 it->told = true;
@@ -1093,6 +1149,121 @@ static void keep_owners(input_raw_t &input) {
     }
     // Bus ids aren't reused soon: forget those of devices gone.
     if (input.owner_fixes.size() > 64) input.owner_fixes.erase(input.owner_fixes.begin(), input.owner_fixes.begin() + 32);
+}
+
+// Before a game starts for the paired device with this certificate (process_ps5.cpp): while nobody is in front, the game
+// would have no clear owner, or the system refuses to start one (prospero::launch_sign_in). A device with its own profiles
+// then gets the first of them its first controller may join (open_pad), signed in now if it isn't, not when that
+// controller arrives. The profile is the
+// host's like one open_pad signed in: signed out sign_out_grace from now unless a pad sits in it by then, so a start that
+// leads to no stream doesn't keep it. Returns the profile it signed in for the game, 0 for none. No profile ids in the log.
+uint32_t sign_in_for_launch(const std::string &cert, const std::string &title) {
+    const auto device = paired_device(cert);
+    const auto set = profiles_of(device.uuid);
+    uint32_t front = 0;
+    const int front_rc = ps_profile_foreground(&front);
+    const auto someone_in_front = front_rc != 0 ? prospero::Answer::unknown : front ? prospero::Answer::yes : prospero::Answer::no;
+    switch (prospero::launch_sign_in(set, someone_in_front)) {
+        case prospero::LaunchSignIn::no: return 0;
+        case prospero::LaunchSignIn::unknown:
+            BOOST_LOG(warning) << "PS5 input: the console didn't say who is in front ("sv << front_rc << "); the game starts as before"sv;
+            return 0;
+        case prospero::LaunchSignIn::yes: break;
+    }
+    std::lock_guard live(live_input_mutex);
+    if (!live_input) return 0;
+    auto &input = *live_input;
+    std::lock_guard lock(input.mutex);
+    for (const uint32_t candidate : prospero::join_order(*set, seats().get(device.uuid, 0))) {
+        const auto use = profile_use(input, -1, candidate);
+        if (prospero::join_block(use) != prospero::JoinBlock::none) continue;
+        if (use.signed_in == prospero::Answer::no) {
+            const int rc = ps_profile_sign_in(candidate);
+            note_credential_restore();
+            if (rc) {
+                BOOST_LOG(error) << "PS5 input: signing in a profile of the device starting a game failed: "sv << rc;
+                continue;
+            }
+            input.host_profiles.add(candidate);
+            BOOST_LOG(info) << "PS5 input: nobody was in front, so a profile of the device starting a game was signed in first"sv;
+        } else {
+            // Signed in by the host, or kept: the game makes it the host's again at once, as one signed in for it, so its
+            // grace below applies even if no controller of the device ever sits in it.
+            input.host_profiles.add(candidate);
+            BOOST_LOG(info) << "PS5 input: nobody was in front; a profile of the device starting a game, signed in by the host, gets it"sv;
+        }
+        // No pad sits in it yet: its grace starts now, and the device's first pad takes it (sign_out_due).
+        const auto at = std::chrono::steady_clock::now() + prospero::sign_out_grace;
+        std::erase_if(input.launched, [&](const auto &l) { return l.first == candidate; });
+        input.launched.emplace_back(candidate, title);
+        std::erase_if(input.sign_out_at, [&](const auto &p) { return p.user == candidate; });
+        input.sign_out_at.push_back({candidate, at, false});
+        BOOST_LOG(info) << "PS5 input: the game starts for that profile; it is signed out in "sv << prospero::sign_out_grace.count()
+                        << " s unless a pad of the device joins it"sv;
+        return candidate;
+    }
+    BOOST_LOG(warning) << "PS5 input: nobody is in front and no profile of the device starting a game could be signed in"sv;
+    return 0;
+}
+
+// A game the host started for a profile it signed in (sign_in_for_launch) may run behind the console's welcome screen
+// (prospero::welcome_step): one X on a pad of the device closes it, held for 200 ms. It is looked at each time a pad sits
+// in such a profile, from its seating on: a client's controller may come long after the game started (Moonlight on iOS
+// adds it at the first touch), or come back to a game left open. Looked at every 250 ms. Caller holds input.mutex.
+static void close_welcome(input_raw_t &input) {
+    const auto now = std::chrono::steady_clock::now();
+    if (input.welcome_pressed >= 0) {
+        if (now < input.welcome_release) return;
+        if (input.pads[input.welcome_pressed]) ps_pad_neutral(input.pads[input.welcome_pressed]);
+        input.welcome_pressed = -1;
+    }
+    if (now < input.welcome_check) return;
+    input.welcome_check = now + 250ms;
+    for (int nr = 0; nr < MAX_GAMEPADS; ++nr) {
+        auto &welcome = input.welcome[nr];
+        if (!input.pads[nr] || !input.seat[nr]) {
+            welcome = {};
+            continue;
+        }
+        if (welcome.seat != input.seat[nr]) welcome = {input.seat[nr], now, false};
+        if (welcome.done) continue;
+        // Only a profile the host started a game for; it waits while that game isn't open yet.
+        if (std::none_of(input.launched.begin(), input.launched.end(), [&](const auto &l) { return l.first == welcome.seat; })) {
+            welcome.done = true;
+            continue;
+        }
+        if (launched_open(input, welcome.seat, false) != prospero::Answer::yes && now - welcome.since < prospero::welcome_window)
+            continue;
+        if (now - welcome.since >= prospero::welcome_window) {
+            BOOST_LOG(info) << "PS5 virtual pad "sv << nr << ": the game started for its profile didn't come to the front; nothing was pressed"sv;
+            welcome.done = true;
+            continue;
+        }
+        char running[16];
+        const int run = ps_title_running(running);
+        const int focused = run > 0 ? ps_title_focused() : -1;
+        uint32_t front = 0;
+        const bool front_known = ps_profile_foreground(&front) == 0;
+        using prospero::Answer;
+        const prospero::WelcomeFacts facts{now - welcome.since >= prospero::welcome_settle,
+                                           run > 0 ? Answer::yes : run == 0 ? Answer::no : Answer::unknown,
+                                           focused < 0 ? Answer::unknown : focused ? Answer::yes : Answer::no,
+                                           !front_known ? Answer::unknown : front ? Answer::yes : Answer::no};
+        switch (prospero::welcome_step(facts)) {
+            case prospero::WelcomeStep::wait: continue;
+            case prospero::WelcomeStep::done: welcome.done = true; continue;
+            case prospero::WelcomeStep::press: {
+                const ps_pad_state down{PS_PAD_CROSS, 128, 128, 128, 128, 0, 0};
+                ps_pad_send(input.pads[nr], &down);
+                input.welcome_pressed = nr;
+                input.welcome_release = now + 200ms;
+                welcome.done = true;
+                BOOST_LOG(info) << "PS5 virtual pad "sv << nr
+                                << ": the console's welcome screen covers the game started for its profile; it pressed X to close it"sv;
+                return;
+            }
+        }
+    }
 }
 
 // What open_pad did: the pad is open, its device may only watch for now (no profile for it), or it failed.
@@ -1508,10 +1679,13 @@ static void hold_back(input_raw_t &input, int nr, const gamepad_state_t &state) 
         BOOST_LOG(info) << "PS5 virtual pad "sv << nr << ": no game in front, and its profile doesn't reach the console's menus: its input waits"sv;
     }
     if (!prospero::wakes_pad(state.buttonFlags, state.lt, state.rt, state.lsX, state.lsY, state.rsX, state.rsY)) return;
-    if (const auto now = std::chrono::steady_clock::now(); now - input.held_told[nr] >= prospero::switch_cooldown) {
-        input.held_told[nr] = now;
-        ps_notify((profile_name(input.seat[nr]) + " can't use the console's menus. Start a game from Moonlight").c_str());
-    }
+    const auto now = std::chrono::steady_clock::now();
+    if (now - input.held_told[nr] < prospero::switch_cooldown) return;
+    input.held_told[nr] = now;
+    // Not while a game the host started for its profile is open: that game is about to come to the front (close_welcome).
+    // Looked at once per switch_cooldown, as it reads the console's process list.
+    if (launched_open(input, input.seat[nr], false) == prospero::Answer::yes) return;
+    ps_notify((profile_name(input.seat[nr]) + " can't use the console's menus. Start a game from Moonlight").c_str());
 }
 
 void gamepad_update(input_t &input, int nr, const gamepad_state_t &state) {
@@ -1742,7 +1916,8 @@ static kbm_t *kbm_for_input(input_raw_t &input, bool release, uint16_t vk = 0) {
     if (waits) {
         if (!release && first >= 0 && now - input.held_told[first] >= prospero::switch_cooldown) {
             input.held_told[first] = now;
-            ps_notify((profile_name(user) + " can't use the console's menus. Start a game from Moonlight").c_str());
+            if (launched_open(input, user, false) != prospero::Answer::yes)
+                ps_notify((profile_name(user) + " can't use the console's menus. Start a game from Moonlight").c_str());
         }
         return nullptr;
     }
