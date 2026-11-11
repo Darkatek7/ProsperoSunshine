@@ -23,7 +23,7 @@
 #   BURST_LEN=8  BUFFER_KBIT=6x (or kbit/s)  BUFFER_PACKETS=39  BUFFER_LOSSES="0"
 #   STREAM_ARGS="--no-script"     more stream_test options; without --no-script the client presses buttons
 #   PACKET_SIZE=1024              the client's video packets: 1024 as Moonlight over the internet (the host then paces
-#                                 as for a remote client), 1392 as Moonlight on a LAN (needs a client built after
+#                                 as for a remote client), 1392 as Moonlight on a LAN (not paced; needs a client built after
 #                                 --packet-size was added to stream_test.c)
 #   PAUSE=8                       seconds between runs, for the host to end the session
 # Each run's client log is kept in out/loss_matrix/, the table in out/loss_matrix/table.txt.

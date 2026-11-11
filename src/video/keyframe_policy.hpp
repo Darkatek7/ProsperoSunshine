@@ -3,11 +3,13 @@
 // tests can run it; video_ps5.cpp keeps one per capture channel, under captures.mutex, for every stream on the channel.
 //
 // What the client does (moonlight-common-c, read in the pinned source): the host announces no reference frame
-// invalidation, so after any loss Moonlight drops every frame until an IDR arrives. It asks for one once it received the
-// next complete frame (asking while everything is lost would only add to the congestion), asks again after every further
-// loss followed by a complete frame while it waits, and on its own after 120 dropped frames (2 s at 60 fps). Avcap2 sends
-// the IDR 2 to 3 frames after the host asks (R1). An IDR is many average frames, and on a channel that several devices
-// share (joined streams) it goes to all of them.
+// invalidation (video_ps5.cpp), so after any loss Moonlight drops every frame until an IDR arrives. It asks for one once it
+// received the next complete frame (asking while everything is lost would only add to the congestion; a frame it finds
+// corrupt makes it ask at once), asks again after every further loss followed by a complete frame while it waits, and on
+// its own after it dropped 120 frames it received (2 s at 60 fps while frames arrive, 4 s at 30). It sends the request
+// reliably over ENet, so a request lost on the way comes again after ENet's retransmission timeout. Avcap2 sends the IDR 2
+// to 3 frames after the host asks (R1). An IDR is many average frames, and on a channel that several devices share
+// (joined streams) it goes to all of them.
 // On a lossy path this feeds itself. Issue 37: 831 requests in 3.5 minutes, nine in ten of them 100 to 300 ms apart, and
 // the host sent 8 to 10 Mbit/s for a 3.4 Mbit/s stream; every IDR lost its tail on the way (frame_pacing.hpp), and the
 // client asked again. While an IDR is on its way, every new loss also brings a request that the IDR already answers.
@@ -15,33 +17,48 @@
 //
 //  1. One IDR on its way answers every request before it. After the host asked the encoder, requests merge until an IDR
 //     is read. After 250 ms without one (3 frames at 30 fps are 100 ms) the host asks again.
-//  2. A request that reaches the host within W after the last IDR left was sent before the client could have that IDR,
-//     and the IDR answers it. W = the IDR's spread by the pacer (frame_pacing.hpp) + 3/4 of the client's smoothed
-//     round-trip time, at most 250 ms of it. A request because that IDR was lost arrives no earlier than its spread + one
-//     frame interval (the client needs the next frame complete) + the true round trip, so W = spread + round trip would be
-//     safe with an exact estimate; ENet's smoothed value lags when a queue drains, hence 3/4, and it starts at 500 ms
-//     before its first measurement, hence the cap. Without a round trip W is the spread alone. A request swallowed wrongly
-//     costs that client the wait until its next loss or its 120-frame limit; one let through costs an IDR, which rule 3
-//     holds back.
+//  2. A request that reaches the host within W after the last IDR was read probably left the client before it could have
+//     that IDR ("blind"), and isn't answered at once. W = the IDR's spread (frame_pacing.hpp) + 3/4 of the client's round
+//     trip as ENet has it, at most 250 ms of it (ENet starts at 500 ms before its first measurement); without a round trip
+//     W is the spread alone. A request because that IDR was lost leaves the client once the frame after it is complete, so
+//     it reaches the host no earlier than the true round trip + the larger of the spread and a frame interval after the
+//     read, and the capture loop sees it up to a frame later. But the round trip is a weak guess: the host's ENet measures
+//     it only from acknowledgements of its own reliable messages (rumble, light bar, HDR), and Moonlight's reliable ping
+//     every 100 ms keeps ENet from sending pings of its own, so in a game without rumble the value can be the one from the
+//     connection's start, or from a delay spike, for minutes. After one late acknowledgement of S ms on a true round trip
+//     T, ENet's value stays more than a third above T (where W swallows a real request) while (S - T) / 8 x (7/8)^n > T / 3:
+//     a 500 ms spike on 50 ms keeps it there for 9 samples. A request that only looks blind may be the client asking for
+//     the IDR it lost, and the client shows nothing until it gets one: dropped, it would wait for its 120 frames (2 to 4 s).
+//     So a blind request is answered blind_hold (250 ms) after it, unless an IDR goes out before (one asked for another
+//     reason, a later request of the same client, the encoder's own): the encoder then needs 2 to 3 frames, so a real
+//     request gets its IDR read at most about 370 ms after it reached the host (30 fps), and one that crossed an IDR that
+//     arrived costs one IDR more. In a simulation (Moonlight's rules, the capture loop once per frame) of a LAN at 20 Mbit/s
+//     with a loss every 0.4 s, of Wi-Fi with delay spikes and ENet's value stuck at 40 or 80 ms, and of issue 37's path,
+//     IDRs per minute stayed within 15 % of dropping blind requests (a third fewer where every IDR failed), while a real
+//     request that rule 2 took for blind waited up to 367 ms instead of up to 4.1 s.
+//     A blind request counts in rule 3 like any other: within H of the IDR that answered the client's last request, as a
+//     failure. One that crossed an IDR that arrived is one failure, and the level needs two in a row; a client whose every
+//     request looks blind (all its IDRs lost, its round trip overestimated) is still held back.
 //  3. A hold-off for clients whose IDRs don't hold. Each client has a level, 0 to 4. The first request a client sends
 //     after the IDR that answered its last one judges that IDR: within H = W + 4 frame intervals of it (67 ms at 60 fps,
 //     133 ms at 30) the IDR or the frames right behind it were lost, later it held. When two IDRs in a row failed the
 //     level rises by one, with each that held it falls by one, and every 2 s without a request it falls by one (counted
 //     from the IDR that answered it: while it waits it has no reason to ask). One failure alone could be an independent
 //     loss that happened to come soon after; in simulations with random losses every 0.4 s on average on a LAN, single
-//     verdicts drove the level up to 4 now and then, two in a row hardly ever (tests/keyframe_policy_test.cpp). The encoder's own IDRs and those for others aren't judged, so a loss right
-//     after one of them is no sign that IDRs fail on this client's path. At level 0 the request
-//     is answered at once: a single loss on a healthy link gets its IDR as fast as before, and so does the first request
-//     after a quiet time. At level L an IDR for that client follows the last one no sooner than
-//     min(2 s, base x 2^(L-1)), base = max(100 ms, 2 x airtime), airtime = the last IDR's bytes on the wire / the client's
-//     bitrate: how long the link the client chose needs for one IDR. So its IDRs take at most half that link at level 1,
-//     a quarter at level 2, an eighth at level 3; 2 s is how long the client itself waits before it asks again on its own.
-//     A request that waits is answered when its time comes, or by any IDR before (the encoder's own every 10 s, one for
-//     another client or a joining device). Random loss with room to spare keeps the level low: an IDR fails only when the
-//     next loss happens to fall within H.
+//     verdicts drove the level up to 4 now and then, two in a row hardly ever (tests/keyframe_policy_test.cpp). The
+//     encoder's own IDRs and those for others aren't judged, so a loss right after one of them is no sign that IDRs fail
+//     on this client's path. At level 0 the request is answered at once: a single loss on a healthy link gets its IDR as
+//     fast as before, and so does the first request after a quiet time. At level L an IDR for that client follows the last
+//     one no sooner than min(2 s, base x 2^(L-1)), base = max(100 ms, 2 x airtime), airtime = the last IDR's bytes on the
+//     wire / the client's bitrate: how long the link the client chose needs for one IDR. So its IDRs take at most half
+//     that link at level 1, a quarter at level 2, an eighth at level 3; 2 s is how long the client itself waits before it
+//     asks again on its own at 60 fps. A request that waits is answered when its time comes, or by any IDR before (the
+//     encoder's own every 10 s, one for another client or a joining device). Random loss with room to spare keeps the
+//     level low: an IDR fails only when the next loss happens to fall within H. A blind request waits for the later of
+//     blind_hold and the hold-off.
 //     Issue 37's stream (3.4 Mbit/s, about 160 kB per IDR on the wire): airtime 380 ms, so while every IDR fails, IDRs at
-//     most every 0.75 s, 1.5 s, then 2 s, instead of up to five a second. A LAN stream at 20 Mbit/s with 360 kB IDRs:
-//     0.29 s, 0.58 s, 1.15 s, 2 s.
+//     most every 0.75 s, 1.5 s, then 2 s, instead of up to five a second. A LAN stream at 20 Mbit/s with 300 kB IDRs on the
+//     wire (240 kB, the largest the repository measured, frame_pacing.hpp): 0.24 s, 0.48 s, 0.96 s, 1.9 s.
 //     The level is each client's own, so that a device on a bad link doesn't hold back the IDRs of one on a good link
 //     that joined the same channel; the hold-off counts from the last IDR of the channel, whoever it was for.
 //  4. A device that joins a running channel needs an IDR to start: forced, only rule 1 applies.
@@ -66,6 +83,7 @@ public:
 
     static constexpr ms encoder_patience{250};
     static constexpr ms rtt_cap{250};
+    static constexpr ms blind_hold{250};
     static constexpr int judge_frames = 4;
     static constexpr ms quiet{2000};
     static constexpr int max_level = 4;
@@ -88,7 +106,7 @@ public:
         now,     // the encoder is asked at the next poll
         waits,   // held back until the client's hold-off has passed (rule 3)
         merged,  // an IDR is already wanted or on its way from the encoder (rule 1)
-        blind,   // sent before the client could have the last IDR (rule 2)
+        blind,   // probably sent before the client could have the last IDR: answered blind_hold later unless one comes (rule 2)
     };
 
     // For the log: what happened to the requests since the last take_counts().
@@ -108,11 +126,8 @@ public:
             ++counts_.merged;
             return Outcome::merged;
         }
-        if (last_keyframe_ && now < *last_keyframe_ + blind_window(client)) {
-            ++counts_.blind;
-            return Outcome::blind;
-        }
         state.level = level_at(state, now);
+        const bool blind = last_keyframe_ && now < *last_keyframe_ + blind_window(client);
         if (state.answered && state.answered == last_keyframe_) {
             if (now - *last_keyframe_ < blind_window(client) + judge_frames * frame_interval(client)) {
                 if (++state.failed_in_row >= 2) state.level = std::min(max_level, state.level + 1);
@@ -124,12 +139,17 @@ public:
         }
         state.quiet_from = now;
         state.waiting = true;
-        const time_point due = last_keyframe_ && state.level > 0 ? std::max(now, *last_keyframe_ + gap(state)) : now;
-        const bool merged = wanted_.has_value();
-        wanted_ = merged ? std::min(*wanted_, due) : due;
+        time_point due = last_keyframe_ && state.level > 0 ? std::max(now, *last_keyframe_ + gap(state)) : now;
+        if (blind) due = std::max(due, now + blind_hold);
+        const bool merged = wanted_.has_value() && *wanted_ <= due;
+        want(due);
         if (merged) {
             ++counts_.merged;
             return Outcome::merged;
+        }
+        if (blind) {
+            ++counts_.blind;
+            return Outcome::blind;
         }
         if (due > now) {
             ++counts_.waited;
@@ -193,8 +213,12 @@ public:
         return it == clients_.end() ? 0 : level_at(it->second, now);
     }
 
-    // A stream left the channel.
-    void forget(std::uintptr_t id) { clients_.erase(id); }
+    // A stream left the channel. What only it waited for isn't asked for any more (an IDR the encoder was asked for still
+    // comes).
+    void forget(std::uintptr_t id) {
+        clients_.erase(id);
+        if (std::none_of(clients_.begin(), clients_.end(), [](const auto &entry) { return entry.second.waiting; })) wanted_.reset();
+    }
 
     Counts take_counts() { return std::exchange(counts_, {}); }
 
@@ -207,6 +231,8 @@ private:
         bool waiting = false;  // it asked, and no IDR has come since
         std::optional<time_point> answered;  // the IDR that answered it, until its next request judges it
     };
+
+    void want(time_point due) { wanted_ = wanted_ ? std::min(*wanted_, due) : due; }
 
     static clock::duration frame_interval(const Client &client) {
         return std::chrono::duration_cast<clock::duration>(std::chrono::duration<double>(1.0 / (client.fps > 0 ? client.fps : 60)));

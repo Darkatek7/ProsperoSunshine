@@ -47,6 +47,7 @@ run_test capture_mode_test
 run_test channel_choice_test
 run_test frame_pacing_test
 run_test keyframe_policy_test
+run_test send_retry_test
 run_test channel_map_test
 run_test audio_meter_test
 run_test hdr10_metadata_test

@@ -1,9 +1,9 @@
 ProsperoSunshine: the round trip and packet size of a session, for the PS5 capture's keyframe policy
 
 video_ps5.cpp decides which keyframe requests reach the encoder (video/keyframe_policy.hpp). It needs each requesting
-session's control round trip (patch 0015 keeps it) to tell a request that the last keyframe already answers from one
-sent after it, and the session's packet size to know whether it streams over the internet, where the video pacer
-(patch 0026) keeps its bursts small.
+session's control round trip (patch 0015 keeps it) to guess whether a request left the client before the last keyframe
+could reach it, and the session's packet size to know whether it streams over the internet, where the video pacer (patch
+0026) spreads large frames.
 
 --- a/src/stream.h
 +++ b/src/stream.h
@@ -15,7 +15,7 @@ sent after it, and the session's packet size to know whether it streams over the
  #include <utility>
  
  // lib includes
-@@ -96,6 +97,21 @@
+@@ -113,6 +114,21 @@
       */
      const std::string &client_cert(session_t &session);
      /**
@@ -39,7 +39,7 @@ sent after it, and the session's packet size to know whether it streams over the
       * @param session Active streaming session.
 --- a/src/stream.cpp
 +++ b/src/stream.cpp
-@@ -2345,6 +2345,15 @@
+@@ -2354,6 +2354,15 @@
        return session.client_cert;
      }
  

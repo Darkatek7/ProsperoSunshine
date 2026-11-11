@@ -1,31 +1,34 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // How the video sender spreads a frame that is much larger than the stream's average (a keyframe) over time instead of
-// sending it as one burst. Portable, so that the tests can run it: Sunshine's video broadcast thread uses it
-// (patches/sunshine/0026-paced-video.patch), and keyframe_policy.hpp uses idle_spread() to tell how long a keyframe is on
-// its way.
+// sending it as one burst, for a client that streams over the internet. Portable, so that the tests can run it: Sunshine's
+// video broadcast thread uses it (patches/sunshine/0026-paced-video.patch), and keyframe_policy.hpp uses idle_spread() to
+// tell how long a keyframe is on its way.
 //
 // Why: Sunshine sends every frame at up to 800 Mbit/s (80% of gigabit). A keyframe of a 3 Mbit/s stream is 100 to 200 kB,
 // 20 to 30 average frames, and leaves the console in about 2 ms. A path that carries 3 to 10 Mbit/s (mobile, a relay, a
 // shaped uplink) has to queue all of it at once or drop its tail, and a dropped tail makes the client ask for the next
 // keyframe (issue 37). Small frames still go out at once: spreading them would only add latency.
 //
-// The plan for one stream, a token bucket:
+// Only a client that streams over the internet is paced: Moonlight then asks for packets of 1024 bytes (1184 over IPv6,
+// 32 less with video encryption) instead of 1392. A client on the LAN gets every frame as before, at Sunshine's wire limit
+// alone (WireLimiter): there the pace would only delay its keyframes. Keyframes the repository measured are 55 to 70 kB on
+// the home screen (13.00, 1080p), 169 kB in GTA III (10.20, HEVC at the QP for 35 to 47 Mbit/s) and up to 239 kB in the
+// Mario 64 demo (HEVC asked for 100 Mbit/s); with FEC and headers about a quarter more. Paced like a remote stream, a
+// 170 to 240 kB keyframe at 10 Mbit/s and 60 fps would leave its last byte 39 to 62 ms later than at the wire limit (2 to
+// 3 ms), at 20 Mbit/s 9 to 19 ms later: more than a frame interval, for every LAN client at every keyframe.
+//
+// The plan for a remote stream, a token bucket:
 //  - Average frame A: the larger of what the client asked for (bitrate / fps) and what the stream's frames other than
 //    keyframes carried lately (a moving average over about 16 frames). On 10.x the encoder keeps no bitrate, so the
 //    request alone can be too small; keyframes stay out of it, or a keyframe loop would raise the rate it is paced at.
-//  - Burst D = 4 A, at least 16 kB: a frame up to that size leaves at once, as before. A path that carries the stream at
-//    all queues four frames' worth (66 ms at 60 fps) without loss, and an encoder's ordinary frames vary about that much.
-//    A client that streams over the internet gets at most 32 kB: Moonlight then asks for packets of 1024 bytes (1184 over
-//    IPv6) instead of 1392. Issue 37's debug logs show such a path keeping the first 39 or 40 packets of a larger frame
-//    and losing all the rest: 4257 of the 5475 frames the client reported lost, in streams from 1.3 to 15 Mbit/s. 39
-//    datagrams of 1040 bytes with the kernel's bookkeeping fill 42 kB, FreeBSD's default UDP receive buffer: most likely
-//    a relay on the way (ps5-tailscale runs on the console) that a burst fills faster than it reads. 32 kB leaves room
-//    for what it still holds.
+//  - Burst D = 4 A, at least 16 kB and at most 32 kB: a frame up to that size leaves at once, as before. Issue 37's debug
+//    logs show a path keeping the first 39 or 40 packets of a larger frame and losing all the rest: 4257 of the 5475
+//    frames the client reported lost, in streams from 1.3 to 15 Mbit/s. 39 datagrams of 1040 bytes with the kernel's
+//    bookkeeping fill 42 kB, FreeBSD's default UDP receive buffer: most likely a relay on the way (ps5-tailscale runs on
+//    the console) that a burst fills faster than it reads. 32 kB leaves room for what it still holds.
 //  - The rest of a larger frame leaves at R = 4 x the stream's rate (A x fps). Four times the rate the client chose keeps
 //    a keyframe's peak well below wire speed (about 14 Mbit/s instead of 800 for a 3.4 Mbit/s stream) while a path that has
-//    headroom gets it soon: a 180 kB keyframe of that stream takes 70 to 90 ms, which a 5 Mbit/s path needs anyway. At
-//    50 Mbit/s and more R is 200 Mbit/s and more and the burst holds 400 kB, so a LAN keyframe of up to six average frames
-//    leaves within about 2 ms of when it did before; from 200 Mbit/s up R reaches the wire limit and nothing changes.
+//    headroom gets it soon: a 180 kB keyframe of that stream takes 70 to 90 ms, which a 5 Mbit/s path needs anyway.
 //  - No frame leaves its last byte later than 100 ms after it reached the sender: a frame that would take longer, or that
 //    waited behind the stream's previous frames, goes faster. This bounds the latency the pacer can add, and with it the
 //    queue, also when the stream carries more than the client asked for.
@@ -66,7 +69,8 @@ public:
     using clock = std::chrono::steady_clock;
     using time_point = clock::time_point;
 
-    // The stream as the client asked for it: kbit/s, frames per second, and whether it streams over the internet.
+    // The stream as the client asked for it: kbit/s, frames per second, and whether it streams over the internet. Only a
+    // remote stream is paced.
     void configure(std::uint32_t kbps, int fps, bool remote = false) {
         fps_ = fps > 0 ? fps : 60;
         requested_frame_ = kbps > 0 ? kbps * 1000.0 / 8.0 / fps_ : 0.0;
@@ -74,9 +78,11 @@ public:
     }
 
     double average_frame() const { return std::max(requested_frame_, measured_frame_); }
+    // Whether frames above the burst are spread: a remote stream whose bitrate is known.
+    bool paces() const { return remote_ && rate() > 0; }
     double burst_bytes() const {
-        const double burst = std::max(min_burst_bytes, burst_frames * average_frame());
-        return remote_ ? std::min(burst, remote_burst_bytes) : burst;
+        if (!remote_) return std::numeric_limits<double>::infinity();
+        return std::clamp(burst_frames * average_frame(), min_burst_bytes, remote_burst_bytes);
     }
     // Bytes per second for the part of a frame beyond the burst; 0 before the stream is known (no pacing then).
     double rate() const {
@@ -87,6 +93,16 @@ public:
     // A frame of `bytes` on the wire (FEC and headers included), which reached the sender at `arrival`, starts now at
     // `start`: no earlier than its arrival, and after the stream's previous frame went out.
     void begin(time_point start, time_point arrival, std::size_t bytes, bool keyframe) {
+        bytes_ = static_cast<double>(bytes);
+        start_ = start;
+        if (!paces()) {
+            // All at once, as before.
+            burst_ = bytes_;
+            frame_rate_ = std::numeric_limits<double>::infinity();
+            end_ = idle_from_ = start;
+            if (!keyframe) measured_frame_ += (bytes_ - measured_frame_) / 16;
+            return;
+        }
         const double depth = burst_bytes();
         const double r = rate();
         if (!started_) {
@@ -96,8 +112,6 @@ public:
             credit_ += pacing_detail::seconds(start - idle_from_) * r;
         }
         credit_ = std::min(credit_, depth);
-        start_ = start;
-        bytes_ = static_cast<double>(bytes);
         burst_ = std::min(bytes_, credit_);
         const double rest = bytes_ - burst_;
         frame_rate_ = r;
@@ -161,8 +175,11 @@ private:
 };
 
 // How long a frame of `bytes` on the wire is spread when the stream had nothing queued and frames of the size it asked
-// for: what keyframe_policy.hpp needs to know about a keyframe it just sent.
+// for: what keyframe_policy.hpp needs to know about a keyframe it just sent. A LAN stream's keyframe takes what the wire
+// limit gives it.
 inline std::chrono::steady_clock::duration idle_spread(std::uint32_t kbps, int fps, bool remote, std::size_t bytes) {
+    if (!remote)
+        return pacing_detail::duration_of(std::max(0.0, static_cast<double>(bytes) - wire_burst_bytes) / wire_bytes_per_second);
     FramePacer pacer;
     pacer.configure(kbps, fps, remote);
     const auto now = std::chrono::steady_clock::time_point{} + std::chrono::hours(1);

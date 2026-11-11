@@ -89,6 +89,18 @@ void update_offers() {
     last_encoder_probe_supported_dynamic_range_for_codec[1] = active_hevc_mode == 3;
 }
 
+// A frame for one stream's session. The session counts it until the video broadcast thread sent or dropped it, and
+// stream::session::join() waits for that (patch 0026): the frame points at the session in the queue and while it is paced.
+// Created only while the session's stream runs: by its own capture thread, or for a joined stream under captures.mutex
+// while it is on the channel.
+struct counted_packet final : packet_raw_generic {
+    counted_packet(std::vector<uint8_t> &&bytes, int64_t index, bool idr, stream::session_t *session)
+        : packet_raw_generic(std::move(bytes), index, idr), ref(session) {
+        channel_data = session;
+    }
+    stream::session::video_frame_ref_t ref;
+};
+
 // A stream that joined a channel another stream holds (a second player). It lives on its own capture thread and is only
 // touched under captures.mutex.
 struct joined_stream {
@@ -180,7 +192,8 @@ void log_keyframe_policy(int slot, channel_t &ch, std::chrono::steady_clock::tim
     const auto counts = ch.keyframes.take_counts();
     if (counts.blind == 0 && counts.waited == 0) return;
     BOOST_LOG(info) << "PS5 capture: channel "sv << slot << ", "sv << counts.requests << " keyframe requests in 10 s: "sv
-                    << counts.blind << " sent before the client could have the last IDR, "sv << counts.merged
+                    << counts.blind << " likely sent before the client could have the last IDR (answered "sv
+                    << prospero::KeyframePolicy::blind_hold.count() << " ms later unless one came), "sv << counts.merged
                     << " answered by one on its way, "sv << counts.waited << " held back (up to "sv
                     << std::chrono::duration_cast<std::chrono::milliseconds>(counts.longest_wait).count()
                     << " ms, hold-off level "sv << ch.keyframes.level(now) << "); "sv << counts.asked << " IDRs asked for"sv;
@@ -577,14 +590,12 @@ void capture(safe::mail_t mail, config_t config, stream::session_t *channel_data
                 for (auto *j : ch.joined) {
                     if (!j->keyframe_seen && !frame.idr) continue;
                     j->keyframe_seen = true;
-                    auto copy = std::make_unique<packet_raw_generic>(std::vector<uint8_t>(frame.bytes), j->next_index++, frame.idr);
-                    copy->channel_data = j->session;
+                    auto copy = std::make_unique<counted_packet>(std::vector<uint8_t>(frame.bytes), j->next_index++, frame.idr, j->session);
                     copy->frame_timestamp = timestamp;
                     packets->raise(std::move(copy));
                 }
             }
-            auto packet = std::make_unique<packet_raw_generic>(std::move(frame.bytes), next_index++, frame.idr);
-            packet->channel_data = channel_data;
+            auto packet = std::make_unique<counted_packet>(std::move(frame.bytes), next_index++, frame.idr, channel_data);
             packet->frame_timestamp = timestamp;
             packets->raise(std::move(packet));
             frame.bytes = {};
