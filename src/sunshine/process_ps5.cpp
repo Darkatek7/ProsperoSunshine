@@ -77,6 +77,8 @@ constexpr auto settings_app_quit = "/data/prosperosunshine/app.quit";
 // Where a title has no /data (9.60), the app sees this one as /app0/app.quit. It may not delete it, so the host does.
 constexpr auto settings_app_quit_install = "/data/homebrew/PPSA47989/app.quit";
 constexpr int launch_mount_busy = static_cast<int>(0x80940033);
+// "!isBigApp() || usercount > 0" in SceLncService's log: nobody is signed in (10.20).
+constexpr int launch_no_user = static_cast<int>(0x8094000A);
 
 // For close_game_on_quit: the game the last session started or found in front, with its app for /resume, and the game
 // Terminate App closed last. The HTTPS thread, the stream's end (patch 0006) and its timer (patch 0007) reach these.
@@ -166,8 +168,9 @@ std::string other_open_title(const std::string &id) {
 }
 
 // False when another title is open and stays so: the stream would show that one, not the title the client asked for, or
-// starting the new one could close it. in_front: the title is in front afterwards, as far as the system said.
-bool start_title(const std::string &id, bool &in_front) {
+// starting the new one could close it. in_front: the title is in front afterwards, as far as the system said. cert: the
+// client's, whose own profile is signed in first while nobody is (platf::sign_in_for_launch).
+bool start_title(const std::string &id, const std::string &cert, bool &in_front) {
     in_front = false;
     wait_for_release(id);
     char running[16];
@@ -186,15 +189,20 @@ bool start_title(const std::string &id, bool &in_front) {
         BOOST_LOG(warning) << "Not starting "sv << id << ": "sv << open << " is still open and starting another title could close it"sv;
         return false;
     }
+    // While nobody is in front, a device with its own profiles gets the game for one of them, signed in first if needed:
+    // with nobody signed in the system would refuse it. Otherwise it starts for the profile in front, as before.
+    const uint32_t user = platf::sign_in_for_launch(cert, id);
     // Without a title the stream still shows the console.
-    int rc = ps_title_launch(id.c_str());
+    int rc = ps_title_launch(id.c_str(), user);
     // ShadowMountPlus releases a title about a second after it ends, and refuses starts until then ("launch mount
     // unavailable ... Device busy" in its log). Seen right after the settings app closed itself, on firmware 10.20. Retried
-    // only while nothing else is open: once ShadowMountPlus lets a start through, the system could close that title.
+    // only while nothing else is open: once ShadowMountPlus lets a start through, the system could close that title. A
+    // profile just signed in may not count yet as signed in to the system: that start is retried too.
     for (auto until = std::chrono::steady_clock::now() + 3s;
-         rc == launch_mount_busy && std::chrono::steady_clock::now() < until && other_open_title(id).empty();) {
+         (rc == launch_mount_busy || (user && rc == launch_no_user)) && std::chrono::steady_clock::now() < until &&
+         other_open_title(id).empty();) {
         std::this_thread::sleep_for(500ms);
-        rc = ps_title_launch(id.c_str());
+        rc = ps_title_launch(id.c_str(), user);
     }
     if (rc < 0) BOOST_LOG(warning) << "Starting "sv << id << " failed: "sv << util::hex(rc).to_string_view();
     else BOOST_LOG(info) << "Started "sv << id;
@@ -216,7 +224,7 @@ std::unique_ptr<platf::deinit_t> init() {
 
 void refresh(const std::string &) {}
 
-int proc_t::execute(int app_id, std::shared_ptr<rtsp_stream::launch_session_t>) {
+int proc_t::execute(int app_id, std::shared_ptr<rtsp_stream::launch_session_t> launch_session) {
     terminate();
     const auto app = std::find_if(_apps.begin(), _apps.end(), [&](const ctx_t &a) { return a.id == std::to_string(app_id); });
     if (app == _apps.end()) {
@@ -229,7 +237,7 @@ int proc_t::execute(int app_id, std::shared_ptr<rtsp_stream::launch_session_t>) 
     placebo = true;
     BOOST_LOG(info) << "Session app ["sv << _app.name << "] marked running"sv;
     bool in_front = false;
-    if (!_app.cmd.empty() && !start_title(_app.cmd, in_front)) {
+    if (!_app.cmd.empty() && !start_title(_app.cmd, launch_session ? launch_session->client_cert : std::string(), in_front)) {
         // Refuse the launch, so the client doesn't name this title over a stream of the one in front. "PS5 Screen" still
         // streams whatever is in front. The game a session left in front stays listed: it's still the one to resume or quit.
         terminate();

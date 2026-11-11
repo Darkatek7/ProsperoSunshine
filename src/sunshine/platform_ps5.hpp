@@ -18,4 +18,9 @@ void profiles_changed(const std::string &cert, const std::vector<uint32_t> &adde
 // menus aren't chosen, for a device that can choose freely or isn't set, and for one with a profile that reaches the menus.
 bool screen_offered_to(const std::string &cert);
 
+// Before a game starts for the paired device with this certificate: while nobody is in front on the console, one of the
+// device's own profiles is signed in if it isn't. The profile the game should start for, else 0.
+// title: the title about to start, so the profile isn't signed out while it is open.
+uint32_t sign_in_for_launch(const std::string &cert, const std::string &title);
+
 }  // namespace platf

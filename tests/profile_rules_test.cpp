@@ -24,6 +24,38 @@ int main() {
     assert((join_order(set, 0x1b1d9389) == std::vector<uint32_t>{0x1b1d9381, 0x1b1d9382, 0x1b1d9383}));
     assert(join_order(*parse_profiles("none"), 0x1b1d9381).empty());
 
+    // Starting a game while nobody is in front: only a device with profiles of its own starts it for one of them.
+    assert(launch_sign_in(set, Answer::no) == LaunchSignIn::yes);
+    assert(launch_sign_in(*parse_profiles("1b1d9381,guest"), Answer::no) == LaunchSignIn::yes);
+    // Someone is in front: the game starts for them, as before.
+    assert(launch_sign_in(set, Answer::yes) == LaunchSignIn::no);
+    // Not on a guess.
+    assert(launch_sign_in(set, Answer::unknown) == LaunchSignIn::unknown);
+    // Free, not set, only watching, or only the Quick Play guest: nothing changes.
+    assert(launch_sign_in(*parse_profiles("free"), Answer::no) == LaunchSignIn::no);
+    assert(launch_sign_in(std::nullopt, Answer::no) == LaunchSignIn::no);
+    assert(launch_sign_in(*parse_profiles("none"), Answer::no) == LaunchSignIn::no);
+    assert(launch_sign_in(*parse_profiles("guest"), Answer::no) == LaunchSignIn::no);
+
+    // The welcome screen over that game: X only once the pad has settled, the game runs without the screen and nobody is
+    // in front.
+    using A = Answer;
+    assert(welcome_step({true, A::yes, A::no, A::no}) == WelcomeStep::press);
+    assert(welcome_step({false, A::yes, A::no, A::no}) == WelcomeStep::wait);
+    assert(welcome_step({true, A::no, A::no, A::no}) == WelcomeStep::wait);
+    assert(welcome_step({true, A::unknown, A::no, A::no}) == WelcomeStep::wait);
+    assert(welcome_step({true, A::yes, A::unknown, A::no}) == WelcomeStep::wait);
+    assert(welcome_step({true, A::yes, A::no, A::unknown}) == WelcomeStep::wait);
+    // The game has the screen, or someone is in front: nothing to press.
+    assert(welcome_step({true, A::yes, A::yes, A::no}) == WelcomeStep::done);
+    assert(welcome_step({false, A::unknown, A::unknown, A::yes}) == WelcomeStep::done);
+    static_assert(welcome_window >= std::chrono::seconds(20) && welcome_settle >= std::chrono::milliseconds(500));
+    // The greeting: only for a device streaming alone while nobody is in front.
+    assert(welcome_greeting(true, A::no));
+    assert(!welcome_greeting(true, A::yes));
+    assert(!welcome_greeting(true, A::unknown));
+    assert(!welcome_greeting(false, A::no));
+
     // Signing out: never someone else's, nor one a controller of the host sits in.
     assert(sign_out({false, false, Answer::no, Answer::no}) == SignOut::never);
     assert(sign_out({true, true, Answer::no, Answer::no}) == SignOut::never);
@@ -36,6 +68,13 @@ int main() {
     // Such a controller plays as it.
     assert(sign_out({true, false, Answer::no, Answer::yes}) == SignOut::later);
     assert(sign_out({true, false, Answer::no, Answer::no}) == SignOut::now);
+    // The game the host started for it is still open: it waits, and goes once the game is closed.
+    assert(sign_out({true, false, Answer::no, Answer::no, Answer::yes}) == SignOut::later);
+    assert(sign_out({true, false, Answer::no, Answer::no, Answer::unknown}) == SignOut::later);
+    assert(sign_out({true, false, Answer::no, Answer::no, Answer::no}) == SignOut::now);
+    // In front or seated still decides first.
+    assert(sign_out({true, false, Answer::yes, Answer::no, Answer::yes}) == SignOut::kept);
+    assert(sign_out({true, true, Answer::no, Answer::no, Answer::yes}) == SignOut::never);
     static_assert(sign_out_grace >= std::chrono::seconds(30) && sign_out_grace <= std::chrono::seconds(60));
 
     // The host's profiles (issue 52): one kept as it was in front can be joined again, but isn't signed out by the host.

@@ -18,6 +18,15 @@
   in. Coming back later than 45 s, their controller could only watch, and the console asked to sign the profile out
   first. Now the host keeps that profile for the device, which can join it again at any time, until someone signs it out
   on the console. A profile someone signed in on the console is still blocked, as before.
+- **A device with its own profiles can start a game while nobody is in front on the console.** With nobody signed in, the
+  console refused the start with `0x8094000A` (it starts a game only while a profile is signed in), and the device's
+  profile was signed in a moment later, for its controller. Now the host starts the game for the device's profile, signed
+  in first if it isn't. If the console's "Press the PS button" screen still covers the game, the device's controller
+  presses X once to close it. While that game stays open (the stream ended without Quit), the host doesn't sign the
+  profile out, as the console would then suspend the game and refuse to start any other; it does once the game is closed.
+  Nothing changes for a device that can choose any profile, or while someone is in front. A device with its own profiles
+  that starts streaming while no other device does and nobody is in front is greeted with "Welcome, <profile>! Press any
+  button to start", as Moonlight's on-screen controls have no PS button and add their controller only at the first press.
 
 ## 0.6.0 (2026-11-09)
 
