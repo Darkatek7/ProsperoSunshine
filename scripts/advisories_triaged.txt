@@ -1,0 +1,13 @@
+# Advisories scripts/check_advisories.sh reports for a pin in deps.lock that don't concern this build, one
+# `<id> <reason>` per line. Reviewed 2026-11-10 against the build scripts and the host ELF. Look again when the pin moves.
+OSV-2024-112     boost: Boost.Graph is not built
+OSV-2024-914     boost: Boost.Regex is not built (Boost.Log uses std::regex)
+CVE-2026-107675  ffmpeg: sftp/libssh not built (--disable-avformat --disable-network)
+CVE-2026-107676  ffmpeg: HDR10+ serializer not linked
+CVE-2026-107677  ffmpeg: DASH demuxer not built
+CVE-2026-107678  ffmpeg: MOV demuxer / pssh not built
+CVE-2026-107696  ffmpeg: RTSP demuxer not built
+CVE-2026-107159  miniupnp: this is miniupnpd (the daemon), not built
+CVE-2026-5720    miniupnp: this is miniupnpd (the daemon), not built
+CVE-2026-110655  miniupnpc: patched here, patches/miniupnpc/0001-minixml-bounds.patch (upstream 3cfb4fb78d5a); drop once a release has it
+CVE-2026-110656  miniupnpc: patched here, patches/miniupnpc/0001-minixml-bounds.patch (upstream 64ef08a12aab); drop once a release has it

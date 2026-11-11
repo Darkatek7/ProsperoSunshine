@@ -143,6 +143,18 @@ static uint32_t record_u32(size_t at)
     memcpy(&value, fake_record + at, sizeof value);
     return value;
 }
+// A title coming up behind the console's welcome screen (13.00): the first read gives the welcome screen's mode, then the
+// output has none for gone_reads reads, then the title's.
+static int gone_reads;
+static void mode_gone_for_a_while(int reads) { fake_output = !reads ? 0x13c : reads <= gone_reads ? 0 : 0x144; }
+// OpenVideo takes only the mode the output has now, which may have changed since it was last read.
+static int needs_current_mode(const char *step, const uint8_t *record)
+{
+    if (fake_mode_changes) fake_mode_changes(fake_mode_reads);
+    uint32_t mode;
+    memcpy(&mode, record + 0x2a0 + ps_capture_record_shift(), sizeof mode);
+    return !strcmp(step, "OpenVideo") && (!fake_output || mode != (uint32_t)fake_output) ? RESOURCE_NOT_ACTIVE : 0;
+}
 
 static int refuse_resource(const char *step, const uint8_t *record)
 {
@@ -374,6 +386,33 @@ int main(void)
     ps_capture_set_reopening(1);
     assert(open_and_close() != 0);
     assert(ps_capture_video_resolution() == 4 && !ps_capture_size_refused());
+    // The output loses its mode only after it was read, for longer than the repeats of OpenVideo last (1.2 s here, a
+    // game started behind the welcome screen on 13.00): the open waits for the mode with the time the first wait didn't
+    // use, and gets the title's mode. Before, the 25 repeats ran out and the stream ended at its start.
+    setup(0x13000040u, 0, 0, 0, 0, 0, 4);
+    fake_mode_reads = 0;
+    gone_reads = 58;
+    fake_mode_changes = mode_gone_for_a_while;
+    fake_decide = needs_current_mode;
+    assert(open_and_close() == 0);
+    assert(logged("video out mode now 0") && !logged("video out mode back after") && logged("OpenVideo repeated"));
+    assert(fake_opens <= 12 && record_u32(0x2a0 + (size_t)ps_capture_record_shift()) == 0x144);
+    // Gone for less than what is left of the wait: the mode is back within it, and one more open takes it.
+    setup(0x13000040u, 0, 0, 0, 0, 0, 4);
+    fake_mode_reads = 0;
+    gone_reads = 20;
+    fake_decide = needs_current_mode;
+    assert(open_and_close() == 0);
+    assert(logged("video out mode back after") && fake_opens == 2 && record_u32(0x2a0 + (size_t)ps_capture_record_shift()) == 0x144);
+    // An output that never gets a mode still ends the open after both waits, and a reopen tries again.
+    setup(0x13000040u, 0, 0, 0, 0, 0, 4);
+    fake_mode_reads = 0;
+    gone_reads = 1000000;
+    fake_decide = needs_current_mode;
+    assert(open_and_close() != 0);
+    assert(fake_opens == 26 && !logged("video out mode back after"));
+    fake_mode_changes = NULL;
+    fake_output = 0x13c;
     // 13.00 has them verified too, with the same fallback.
     setup_small(0x13000040u, 0, 0, 3);
     assert(ps_capture_small_modes_allowed());

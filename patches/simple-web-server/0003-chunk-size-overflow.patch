@@ -1,0 +1,28 @@
+ProsperoSunshine: a chunk size near 2^64 no longer wraps the body limit's check
+
+Found by the fuzz target sws_server (tests/fuzz). A chunked request body is read chunk by chunk and each announced chunk is
+checked against the room left in the content buffer with "chunk_size + bytes read so far > limit". Both are 64-bit: a size of
+2^64-1 (or any size within the bytes read so far of 2^64) wraps the sum around to a small number, the check passes, and the
+bytes that had arrived behind the size line, up to a whole read of them, were then copied into a buffer that was already
+nearly full. That made basic_streambuf::prepare throw std::length_error out of the io thread, which ends start() of a server
+that takes bodies and has a size limit. One request from anybody who can open a connection ended the server; the web page
+(a body limit of 64 KiB, bodies accepted) is such a server and restarts ten seconds after. The GameStream servers refuse
+bodies (patch 0002) and are not reached; a server without a limit reads on until the connection's timeout instead.
+The check is now written so that nothing is added: the chunk must not be larger than what the buffer has room for.
+
+Reproduction: "POST / HTTP/1.1", "Transfer-Encoding: chunked", the chunk "fff0" with 65520 bytes, then the line
+"ffffffffffffffff" and 100 more bytes, all in one write, on a server with max_request_streambuf_size 65536.
+
+--- a/server_http.hpp
++++ b/server_http.hpp
+@@ -694,7 +694,9 @@
+             return;
+           }
+ 
+-          if(chunk_size + session->request->content_streambuf.size() > session->request->content_streambuf.max_size()) {
++          // Not "chunk_size + size > max_size": a chunk size near 2^64 wraps that sum around, passes, and the bytes already
++          // read behind it then overflow the content buffer (std::length_error out of the io thread).
++          if(chunk_size > session->request->content_streambuf.max_size() - session->request->content_streambuf.size()) {
+             auto response = std::shared_ptr<Response>(new Response(session, this->config.timeout_content));
+             response->write(StatusCode::client_error_payload_too_large);
+             if(this->on_error)

@@ -1,0 +1,10 @@
+[a]
+F12 = cross
+Num5 = options
+Ctrl = none
+; = ps
+[b-2]
+base=shooter
+Shift=l2
+[standard]
+\;x\;

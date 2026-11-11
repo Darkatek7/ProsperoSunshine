@@ -450,7 +450,7 @@ void Host::read_files()
 void Host::poll()
 {
     const io::Exchange reply = io::exchange(kControlPort, "STATUS\nPAIRINGS\n", is_end, 3000);
-    bool running = false, streaming = false;
+    bool running = false, streaming = false, control_lan = false;
     std::string app, client, client_address, error;
     bool client_known = false;
     std::vector<Pairing> pairings;
@@ -481,6 +481,7 @@ void Host::poll()
                 client = status_field(line, "client");
                 client_address = status_field(line, "address");
                 client_known = line.find(" client=") != std::string::npos;
+                control_lan = status_field(line, "lan") == "1";
                 continue;
             }
             if (line == "END" || line.rfind("OK ", 0) != 0)
@@ -581,6 +582,7 @@ void Host::poll()
     state_.client = client;
     state_.client_address = client_address;
     state_.client_known = client_known;
+    state_.control_lan = control_lan;
     state_.pairings = pairings;
     state_.poll_error = error;
     state_.devices_known = devices_known;
@@ -933,7 +935,7 @@ void Host::do_autoload(bool on)
 }
 
 // Everything someone else needs to tell why streaming fails here, fit to paste into a public issue:
-// no addresses, device names, ids or game titles (diag::scrub).
+// no addresses, device names, ids or game titles (diag::Scrubber).
 bool Host::same_as_bundled()
 {
     if (!io::sandboxed())
@@ -996,20 +998,24 @@ std::string Host::build_report()
         // The console's name stays out; the other options say nothing about anyone.
         if (!value)
             continue;
-        out += "  " + key + " = " + (key == "sunshine_name" ? std::string("<name>") : *value) + "\n";
+        out += "  " + key + " = " + (key == "sunshine_name" ? std::string("<console-name>") : *value) + "\n";
         any = true;
     }
     if (!any)
         out += "  none\n";
 
-    std::vector<std::string> names = snap.paired;
-    for (const diag::Device &device : snap.devices)
-        names.push_back(device.name);
+    // Everything that names someone goes through one scrubber, so that the same address or device has the same tag in every section:
+    // the console, the paired devices (with their uuids, so a tag matches the uuid's in the logs), and the client that streams.
+    diag::Scrubber scrubber;
     const auto name = snap.config.find("sunshine_name");
     if (name != snap.config.end() && name->second)
-        names.push_back(*name->second);
+        scrubber.add_console(*name->second);
+    for (const diag::Device &device : snap.devices)
+        scrubber.add_device(device.name, device.id);
+    for (const std::string &paired : snap.paired)
+        scrubber.add_name(paired);
     if (!snap.client.empty())
-        names.push_back(snap.client);
+        scrubber.add_name(snap.client);
     std::vector<std::string> switches;
     for (int i = 0; i < PS_EXP_SWITCH_COUNT; ++i)
     {
@@ -1019,18 +1025,19 @@ std::string Host::build_report()
             switches.push_back(key);
     }
     out += "\nExperimental switches:\n";
-    out += diag::scrub(diag::experimental_report(host_log, switches), names);
+    out += scrubber.apply(diag::experimental_report(host_log, switches));
     out += "\nHost breadcrumbs (host_diag.log):\n";
-    out += have_host_file ? diag::scrub(diag::tail(host_file, 120), names) : "  no file: " + io::open_error(kHostDiagPath) + "\n";
+    out += have_host_file ? scrubber.tail(host_file, 120) : "  no file: " + io::open_error(kHostDiagPath) + "\n";
     if (have_older_host_file)
     {
         // How the last run ended, or how a long run started.
         out += "\nOlder breadcrumbs (host_diag.log.1: the last run, or the lines before the newest), last lines:\n";
-        out += diag::scrub(diag::tail(older_host_file, 60), names);
+        out += scrubber.tail(older_host_file, 60);
     }
     out += "\nsunshine.log, last lines:\n";
-    out += have_log_file ? diag::scrub(diag::tail(log_file, 80), names) : "  no file: " + io::open_error(kHostLogPath) + "\n";
-    return out;
+    out += have_log_file ? scrubber.tail(log_file, 80) : "  no file: " + io::open_error(kHostLogPath) + "\n";
+    // The lines above hold no one's name, but a line added there later might hold an address: they get the same pass.
+    return scrubber.apply(out, false);
 }
 
 void Host::do_report()

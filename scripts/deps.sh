@@ -3,7 +3,15 @@
 # Fetch the sources pinned in deps.lock, verify and patch them, and build static PS5 libraries into
 # out/deps. Each library with a build step has its own scripts/deps/<name>.sh; finished builds leave
 # a stamp so later runs only redo what changed. Pass library names to limit the run to those.
+# "deps.sh --sources <name>..." only fetches, verifies, patches and extracts those sources into .cache/deps/src and builds
+# nothing (the Linux tests of the HTTP library use it, scripts/dep_headers.sh); a patch that no longer applies stops it.
 set -euo pipefail
+sources_only=0
+if [[ "${1:-}" == --sources ]]; then
+    sources_only=1
+    shift
+    [[ $# -gt 0 ]] || { echo "deps.sh --sources: name the sources to prepare" >&2; exit 2; }
+fi
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 export sdk=${PS5_PAYLOAD_SDK:-/opt/ps5-payload-sdk}
 export prefix="$root/out/deps"
@@ -13,7 +21,8 @@ export jobs
 dl="$root/.cache/deps/dl"
 mirror=${DEPS_MIRROR:-https://github.com/Darkatek7/ProsperoSunshine/releases/download/deps-mirror}
 srcroot="$root/.cache/deps/src"
-mkdir -p "$dl" "$srcroot" "$prefix/include" "$prefix/lib" "$prefix/licenses" "$work"
+mkdir -p "$dl" "$srcroot"
+[[ $sources_only -eq 1 ]] || mkdir -p "$prefix/include" "$prefix/lib" "$prefix/licenses" "$work"
 
 # Source trees are extracted once into .cache/deps/src/<name>; a stamp records archive hash and
 # patch set, so a changed pin or patch re-extracts the tree.
@@ -21,6 +30,7 @@ declare -A src version
 order=()
 while read -r name ver sha url; do
     [[ -z "$name" || "$name" == \#* ]] && continue
+    [[ $sources_only -eq 0 ]] || [[ " $* " == *" $name "* ]] || continue
     ext=${url##*/}; ext=${ext#*.}
     [[ "$ext" == tar.* ]] || ext=tar.gz
     file="$dl/$name-$ver.$ext"
@@ -52,6 +62,12 @@ while read -r name ver sha url; do
     order+=("$name")
 done < "$root/deps.lock"
 
+if [[ $sources_only -eq 1 ]]; then
+    for name in "$@"; do
+        [[ -n "${src[$name]:-}" ]] || { echo "deps.sh --sources: $name is not in deps.lock" >&2; exit 2; }
+    done
+    exit 0
+fi
 selected=("$@")
 [[ ${#selected[@]} -gt 0 ]] || selected=("${order[@]}")
 for name in "${selected[@]}"; do

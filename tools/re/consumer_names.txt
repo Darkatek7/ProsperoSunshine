@@ -53,3 +53,7 @@ sceVencSetCallback
 sceVencQueryStatus
 sceVencQueryConfig
 sceVencSetEncodeParam
+sceVencSetLongTermReferenceConfig
+sceVencSetTemporalSvcConfig
+sceVencSetSliceSizeControlConfig
+sceVencSetFrameDroppingConfig

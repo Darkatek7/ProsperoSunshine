@@ -24,6 +24,7 @@ run_capture_test capture_records_test "-DGOLDEN=\"$root/tests/capture_records.go
 run_capture_test capture_open_test
 run_capture_test capture_slots_test
 run_capture_test probe_record_test
+run_capture_test capture_firmware_test
 run_capture_test diag_test
 run_capture_test diag_test -DPROSPERO_DEBUG=1
 run_test experimental_test
@@ -45,11 +46,16 @@ run_test menu_access_test
 run_test stream_list_test
 run_test capture_mode_test
 run_test channel_choice_test
+run_test frame_pacing_test
+run_test keyframe_policy_test
+run_test send_retry_test
 run_test channel_map_test
+run_test audio_meter_test
 run_test hdr10_metadata_test
 run_test titles_test "$root/src/apps/titles.cpp"
 run_test mdns_test "$root/src/net/mdns.cpp"
 run_test ra_choose_test
+run_test mask_test
 run_test probe_scrub_test
 run_test log_filter_test
 run_test remote_log_test
@@ -63,4 +69,16 @@ run_test web_lines_test
 run_test uuid_lines_test
 run_test app_access_test
 run_test web_plain_test
+run_test web_logs_test
+run_test stream_health_test
 run_test log_throttle_test
+run_test exposure_test
+run_test thread_load_test
+# The report's scrub (diag.cpp) includes itself as "app/psapp/...", as in app/tests/run.sh.
+mkdir -p "$root/out/include/app"
+ln -sfn "$root/app/src/psapp" "$root/out/include/app/psapp"
+run_test privacy_leak_test "$root/app/src/psapp/diag.cpp" -I "$root/out/include"
+# The web page's settings groups come from the app's option list and layout.
+run_test web_settings_test "$root/app/src/psapp/conf.cpp" "$root/app/src/psapp/settings_layout.cpp" -I "$root/out/include"
+# A new or changed log statement that can hold an address or a name must be looked at (and have a sample in privacy_leak_test).
+bash "$root/scripts/check_log_sites.sh"

@@ -40,6 +40,37 @@ int main() {
     for (const char *p : {"", "1.2.3", "1.2.3.4.5", "256.1.1.1", "a.b.c.d", "1.2.3.4x", "::1"})
         assert(!private_ipv4(p));
 
+    // Permanent mappings noted in a file: one line each, read back the same, nothing that isn't one word per field.
+    const PermanentMapping inner{"http://router.example:5000/ctl/IPConn", "urn:schemas-upnp-org:service:WANIPConnection:1",
+                                 "198.51.100.88", true, 47998};
+    const PermanentMapping https{inner.control_url, inner.service_type, inner.client, false, 47984};
+    assert(format_permanent(inner) ==
+           "http://router.example:5000/ctl/IPConn urn:schemas-upnp-org:service:WANIPConnection:1 198.51.100.88 UDP 47998");
+    const auto list = parse_permanent(format_permanent_list({inner, https, inner}));
+    assert(list.size() == 2 && list[0] == inner && list[1] == https);
+    assert(format_permanent({"http://a b", "s", "c", false, 1}).empty() && format_permanent({"u", "s", "", false, 1}).empty());
+    assert(format_permanent({"u", "s", "c", false, 0}).empty() && format_permanent({"u", "s\nx", "c", false, 1}).empty());
+    assert(parse_permanent("").empty());
+    assert(parse_permanent("u s c TCP 0\nu s c TCP 65536\nu s c XYZ 1\nu s c TCP\nu s c TCP 1x\nu s c d TCP 1\n").empty());
+    assert(parse_permanent("u s c TCP 65535").size() == 1 && parse_permanent("u s c TCP 65535")[0].port == 65535);
+    assert(format_permanent_list({}).empty());
+    // Notes added and removed: by router, port and protocol; a mapping added again replaces its note.
+    PermanentMapping moved = inner;
+    moved.client = "198.51.100.89";
+    assert(merge_permanent({}, {inner, https}, {}) == (std::vector<PermanentMapping>{inner, https}));
+    assert(merge_permanent({inner, https}, {moved}, {}) == (std::vector<PermanentMapping>{https, moved}));
+    assert(merge_permanent({inner, https}, {}, {{inner.control_url, inner.service_type, "", true, 47998}}) ==
+           (std::vector<PermanentMapping>{https}));
+    assert(merge_permanent({inner}, {}, {{"http://other.example/ctl", inner.service_type, "", true, 47998}}).size() == 1);
+    assert(merge_permanent({inner, https}, {}, {inner, https}).empty());
+    assert(merge_permanent({inner}, {inner, inner}, {}).size() == 1);
+
+    // The ports mapped now are left to the run; a port from an earlier Base port is removed.
+    assert(mapped_now(inner, ports) && mapped_now(https, ports));
+    assert(!mapped_now({inner.control_url, inner.service_type, inner.client, false, 47998}, ports));  // TCP, not UDP
+    assert(!mapped_now({inner.control_url, inner.service_type, inner.client, true, 48098}, ports));
+    assert(!mapped_now(inner, {}));
+
     // A lease near its end is renewed by removing the mapping first; a permanent one (0) or a fresh one is not.
     assert(renew_by_removing("599") && renew_by_removing("1") && renew_by_removing("120"));
     assert(!renew_by_removing("600") && !renew_by_removing("3416") && !renew_by_removing("0"));

@@ -6,6 +6,7 @@
 #include <map>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace prospero::web {
@@ -45,24 +46,25 @@ inline Record fields(std::string_view line, std::string_view last) {
     return record;
 }
 
-// STATUS: "running=<0|1> app=<name> pending=<n> address=<ip> client=<name>"; the app's name may hold spaces too, so the
-// keys are found by name and in this order.
+// STATUS: "running=<0|1> app=<name> pending=<n> lan=<0|1> address=<ip> client=<name>"; the app's name may hold spaces too, so
+// the keys are found by name and in this order, each value running to the next key found. A key an older host doesn't send
+// (lan) is left out of the record.
 inline Record status(std::string_view line) {
     Record record;
-    const char *keys[] = {"running", "app", "pending", "address", "client"};
+    const std::string padded = " " + std::string(line);
+    const std::string_view keys[] = {"running", "app", "pending", "lan", "address", "client"};
+    std::vector<std::pair<std::string_view, size_t>> found;  // a key, and where its " key=" starts
     size_t from = 0;
-    for (size_t i = 0; i < std::size(keys); ++i) {
-        const std::string key = std::string(i == 0 ? "" : " ") + keys[i] + "=";
-        const size_t at = line.find(key, from);
-        if (at == std::string_view::npos) return record;
-        const size_t start = at + key.size();
-        size_t end = std::string_view::npos;
-        if (i + 1 < std::size(keys)) {
-            end = line.find(std::string(" ") + keys[i + 1] + "=", start);
-            if (end == std::string_view::npos) end = line.size();
-        }
-        record[keys[i]] = std::string(line.substr(start, end == std::string_view::npos ? std::string_view::npos : end - start));
-        from = end == std::string_view::npos ? line.size() : end;
+    for (const auto key : keys) {
+        const size_t at = padded.find(" " + std::string(key) + "=", from);
+        if (at == std::string::npos) continue;
+        found.emplace_back(key, at);
+        from = at + key.size() + 2;
+    }
+    for (size_t i = 0; i < found.size(); ++i) {
+        const size_t start = found[i].second + found[i].first.size() + 2;
+        const size_t end = i + 1 < found.size() ? found[i + 1].second : padded.size();
+        record[std::string(found[i].first)] = padded.substr(start, end - start);
     }
     return record;
 }

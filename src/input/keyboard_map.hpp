@@ -225,11 +225,13 @@ constexpr uint8_t mouse_button_bit(int button) {
 }
 
 // Moonlight scrolls in 1/120 steps (WHEEL_DELTA); the mouse reports whole steps. Takes a distance, returns the
-// whole steps to send and keeps the rest for the next one. Positive is away from the user.
+// whole steps to send and keeps the rest for the next one. Positive is away from the user. What waits is bounded by the
+// largest distance one of Moonlight's reports carries: a client that sends more than 127 steps in every report would grow
+// it without end otherwise.
 class WheelSteps {
 public:
     int8_t add(int distance) {
-        rest_ += distance;
+        rest_ = static_cast<int>(std::clamp<long long>(static_cast<long long>(rest_) + distance, -most_waiting, most_waiting));
         const int steps = std::clamp(rest_ / 120, -127, 127);
         rest_ -= steps * 120;
         return static_cast<int8_t>(steps);
@@ -238,6 +240,7 @@ public:
     void clear() { rest_ = 0; }
 
 private:
+    static constexpr int most_waiting = 32767;
     int rest_ = 0;
 };
 

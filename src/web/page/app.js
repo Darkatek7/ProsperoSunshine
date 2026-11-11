@@ -46,17 +46,30 @@ function el(tag, props = {}, ...children) {
   return node;
 }
 
+// What a screen reader says without the focus moving: two regions that are always in the page (a box that only appears is not
+// read). An error interrupts, the rest waits its turn. The same text twice in a row is said twice: the region is emptied first.
+function announce(text, urgent = false) {
+  const region = $(urgent ? 'announce-alert' : 'announce');
+  region.textContent = '';
+  setTimeout(() => { region.textContent = text; }, 50);
+}
+
+const reducedMotion = () => window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
 let noticeTimer = null;
-// Shown at the top of the window, wherever the page is scrolled to; a tap closes it.
+// Shown at the top of the window, wherever the page is scrolled to; the Close button (or the time) takes it away. An error says
+// "Error:", so that its colour is not the only sign.
 function notice(text, bad = false, sticky = false) {
   const box = $('notice');
-  box.textContent = text;
+  const shown = bad ? `Error: ${text}` : text;
+  $('notice-text').textContent = shown;
   box.classList.toggle('bad', bad);
   box.hidden = false;
+  announce(shown, bad);
   clearTimeout(noticeTimer);
   if (!sticky) noticeTimer = setTimeout(() => { box.hidden = true; }, bad ? 8000 : 5000);
 }
-$('notice').addEventListener('click', () => { $('notice').hidden = true; });
+$('notice-close').addEventListener('click', () => { $('notice').hidden = true; });
 
 function failed(error) {
   if (error instanceof HttpError && error.status === 401) return;
@@ -105,7 +118,9 @@ $('logout').addEventListener('click', async () => {
 function selectTab(name) {
   currentTab = name;
   for (const button of document.querySelectorAll('.tabs button')) {
-    button.setAttribute('aria-selected', String(button.dataset.tab === name));
+    const selected = button.dataset.tab === name;
+    button.setAttribute('aria-selected', String(selected));
+    button.tabIndex = selected ? 0 : -1;  // one stop in the tab order; the arrow keys move between the tabs
   }
   for (const section of document.querySelectorAll('.tab')) section.hidden = section.id !== `tab-${name}`;
   if (name !== 'overview') $('risk').hidden = true;  // the risky setup notice is Overview's; Devices says it per device
@@ -116,8 +131,19 @@ function selectTab(name) {
   else if (name === 'logs') loadLog();
 }
 
-for (const button of document.querySelectorAll('.tabs button')) {
+const tabButtons = [...document.querySelectorAll('.tabs button')];
+for (const button of tabButtons) {
   button.addEventListener('click', () => selectTab(button.dataset.tab));
+  button.addEventListener('keydown', (event) => {
+    const keys = { ArrowRight: 1, ArrowLeft: -1, Home: 'first', End: 'last' };
+    if (!(event.key in keys)) return;
+    event.preventDefault();
+    const at = tabButtons.indexOf(button), step = keys[event.key];
+    const next = step === 'first' ? tabButtons[0] : step === 'last' ? tabButtons.at(-1)
+      : tabButtons[(at + step + tabButtons.length) % tabButtons.length];
+    selectTab(next.dataset.tab);
+    next.focus();
+  });
 }
 
 function startPolling() {
@@ -243,11 +269,26 @@ function renderStatus(host, status, upnp) {
   ];
   const address = publicAddress(upnp);
   if (address) facts.push(['Internet address', addressWithCopy(address)]);
+  // The development switch control_lan: the control socket, which has no login, answers the whole network.
+  if (status.lan === '1') {
+    facts.unshift(['Control socket', el('span', { class: 'warn-text',
+      text: 'open to the LAN (control_lan): anyone in your network can pair devices, change this page\'s login and stop '
+        + 'the host. Delete the file unless you develop on a network you trust.' })]);
+  }
   $('status').replaceChildren(...facts.flatMap(([key, value]) => [el('dt', { text: key }), el('dd', {}, value)]));
 }
 
+// A device that starts waiting for a PIN is said once, wherever the visitor is on the page.
+const announcedPairings = new Set();
+
 function renderPairings(pairings) {
   const list = $('pairings');
+  for (const p of pairings) {
+    if (!announcedPairings.has(p.id)) {
+      announcedPairings.add(p.id);
+      announce(`${p.name || 'A device'} is waiting for a PIN.`);
+    }
+  }
   if (!pairings.length) {
     list.replaceChildren(el('li', { class: 'empty', text: 'No device is waiting for a PIN.' }));
     return;
@@ -257,7 +298,7 @@ function renderPairings(pairings) {
       el('div', { class: 'title', text: p.name || 'Moonlight' }),
       el('div', { class: 'sub', text: p.address || '' })),
     el('span', { class: 'badge', text: 'waiting for PIN' }),
-    el('button', { class: 'danger', text: 'Deny', onclick: () => denyPairing(p) }))));
+    el('button', { class: 'danger', text: 'Deny', 'aria-label': `Deny: ${p.name || 'Moonlight'}`, onclick: () => denyPairing(p) }))));
   // With several waiting, the PIN goes to the one picked here.
   if (pairings.length > 1) {
     $('pin-form').dataset.ids = JSON.stringify(pairings.map((p) => p.id));
@@ -266,26 +307,70 @@ function renderPairings(pairings) {
   }
 }
 
+// Streams whose numbers are open, and which had a health line at the last poll, kept while the list refreshes.
+const healthOpen = new Set();
+const healthSeen = new Map();
+
+// The host decides when a stream is in trouble (src/web/stream_health.hpp, over the last readings of its polls) and sends the
+// plain line and the numbers behind it. Here it is one line, with the numbers a button away: "Trouble" or "Note" starts it, so
+// the border's colour is not the only sign.
+function healthBox(s, key) {
+  const h = s.health;
+  const numbers = el('p', { class: 'numbers', id: `health-${key.replace(/[^A-Za-z0-9_-]/g, '-')}`, text: h.details });  // an id has no spaces
+  numbers.hidden = !healthOpen.has(key);
+  const toggle = el('button', { type: 'button', class: 'ghost', text: numbers.hidden ? 'Numbers' : 'Hide numbers',
+    'aria-expanded': String(!numbers.hidden), 'aria-controls': numbers.id });
+  toggle.addEventListener('click', () => {
+    numbers.hidden = !numbers.hidden;
+    toggle.textContent = numbers.hidden ? 'Numbers' : 'Hide numbers';
+    toggle.setAttribute('aria-expanded', String(!numbers.hidden));
+    if (numbers.hidden) healthOpen.delete(key); else healthOpen.add(key);
+  });
+  return el('div', { class: `health ${h.lossy ? 'bad' : 'warn'}` },
+    el('div', { class: 'health-line' },
+      el('span', {}, el('strong', { text: h.lossy ? 'Trouble:' : 'Note:' }), h.line),
+      h.details ? toggle : null),
+    h.details ? numbers : null);
+}
+
+function streamKey(s) {
+  return s.uuid && s.uuid !== '-' ? s.uuid : `address ${s.address}`;
+}
+
 function renderStreams(streams) {
   const list = $('streams');
+  // A new problem is said once, not at every poll.
+  const seen = new Map();
+  for (const s of streams) {
+    const key = streamKey(s);
+    seen.set(key, !!s.health);
+    if (s.health && !healthSeen.get(key)) announce(`${s.name || s.address}: ${s.health.line}`);
+  }
+  healthSeen.clear();
+  for (const [key, value] of seen) healthSeen.set(key, value);
   if (!streams.length) {
     list.replaceChildren(el('li', { class: 'empty', text: 'Nothing is streaming.' }));
     return;
   }
   list.replaceChildren(...streams.map((s) => {
+    // "-" is the host's word for a client that is no paired device (it has no page in Devices, and can't be ended from here).
+    const uuid = s.uuid && s.uuid !== '-' ? s.uuid : '';
+    const who = s.name || s.address;
     const parts = [s.address, s.codec, s.hdr === '1' ? 'HDR' : null, s.mode, s.kbps !== '-' ? `${s.kbps} kbps` : null,
       sending(s), `${s.pads} pad${s.pads === '1' ? '' : 's'}`, duration(s.secs)].filter(Boolean);
     // A paired device's name leads to it in Devices, where its profiles are, without having to recall what it was named.
-    const title = s.uuid
-      ? el('button', { type: 'button', class: 'title link', text: s.name || s.address, title: 'Show this device in Devices',
-        onclick: () => showDevice(s.uuid) })
-      : el('div', { class: 'title', text: s.name || s.address });
+    const title = uuid
+      ? el('button', { type: 'button', class: 'title link', text: who, title: 'Show this device in Devices',
+        onclick: () => showDevice(uuid) })
+      : el('div', { class: 'title', text: who });
     return el('li', {},
       el('div', { class: 'grow' },
         title,
         el('div', { class: 'sub' }, ...parts.flatMap((part, i) => (i ? [' · ', part] : [part])), latency(s.rtt_ms))),
       el('span', { class: 'badge live', text: s.role === 'joined' ? 'joined' : 'live' }),
-      s.uuid ? el('button', { class: 'danger', text: 'End stream', onclick: () => endStream(s) }) : null);
+      uuid ? el('button', { class: 'danger', text: 'End stream', 'aria-label': `End stream: ${who}`,
+        onclick: () => endStream({ ...s, uuid }) }) : null,
+      s.health ? healthBox(s, streamKey(s)) : null);
   }));
 }
 
@@ -294,10 +379,11 @@ function latency(rtt) {
   const ms = Number(rtt);
   if (!rtt || rtt === '-' || !Number.isFinite(ms)) return null;
   const rating = ms < 40 ? 'good' : ms <= 80 ? 'fair' : 'poor';
-  return el('span', { class: `latency ${rating}`, title: 'Round trip to the device', text: ` · ${ms} ms` });
+  // Above 80 ms it says so in words: the colour alone is not a sign for everyone.
+  return el('span', { class: `latency ${rating}`, title: 'Round trip to the device', text: ` · ${ms} ms${rating === 'poor' ? ' (high)' : ''}` });
 }
 
-// What goes out against what the stream asked for: from 85 % good, from 60 % fair, below that poor. No colour in the first
+// What goes out against what the stream asked for: from 85 % good, from 60 % fair, below that poor, above 150 % no colour. No colour in the first
 // seconds, while the rate is still settling, or without both values.
 function sending(s) {
   if (!s.sent_kbps || s.sent_kbps === '-') return null;
@@ -305,8 +391,10 @@ function sending(s) {
   const text = `sending ${s.sent_kbps} kbps`;
   if (!Number.isFinite(sent) || !(asked > 0) || s.role === 'starting' || !(Number(s.secs) >= 10)) return text;
   const share = sent / asked;
-  const rating = share >= 0.85 ? 'good' : share >= 0.6 ? 'fair' : 'poor';
-  return el('span', { class: `rate ${rating}`, text,
+  // Far above what was asked is not "good": no colour, and the stream's health line (from the host) says when it is trouble.
+  // On firmware where the encoder keeps its own rate it is normal.
+  const rating = share > 1.5 ? 'plain' : share >= 0.85 ? 'good' : share >= 0.6 ? 'fair' : 'poor';
+  return el('span', { class: `rate ${rating}`, text: rating === 'poor' ? `${text} (low)` : text,
     title: `${Math.round(share * 100)} % of the ${asked} kbps asked for. A still picture needs less, so a low share there is no fault.` });
 }
 
@@ -328,7 +416,7 @@ function showDevice(uuid) {
   const item = [...$('devices').children].find((li) => li.dataset.uuid === uuid);
   if (!item) return;
   item.classList.add('flash');
-  item.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  item.scrollIntoView({ block: 'center', behavior: reducedMotion() ? 'auto' : 'smooth' });
   setTimeout(() => item.classList.remove('flash'), 2500);
 }
 
@@ -387,11 +475,11 @@ function renderDevices(devices, streams = [], trusted = []) {
       why ? explainedBadge(d, profiles, why)
         : profiles.badge ? el('span', { class: `badge ${profiles.badgeClass}`, text: profiles.badge }) : null,
       d.streaming === '1' ? el('span', { class: 'badge live', text: 'streaming' }) : null,
-      d.streaming === '1' ? el('button', { class: 'danger', text: 'End stream',
+      d.streaming === '1' ? el('button', { class: 'danger', text: 'End stream', 'aria-label': `End stream: ${d.name || d.uuid}`,
         onclick: () => endStream(stream || { uuid: d.uuid, name: d.name }) }) : null,
-      el('button', { text: 'Profiles', onclick: () => editProfiles(d) }),
-      el('button', { text: 'Rename', onclick: () => rename(d) }),
-      el('button', { class: 'danger', text: 'Unpair', onclick: () => unpair(d) }),
+      el('button', { text: 'Profiles', 'aria-label': `Profiles: ${d.name || d.uuid}`, onclick: () => editProfiles(d) }),
+      el('button', { text: 'Rename', 'aria-label': `Rename: ${d.name || d.uuid}`, onclick: () => rename(d) }),
+      el('button', { class: 'danger', text: 'Unpair', 'aria-label': `Unpair: ${d.name || d.uuid}`, onclick: () => unpair(d) }),
       why);
   }));
 }
@@ -737,19 +825,39 @@ $('pin-form').addEventListener('submit', async (event) => {
   } catch (e) { failed(e); }
 });
 
-// Settings.
+// Settings. The host sends the groups in the app's order with its captions, and each option names its group; nothing of that
+// is written down here.
 let settings = [];
 async function loadSettings() {
   try {
-    settings = (await api('/api/settings')).options;
-    $('settings').replaceChildren(...settings.map(settingRow));
+    const data = await api('/api/settings');
+    settings = data.options;
+    $('settings').replaceChildren(...settingGroups(data.groups || [], settings));
   } catch (e) { failed(e); }
+}
+
+function settingGroups(groups, options) {
+  const known = new Set(groups.map((g) => g.id));
+  const all = options.some((o) => !known.has(o.group)) ? [...groups, { id: 'other', caption: 'OTHER', note: '' }] : groups;
+  return all.map((group) => {
+    const members = options.filter((o) => (group.id === 'other' ? !known.has(o.group) : o.group === group.id));
+    if (!members.length) return null;
+    const heading = el('h3', { class: 'group', id: `group-${group.id}`, text: group.caption });
+    return el('section', { class: 'group-block', 'aria-labelledby': heading.id },
+      heading,
+      group.note ? el('p', { class: 'muted group-note', text: group.note }) : null,
+      el('div', { class: 'group-body' }, ...members.map(settingRow)));
+  }).filter(Boolean);
 }
 
 function settingRow(option) {
   const id = `setting-${option.key}`;
+  const helpId = `help-${option.key}`;
   let control;
-  if (option.kind === 'toggle') {
+  if (option.app_only) {
+    // An Experimental firmware switch: its state as the app words it, changed in the app (the host refuses it here).
+    control = el('span', { class: 'state', id }, el('span', { class: 'sr-only', text: `${option.label}: ` }), option.state);
+  } else if (option.kind === 'toggle') {
     control = el('input', { id, type: 'checkbox' });
     control.checked = option.value === '1';
   } else if (option.kind === 'choice') {
@@ -769,16 +877,19 @@ function settingRow(option) {
     control = el('input', { id, maxlength: '63', placeholder: `Default: ${option.default}` });
     control.value = option.value ?? '';
   }
-  return el('div', { class: 'setting' },
-    el('label', { for: id, class: 'title', text: option.label }),
-    el('div', { class: 'help', text: option.help }),
+  if (!option.app_only) control.setAttribute('aria-describedby', helpId);
+  return el('div', { class: `setting${option.locked ? ' locked' : ''}` },
+    option.app_only ? el('div', { class: 'title', text: option.label }) : el('label', { for: id, class: 'title', text: option.label }),
+    el('div', { class: 'help', id: helpId, text: option.help }),
     el('div', { class: 'control' }, control,
-      option.kind === 'toggle' ? el('span', { class: 'default', text: `Default: ${option.default}` }) : null));
+      option.kind === 'toggle' && !option.app_only ? el('span', { class: 'default', text: `Default: ${option.default}` }) : null,
+      option.app_only && !option.locked ? el('span', { class: 'app-note', text: 'Changed in the app on the console.' }) : null));
 }
 
 function settingValues() {
   const values = {};
   for (const option of settings) {
+    if (option.app_only) continue;  // shown, not changed here
     const control = $(`setting-${option.key}`);
     if (option.kind === 'toggle') values[option.key] = control.checked ? '1' : null;
     else values[option.key] = control.value.trim() === '' ? null : control.value.trim();
@@ -799,8 +910,12 @@ async function saveSettings(restartAfter) {
 }
 
 // The banner stays while sunshine.conf differs from what the running host read at its start.
+let wasPending = null;
 function showPending(pending) {
   $('pending').hidden = !pending;
+  // Said when it appears after the page was up, not when the page loads with it.
+  if (pending && wasPending === false) announce('Saved settings are not applied yet: the host reads them when it starts.');
+  wasPending = !!pending;
 }
 $('pending-restart').addEventListener('click', () => restartHost(false));
 
@@ -871,6 +986,7 @@ function renderApps(apps) {
         el('div', { class: 'sub', text: app.name ? app.id : `${app.id}, not installed any more` })),
       hidden ? el('span', { class: 'badge risky', text: 'hidden' }) : null,
       el('button', { type: 'button', class: hidden ? '' : 'primary', text: hidden ? 'Show to all' : 'Hide',
+        'aria-label': `${hidden ? 'Show to all' : 'Hide'}: ${app.name || app.id}`,
         title: hidden ? 'Every device sees it again' : 'Only trusted devices see it',
         onclick: () => setAppHidden(app, !hidden) }));
   }));
@@ -892,22 +1008,74 @@ async function setAppHidden(app, hidden) {
   } catch (e) { failed(e); }
 }
 
-// Logs.
+// Logs. The view is the file as it is; the filter changes only what is shown here, never what a download holds.
+let logText = '';
+const levelRank = { verbose: 0, debug: 1, info: 2, warning: 3, error: 4, fatal: 5 };
+// Sunshine's line: "[2026-11-10 18:01:16.309]: Debug: text". host_diag.log has no levels.
+const levelPattern = /^\[[^\]]*\]: (Verbose|Debug|Info|Warning|Error|Fatal): /;
+
+// The lines of `text` to show: those containing `needle` (any case), and where the file has levels those at `minLevel` or above.
+// A line without a level (the rest of a dump) belongs to the entry before it and follows its level. { shown, total, leveled }.
+function filterLog(text, needle, minLevel) {
+  const lines = text.split('\n');
+  if (lines.length && lines[lines.length - 1] === '') lines.pop();
+  const wanted = needle.trim().toLowerCase();
+  const min = minLevel ? levelRank[minLevel] : -1;
+  let rank = 99;  // lines before the first level are kept
+  let leveled = false;
+  const shown = [];
+  for (const line of lines) {
+    const found = levelPattern.exec(line);
+    if (found) {
+      rank = levelRank[found[1].toLowerCase()];
+      leveled = true;
+    }
+    if (rank < min) continue;
+    if (wanted && !line.toLowerCase().includes(wanted)) continue;
+    shown.push(line);
+  }
+  return { shown, total: lines.length, leveled };
+}
+
+function renderLog() {
+  const box = $('log');
+  const filter = $('log-filter').value;
+  const { shown, total, leveled } = filterLog(logText, filter, $('log-level').value);
+  $('log-level').hidden = !leveled;
+  if (!leveled) $('log-level').value = '';
+  const filtering = filter.trim() !== '' || $('log-level').value !== '';
+  box.textContent = !logText ? '(empty)' : shown.length ? shown.join('\n') : '(no line matches)';
+  $('log-count').textContent = !logText ? '' : filtering ? `${shown.length} of ${total} lines shown` : `${total} lines`;
+  box.scrollTop = box.scrollHeight;
+}
+
 async function loadLog() {
   const file = $('log-file').value;
-  const path = file === 'report' ? '/api/diagnostics' : `/api/logs?file=${file}`;
+  const report = file === 'report';
+  const path = report ? '/api/diagnostics' : `/api/logs?file=${file}`;
+  // The report is masked already. A log is offered masked first (the one to post) and raw second (what the host wrote).
+  const name = { report: 'diagnostics.txt', diag: 'host_diag', sunshine: 'sunshine' }[file];
   $('log-download').href = path;
-  $('log-download').download = { report: 'diagnostics.txt', diag: 'host_diag.log' }[file] || 'sunshine.log';
-  $('report-hint').hidden = file !== 'report';
+  $('log-download').download = report ? name : `${name}.log`;
+  $('log-download').textContent = report ? 'Download' : 'Download raw';
+  $('log-download-masked').href = `${path}&masked=1`;
+  $('log-download-masked').download = `${name}.masked.log`;
+  $('log-download-masked').hidden = report;
+  $('log-hint').hidden = report;
+  $('report-hint').hidden = !report;
   try {
-    const text = await api(path);
-    const box = $('log');
-    box.textContent = text || '(empty)';
-    box.scrollTop = box.scrollHeight;
+    logText = await api(path);
+    renderLog();
   } catch (e) { failed(e); }
 }
 $('log-file').addEventListener('change', loadLog);
 $('log-refresh').addEventListener('click', loadLog);
+let filterTimer = null;
+$('log-filter').addEventListener('input', () => {
+  clearTimeout(filterTimer);
+  filterTimer = setTimeout(renderLog, 200);
+});
+$('log-level').addEventListener('change', renderLog);
 
 document.addEventListener('visibilitychange', () => { if (!document.hidden && pollTimer) refresh(); });
 

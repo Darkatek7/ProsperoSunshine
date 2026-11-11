@@ -93,7 +93,85 @@ Issue 36“) und ein Debug-Build in jedem Release („Debug-Build (PR 29) zusamm
 
 ## Neuere Nachweise
 
-### Profil nach 45 s zurück, Issue 52 (2026-11-10, 13.00, Testclient, nicht veröffentlicht)
+### Stand von `work/integration` auf der Konsole (2026-11-11, 13.00, lokal, nicht veröffentlicht)
+
+Gemessen von einem Linux-Rechner im LAN mit dem Testclient (`run_smoke.sh`, `loss_matrix.sh` im SDK-Container, 30 s je
+Lauf, Mario-64-Demo vorne), in sechs Runden mit den Builds 7694c0c7, f497e759 und 8e3611c7; Vergleichs-Hosts (0.6.0 und
+Varianten) liefen aus dem Speicher über den ELF-Loader, ohne die installierten Dateien zu ändern.
+
+**Issue 37, Stream über das Internet**
+
+- Der Fall aus dem Log des Melders, nachgebaut: 3,4 Mbit/s bei 30 fps, 1024-Byte-Pakete, davor ein Engpass mit 20 Mbit/s
+  und 39 Paketen Puffer (`buffer 0 3400 30`). 0.6.0: 0 Frames, 126 IDR-Anfragen, 11,6 Mbit/s gesendet. 7694c0c7: 897
+  Frames, 0 fehlend, 1 Anfrage, 2,7 Mbit/s. Mit f497e759 auch bei halb so schnellem Abfluss (`BUFFER_KBIT=3x`) alle
+  Frames und 1 Anfrage; die Demo sendete dabei nur etwa 1 Mbit/s, das ist ein leichterer Test.
+- LAN-Zeilen (`PACKET_SIZE=1392`, 10/20/50 Mbit/s, 0 und 1 % Verlust): wie 0.6.0, 0 fehlend, längste Lücke 23 bis 38 ms.
+- 10 % Verlust in Bursts von 8 Paketen (`KINDS=burst LOSSES=10`, 3,4 Mbit/s, 30 fps), längste Lücke je Lauf, Median aus
+  sechs Läufen, die Hosts reihum:
+
+  | Host | Median | Spanne |
+  |---|---|---|
+  | 0.6.0 | 619 ms | 567 bis 699 |
+  | f497e759 (Hold-off bis 500 ms, fünf Stufen) | 1025 ms | 636 bis 1770 |
+  | ohne Hold-off | 561 und 558 ms (zwei Runden) | 401 bis 793 |
+  | ohne Hold-off, `blind_hold` 0 | 700 ms | bis 863 |
+  | eine Hold-off-Stufe ohne Verdopplung | 1113 ms | 868 bis 1186 |
+
+  Mit Hold-off bis 2 s (7694c0c7) stand das Bild in einzelnen Läufen bis 4,5 s. Der Hold-off ist deshalb seit 8e3611c
+  entfernt; das Pacing kostet nicht messbar (f497e759 mit 1392-Byte-Paketen, also ohne Pacing: 800 ms).
+- Engpass unter der Bitrate (2500 kbit/s für 3400): kein Host bringt ein Bild durch. Gesendet: 0.6.0 5,8 bis 6,4 Mbit/s,
+  ohne Hold-off 4,8 bis 4,9, mit Hold-off 3,6 bis 4,1.
+- Ton: 20 Sitzungen zu 8 s und 15 schwierige Fälle (direkt nacheinander, zwei Geräte mit Übergabe, abgebrochener Client)
+  alle mit Ton; die Übergabe kostet 5 Pakete. Der vom Melder beschriebene fehlende Ton ist im LAN nicht nachgestellt.
+
+**Zwei Geräte, Last, Logs**
+
+- Zwei Geräte auf einem Kanal: 10 + 10 Zyklen (zweites Gerät endet zuerst, Halter endet zuerst) ohne Absturz. Ein Gerät
+  mit 10 % Verlust kostet das saubere keine Frames (0 fehlend, längste Lücke 55 bis 59 ms).
+- `Host load:` (Debug-Variante, alle 5 s, ganzer Prozess; den Thread-sysctl `kern.proc.pid_td` lehnt 13.00 ab): Leerlauf
+  0,2 % CPU und etwa 125 Wakeups/s; ein Stream 1080p60 H.264 oder HEVC 6,1 bis 6,3 % und etwa 2430 Wakeups/s; 720p30
+  5,0 %; RSS 19 bis 30 MB.
+- Maskierung im Debug-Log: zwei Kennungen (`<id-1>`, `<id-2>`) nach etwa 40 Streams von zwei Geräten; vorher war die
+  Tabelle nach 25 Minuten bei `<id-254>` voll.
+- Abgeschnittene chunked-Anfrage und Anfrage mit Body an 47989, 47984 und 47990: ohne Antwort geschlossen, der Host
+  antwortet weiter. Gerätename über 1 MB: Verbindung geschlossen; 300 Byte werden 128 Zeichen; dritte offene Kopplung
+  von einer Adresse: 503. Die chunked-Anfrage mit Chunk-Größe `ffffffffffffffff` per TLS an 47990 beendet die Webseite
+  nicht (200 direkt danach); ob der alte Build über TLS daran gescheitert wäre, ist nicht gemessen.
+- Moonlight-qt 6.2.0 (headless) 30 s H.264 1080p60: 59,98 fps empfangen und dekodiert; mit `lan_encryption_mode = 2`
+  läuft der Stream.
+- App-Einstellungsseite (normal): Layout, Steuerkreuz-Wege, Schalter, Fehlerkorrektur-Blatt (0 bis 80, schreibt
+  `fec_percentage`) wie vorgesehen.
+
+**PS-Taste und Pull Requests 54 und 55 (Test-Host aus `main` + beiden PRs, Debug)**
+
+- PS halten auf 13.00 (virtueller Controller, je zwei Durchgänge): 300 und 350 ms öffnen das Kontrollzentrum, 400 ms tut
+  nichts, ab 450 ms geht es zum Home-Bildschirm. Das sind die Schwellen, die der Autor von PR 55 auf 10.20 gemessen hat.
+- PR 55: Windows+Esc drückt PS so lange wie Esc (51 ms, Kontrollzentrum), Windows+Shift+Esc hält PS 649 ms
+  (Home-Bildschirm); Esc, Windows und Shift+Esc allein bleiben Tasten. Der Hinweis für Moonlight auf iPhone und iPad ist
+  nicht geprüft (der Testclient sendet dessen User-Agent nicht).
+- PR 54 (Gerät mit einem Profil, niemand angemeldet): alle Zeilen des Autors in gleicher Reihenfolge, `Started` nach
+  0,57 s ohne `8094000A`, X 1,02 s nach dem Pad; ohne Quit wartet das Profil auf sein Spiel, nach Quit Abmeldung 45,2 s
+  nach dem Pad. `ps_title_open` ist auf 13.00 erlaubt (`kern.proc.proc`, 0,74 bis 1,00 ms je Aufruf bei 88 Prozessen).
+  Die Begrüßung erscheint auch beim Wiederverbinden über dem laufenden Spiel.
+- Aufnahme-Start hinter dem Willkommensbildschirm: 2 von 3 solchen Starts endeten mit `PS5 capture failed to start`
+  (die Ausgabe hat 1,1 bis 1,2 s keinen Modus, das Öffnen gab nach 1 s auf). Mit a8b7950 auf demselben Test-Host: 6 von 6
+  Starts liefen, längstes Öffnen 1,37 s, erstes Bild nach 1,3 bis 1,5 s.
+
+**Der letzte Build 8e3611c7 (ohne Hold-off, mit dem Aufnahme-Fix), beide Varianten**
+
+- Smoke-Test H.264 und HEVC 1080p60 je 30 s: 0 fehlende Frames in Debug (aus dem Speicher) und normal (installiert).
+- 10 % Verlust in Bursts, längste Lücke je Lauf: Debug Median 470 ms (4 Läufe, 406 bis 531), normal Median 470 ms
+  (6 Läufe, 377 bis 642). Das liegt auf dem Niveau des Hosts ohne Hold-off und unter 0.6.0 (619 ms).
+- Issue 37 bleibt behoben: `buffer 0 3400 30` 896 Frames, 0 fehlend, 1 Anfrage, `buffer 0 20000 60` 1795 / 0 / 1, auch
+  mit `BUFFER_KBIT=3x`; der Host sendete dabei 2,7 bis 11,2 Mbit/s. LAN-Zeile: 0 fehlend, längste Lücke 21 bis 22 ms.
+- Zwei Starts der Demo über `/launch` vom Home-Bildschirm liefen; beim zweiten ging die Ausgabe von 0x13c über 0 auf
+  0x144, und die Aufnahme wartete darauf.
+- Die normale Variante ist installiert (Host-Datei, Autoload-Slot, App), `host version=0.6.0 commit=8e3611c7`.
+
+Nicht gemessen: der echte Pfad des Melders von Issue 37 (ein Test-Build für ihn steht aus), der Hinweis von PR 55 für
+iPhone und iPad, PR 54 mit zwei angemeldeten Profilen, die Webseite hinter ihrem Login, UPnP.
+
+### Profil nach 45 s zurück, Issue 52 (2026-11-10, 13.00 und 10.20, in `main`, nicht veröffentlicht)
 
 Testgerät mit einem Profil (ein zweites Konsolenprofil, vorher abgemeldet), `--no-script`, Home-Bildschirm:
 
@@ -106,6 +184,17 @@ Testgerät mit einem Profil (ein zweites Konsolenprofil, vorher abgemeldet), `--
 - Ein kurzer PS-Druck (Kontrollzentrum) brachte das Profil auf 13.00 nicht nach vorne; es wurde nach 45 s abgemeldet.
 
 Unit-Tests (`profile_rules_test`) und Host-Build ohne Warnung. Danach wieder 0.6.0 über `host_restart.elf`.
+
+Auf 10.20 vom Melder bestätigt (PS5 Pro, Test-Build `test-0.6.0-i52-1`, Host `f463b8cb`, Gerät mit einem Profil, anfangs
+niemand angemeldet):
+
+- 55 s nach dem Streamende neu verbunden: nach 45 s „stays signed in, it is in front on the console“, das Pad saß sofort
+  wieder im Profil („bound after 0 ms“).
+- Der echte Fall: GTA III auf dem Profil gestartet, Stream ohne Quit beendet, 3 Minuten später neu verbunden. Das Spiel war
+  noch offen und das Pad saß sofort im Profil.
+- Nach Quit blieb das Profil wieder angemeldet. Im Konsolenmenü abgemeldet: „a profile the host kept signed in was signed
+  out on the console“.
+- Die Zeile „signed in on the console by someone else“ kam nirgends vor.
 
 ### Release 0.6.0 auf der Konsole (2026-11-09, 13.00)
 

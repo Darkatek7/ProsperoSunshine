@@ -33,6 +33,8 @@ proc_t proc;
 namespace {
 constexpr int screen_app_id = 1;
 
+bool trusted_with_apps(const std::string &cert);
+
 std::filesystem::path cover_path() { return platf::appdata() / "assets" / "ps5_screen.png"; }
 
 // Clients fetch box art for every app; an empty answer makes some (Moonlight Web) drop the list.
@@ -80,10 +82,11 @@ constexpr int launch_mount_busy = static_cast<int>(0x80940033);
 // "!isBigApp() || usercount > 0" in SceLncService's log: nobody is signed in (10.20).
 constexpr int launch_no_user = static_cast<int>(0x8094000A);
 
-// For close_game_on_quit: the game the last session started or found in front, with its app for /resume, and the game
-// Terminate App closed last. The HTTPS thread, the stream's end (patch 0006) and its timer (patch 0007) reach these.
+// For close_game_on_quit: the game the last session started or found in front, with its app for /resume, the certificate of
+// the device whose launch did so, and the game Terminate App closed last. The HTTPS thread, the stream's end (patch 0006) and
+// its timer (patch 0007) reach these.
 std::mutex quit_mutex;
-std::string session_game, closed_game;
+std::string session_game, session_game_cert, closed_game;
 int session_app_id = 0;
 ctx_t session_app;
 std::chrono::steady_clock::time_point closed_at;
@@ -245,6 +248,7 @@ int proc_t::execute(int app_id, std::shared_ptr<rtsp_stream::launch_session_t> l
     }
     std::lock_guard lock(quit_mutex);
     session_game = in_front ? _app.cmd : "";
+    session_game_cert = in_front && launch_session ? launch_session->client_cert : "";
     session_app_id = in_front ? app_id : 0;
     if (in_front) session_app = _app;
     return 0;
@@ -268,6 +272,7 @@ int game_left_running() {
     char running[16] = {};
     if (ps_title_running(running) <= 0 || session_game != running) {
         session_game.clear();
+        session_game_cert.clear();
         session_app_id = 0;
         return 0;
     }
@@ -288,22 +293,39 @@ void proc_t::resume_left_game() {
 // Moonlight's Terminate App or Quit (/cancel, patch 0010), never a session's end or the host's shutdown. With
 // close_game_on_quit, closes the game the session started or found in front, if it is still in front, as "Close Game" on the
 // home screen does: its unsaved progress is lost. Moonlight asks first when quitting from its app list, but not for
-// Ctrl+Alt+Shift+E, so turning the setting on is the consent.
-void close_game_on_quit() {
+// Ctrl+Alt+Shift+E, so turning the setting on is the consent. Only the device whose launch started the game, or one trusted
+// with every app, closes it (quit_policy.hpp): client_cert is the certificate of the device that sent the /cancel (patch 0028).
+void close_game_on_quit(const std::string &client_cert) {
     if (!config::ps5.close_game_on_quit) return;
     using std::chrono::duration_cast, std::chrono::milliseconds;
-    std::string game;
+    std::string game, starter;
     {
         std::lock_guard lock(quit_mutex);
-        game.swap(session_game);
-        session_app_id = 0;
+        game = session_game;
+        starter = session_game_cert;
     }
+    const bool allowed = prospero::may_close_game(!client_cert.empty() && client_cert == starter,
+                                                  !game.empty() && trusted_with_apps(client_cert));
     char running[16] = {};
     const std::string in_front = ps_title_running(running) > 0 ? running : "";
-    switch (prospero::quit_decision(true, game, in_front)) {
+    const auto decision = prospero::quit_decision(true, game, in_front, allowed);
+    if (decision != prospero::QuitDecision::not_theirs) {
+        // The game is dealt with now, so a later quit doesn't close it. Another device's quit leaves it to the one that
+        // started it.
+        std::lock_guard lock(quit_mutex);
+        if (session_game == game) {
+            session_game.clear();
+            session_game_cert.clear();
+            session_app_id = 0;
+        }
+    }
+    switch (decision) {
     case prospero::QuitDecision::off: return;
     case prospero::QuitDecision::no_game:
         BOOST_LOG(info) << "Terminate App: the session started no game, nothing to close"sv;
+        return;
+    case prospero::QuitDecision::not_theirs:
+        BOOST_LOG(info) << "Not closing "sv << game << ": another device started it, and this one isn't trusted with every app"sv;
         return;
     case prospero::QuitDecision::not_in_front:
         BOOST_LOG(info) << "Not closing "sv << game << ": "sv << (in_front.empty() ? "nothing"s : in_front) << " is in front"sv;

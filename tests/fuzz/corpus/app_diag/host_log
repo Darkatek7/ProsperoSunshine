@@ -1,0 +1,8 @@
+ProsperoSunshine: host version=0.1.7 commit=3b912d6a firmware=0x13000040 known=1
+ProsperoSunshine: experimental switches=hevc set=hevc firmware=0x13000040
+ProsperoSunshine: experimental attempt switches=hevc firmware=0x13000040 trial=hevc codec=hevc bits=8 mode=1920x1080 fps=60 kbit=20000 variant=minimal
+ProsperoSunshine: capture open start codec=1 resource=180
+ProsperoSunshine: capture Start rc=0x80c78000
+ProsperoSunshine: capture open failed step=Start error=-1 rc=0
+ProsperoSunshine: experimental result=failed switches=hevc firmware=0x13000040 trial=hevc codec=hevc bits=8 mode=1920x1080 fps=60 kbit=20000 variant=minimal error=-1 rc=0x80c78000 step=Start
+\;OK 1111 1 1280x720@60 Deck\;

@@ -2,6 +2,7 @@
 #include "input/keyboard_map.hpp"
 #include <cassert>
 #include <chrono>
+#include <climits>
 #include <iostream>
 using namespace prospero;
 
@@ -71,6 +72,15 @@ int main() {
     assert(wheel.add(-30) == 0 && wheel.add(-100) == -1);
     wheel.clear();
     assert(wheel.add(120 * 200) == 127 && wheel.add(0) == 73);
+    // A client that sends the largest distance in every report scrolls at full speed, and what waits stays bounded (the
+    // count would overflow after about 122 000 such reports otherwise).
+    wheel.clear();
+    for (int i = 0; i < 200'000; i++) assert(wheel.add(32767) == 127);
+    int waiting = 0;
+    for (int steps; (steps = wheel.add(0)) != 0;) waiting += steps;
+    assert(waiting == (32767 - 127 * 120) / 120);
+    wheel.clear();
+    assert(wheel.add(INT_MAX) == 127 && wheel.add(INT_MIN) == -127 && wheel.add(INT_MIN) == -127);
 
     // Windows+Esc is PS: on the keyboard pad (ps_chord) and, for a client with a controller, on that controller (PsChord).
     static_assert(ps_chord(0x1B, 0x08) && ps_chord(0x1B, 0x80) && ps_chord(0x1B, 0x8B));

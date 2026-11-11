@@ -8,6 +8,7 @@ verified state with evidence: `STATUS.md` (both German).
 - `src/sunshine/` – PS5 replacements for Sunshine parts (video, audio, input, process, main).
 - `src/platform/ps5/` – Avcap2 capture (`capture.c`), `SharedCapture`, backend glue.
 - `src/capture/`, `src/video/` – portable logic with unit tests in `tests/`.
+- `tests/deps/` – tests built against the patched dependency sources (`scripts/test_deps.sh`, not part of `scripts/test.sh`).
 - `src/payloads/` – standalone payloads that ship: `firmware_probe` and `host_restart` (release archive), `relaunch_helper`
   (embedded into the host).
 - `src/probes/` – probes and spikes, standalone research and test payloads built into `out/` but not shipped.
@@ -28,11 +29,22 @@ Development runs on Linux with Docker, from the repository root. Build the SDK i
 docker run --rm -e PROSPERO_COMMIT=$(git rev-parse --short=8 HEAD) --mount type=bind,source="$PWD",target=/repo prosperosunshine-sdk:v0.45 bash scripts/build.sh   # host + probes -> out/
 docker run --rm -e PROSPERO_COMMIT=$(git rev-parse --short=8 HEAD) -e PROSPERO_DEBUG=1 --mount type=bind,source="$PWD",target=/repo prosperosunshine-sdk:v0.45 bash scripts/build.sh   # the debug flavor -> out/debug/
 docker run --rm --mount type=bind,source="$PWD",target=/repo prosperosunshine-sdk:v0.45 bash scripts/test.sh
+docker run --rm --mount type=bind,source="$PWD",target=/repo prosperosunshine-sdk:v0.45 bash scripts/fuzz.sh [seconds] [target ...]   # libFuzzer, 0 = replay the seeds
+docker run --rm --mount type=bind,source="$PWD",target=/repo prosperosunshine-sdk:v0.45 bash scripts/test_deps.sh   # Simple-Web-Server as patched, as the host configures it
 ```
 
 `PROSPERO_COMMIT` names the commit the host reports; in a git worktree the container can't find it itself. On a machine with
 little RAM, add `--memory=6g --memory-swap=6g` to the build so that a memory spike stops the container, not the machine. On
 Windows, `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 [-Debug]` does the same.
+
+`scripts/fuzz.sh` fuzzes the portable parsers (`tests/fuzz/`, seeds in `tests/fuzz/corpus/<target>/`); CI runs it for 5 s per
+target. A crash leaves its input in `out/fuzz/crash-<target>-*` (reproduce with `out/fuzz/<target> <file>`): fix the bug, add
+a case to that file's unit test and move the input into the seeds. Don't edit the script while it runs.
+
+`scripts/test_deps.sh` (`tests/deps/`) and the fuzz targets `sws_parse` and `sws_server` run against the patched
+Simple-Web-Server and Boost's headers: `scripts/dep_headers.sh` fetches and patches only those (`scripts/deps.sh --sources`,
+nothing is built for the PS5), and a patch that no longer applies fails them. A bug in the library is fixed with a patch
+in `patches/simple-web-server/` and a case in `tests/deps/sws_server_test.cpp`.
 
 The app and its tests (the app bundles `out/prospero_sunshine.elf`, so build the host first). Build its image once with
 `docker build -t prosperosunshine-app:2 -f app/Dockerfile app`; the volume `prosperosunshine-app-cache` needs the ps5-opengl
@@ -125,6 +137,11 @@ Toolchain: PS5 Payload SDK v0.45 in the Docker image `prosperosunshine-sdk:v0.45
   `PROBE` sends `/data/prosperosunshine/firmware_probe.elf` to the ELF loader unless a stream runs (`docs/firmware-probe.md`).
 - Before touching the console, check `http://<console>:47989/serverinfo`: go on only at `SUNSHINE_SERVER_FREE`, someone may
   be streaming. Don't take screenshots during a stream.
+- To try a host without installing it, run it from memory: `QUIT` on the control socket (with `control_lan`), wait until
+  port 47989 is closed (a second host started while one runs logs `host ready` without holding a port), then send the ELF
+  to the loader; `out/host_restart.elf` starts the installed one again. Builds to compare take turns that way, several
+  rounds each: the Mario 64 demo's picture changes over its loop (the encoder sent 1.0 to 2.7 Mbit/s at the same cap), and a
+  single run of `loss_matrix.sh` says little (the longest gap of one build spread from 0.6 to 1.8 s over six runs).
 - Logs: `sunshine.log` (older ones `.1`, `.2`, ...; `min_log_level = debug` in `sunshine.conf` also logs motors, light bar
   and trigger blocks), and `host_diag.log`, which the app's diagnostic report reads. The host reads `sunshine.conf` at
   start; to restart it, use "Restart host" in the app.

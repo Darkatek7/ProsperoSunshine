@@ -8,15 +8,20 @@
 #include "src/rtsp.h"
 #include "src/stream.h"
 #include <netinet/in.h>
+#include <openssl/evp.h>
+#include <rs.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #include <chrono>
 #include <cstring>
 #include <string>
+#include <vector>
 extern "C" {
 #include <ps5/kernel.h>
 #include "platform/ps5/capture.h"
 #include "platform/ps5/diag.h"
+// Not in OpenSSL's public headers; libcrypto defines it: the capability words OPENSSL_cpuid_setup filled in at start.
+extern unsigned int OPENSSL_ia32cap_P[4];
 }
 
 namespace prospero {
@@ -42,6 +47,49 @@ bool udp_free(uint16_t port) {
     const bool free = bind(fd, reinterpret_cast<const sockaddr *>(&addr), sizeof addr) == 0;
     close(fd);
     return free;
+}
+
+double seconds_since(std::chrono::steady_clock::time_point since) {
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() - since).count();
+}
+
+// Whether the fast paths are in use. A 150 kB IDR at 20 % FEC is 107 data and 22 parity shards of 1408 bytes: with AVX2 the
+// Reed-Solomon encode takes a few tenths of a millisecond (mac_mb_s in the thousands), the scalar fallback several ms (under
+// 1000). AES-128-GCM over video-sized packets with one key, as the stream does it: AES-NI and PCLMUL give about 1 to 3 us a
+// packet (gcm_mb_s in the thousands), table code 10 to 30. ia32cap shows what OpenSSL decided (AES-NI is bit 25 of the
+// second word, PCLMULQDQ bit 1, AVX bit 28).
+void perf_check() {
+    constexpr int data = 107, parity = 22, block = 1408, rounds = 200;
+    std::vector<uint8_t> memory(static_cast<size_t>(data + parity) * block, 7);
+    std::vector<uint8_t *> shards(data + parity);
+    for (int i = 0; i < data + parity; i++) shards[i] = memory.data() + static_cast<size_t>(i) * block;
+    if (reed_solomon *rs = reed_solomon_new(data, parity)) {
+        const auto start = std::chrono::steady_clock::now();
+        for (int i = 0; i < rounds; i++) reed_solomon_encode(rs, shards.data(), data + parity, block);
+        const double took = seconds_since(start);
+        reed_solomon_release(rs);
+        ps_diag_log("ProsperoSunshine: perfcheck fec_us_per_idr=%.0f mac_mb_s=%.0f\n", took / rounds * 1e6,
+                    static_cast<double>(data) * parity * block * rounds / took / 1e6);
+    }
+    EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
+    uint8_t key[16] = {1}, iv[12] = {2}, tag[16];
+    std::vector<uint8_t> packet(block, 3);
+    int out = 0;
+    constexpr int packets = 20000;
+    EVP_EncryptInit_ex(ctx, EVP_aes_128_gcm(), nullptr, nullptr, nullptr);
+    EVP_EncryptInit_ex(ctx, nullptr, nullptr, key, iv);
+    const auto start = std::chrono::steady_clock::now();
+    for (int i = 0; i < packets; i++) {
+        iv[0] = static_cast<uint8_t>(i);
+        EVP_EncryptInit_ex(ctx, nullptr, nullptr, nullptr, iv);
+        EVP_EncryptUpdate(ctx, packet.data(), &out, packet.data(), static_cast<int>(packet.size()));
+        EVP_EncryptFinal_ex(ctx, packet.data() + out, &out);
+        EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG, 16, tag);
+    }
+    const double took = seconds_since(start);
+    EVP_CIPHER_CTX_free(ctx);
+    ps_diag_log("ProsperoSunshine: perfcheck gcm_us_per_packet=%.2f gcm_mb_s=%.0f ia32cap=%08x:%08x\n", took / packets * 1e6,
+                packets * static_cast<double>(block) / took / 1e6, OPENSSL_ia32cap_P[0], OPENSSL_ia32cap_P[1]);
 }
 
 }  // namespace
@@ -104,6 +152,8 @@ void self_check() {
                     opens ? "opens" : "failed", step ? step : "", static_cast<unsigned>(raw));
         problems += !opens;
     }
+
+    perf_check();
 
     const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
     ps_diag_log("ProsperoSunshine: selfcheck done ms=%lld problems=%d\n", static_cast<long long>(ms), problems);

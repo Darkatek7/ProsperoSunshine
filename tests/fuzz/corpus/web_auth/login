@@ -1,0 +1,6 @@
+user=admin
+salt=00ff
+iterations=100000
+hash=abcdef0123
+enabled=1
+\;

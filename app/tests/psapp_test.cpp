@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // PC tests for the app's pure parts: sunshine.conf edits, the Payload Manager's autoload list, the
-// diagnostic report and the web page's login.
+// diagnostic report, the web page's login and (settings_layout_test.cpp) the settings page's layout.
 #include "app/psapp/autoload.hpp"
 #include "app/psapp/conf.hpp"
 #include "app/psapp/diag.hpp"
@@ -10,27 +10,11 @@
 #include <cstdio>
 #include <string>
 
-static int failures = 0;
-#define CHECK(cond)                                                                                \
-    do                                                                                             \
-    {                                                                                              \
-        if (!(cond))                                                                               \
-        {                                                                                          \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);                            \
-            ++failures;                                                                            \
-        }                                                                                          \
-    } while (0)
-// CHECK, and the test function stops when it fails: for a pointer the next lines dereference.
-#define REQUIRE(cond)                                                                              \
-    do                                                                                             \
-    {                                                                                              \
-        if (!(cond))                                                                               \
-        {                                                                                          \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);                            \
-            ++failures;                                                                            \
-            return;                                                                                \
-        }                                                                                          \
-    } while (0)
+#include "check.hpp"
+
+// settings_layout_test.cpp
+void settings_layout_tests();
+bool write_settings_svg(const char *path);
 
 using namespace psapp;
 
@@ -98,6 +82,28 @@ static void conf_tests()
     CHECK(!option_value(Config::parse("port = 48000\n"), *upnp));
     CHECK(option_value(Config::parse("upnp = enabled\n"), *upnp) == std::optional<std::string>("1"));
     CHECK(option_value(Config::parse("upnp = disabled\n"), *upnp) == std::optional<std::string>("0"));
+    // pair_over_internet: the host's own key, which Sunshine's config reads (patch 0030); off by default, read the same way.
+    const OptionSpec *pair = find_option("pair_over_internet");
+    REQUIRE(pair != nullptr);
+    CHECK(pair->kind == OptionKind::toggle);
+    CHECK(std::string_view(pair->default_label) == "Off");
+    CHECK(!validate(*pair, "1"));
+    CHECK(!option_value(Config::parse("port = 48000\n"), *pair));
+    CHECK(option_value(Config::parse("pair_over_internet = enabled\n"), *pair) == std::optional<std::string>("1"));
+    CHECK(option_value(Config::parse("pair_over_internet = 0\n"), *pair) == std::optional<std::string>("0"));
+    // fec_percentage: Sunshine's own key, a number up to 80 (above it Sunshine stops making room for it in the bitrate).
+    const OptionSpec *fec = find_option("fec_percentage");
+    REQUIRE(fec != nullptr);
+    CHECK(fec->kind == OptionKind::number);
+    CHECK(fec->fallback == 20 && std::string_view(fec->default_label) == "20 %");
+    CHECK(!validate(*fec, "0"));
+    CHECK(!validate(*fec, "20"));
+    CHECK(!validate(*fec, "80"));
+    CHECK(validate(*fec, "81"));
+    CHECK(validate(*fec, "-1"));
+    CHECK(option_value(Config::parse("fec_percentage = 35\n"), *fec) == std::optional<std::string>("35"));
+    CHECK(std::string_view(fec->unit) == "%");
+    CHECK(std::string_view(find_option("ping_timeout")->unit) == "ms");
     // Other options stay as they are in the file.
     CHECK(option_value(Config::parse("experimental_hevc = on\n"), *find_option("experimental_hevc")) == std::optional<std::string>("on"));
 }
@@ -469,6 +475,65 @@ static void stream_tests()
     CHECK(diag::duration_text(-1) == "0 s");
 }
 
+// What the report hides and how (app/src/psapp/mask.hpp, diag.hpp "Scrubber"): tags that say what was hidden, stay the same for the same
+// value within one report, and match between a device's name and its uuid. The test of every kind of log line is
+// tests/privacy_leak_test.cpp.
+static void scrubber_tests()
+{
+    {
+        diag::Scrubber scrubber;
+        scrubber.add_console("Deck Room");
+        scrubber.add_device("Tom's iPhone", "3FA2c1d0-1111-2222-3333-444455556666");
+        scrubber.add_device("Tom", "9b00aaaa-1111-2222-3333-444455556666");
+        scrubber.add_name("Guest Pad");
+        scrubber.add_name("Guest Pad");
+        scrubber.add_name("PC");
+        CHECK(scrubber.apply("by Tom's iPhone and tom and DECK ROOM") == "by <device-3fa2> and <device-9b00> and <console-name>");
+        CHECK(scrubber.apply("a Guest Pad b Guest Pad") == "a <name-1> b <name-1>");
+        CHECK(scrubber.apply("PC stays") == "PC stays");
+        scrubber.add_console("PS5");
+        CHECK(scrubber.apply("PS5 capture requested") == "PS5 capture requested");
+        // The uuid of a device has the first characters of its name's tag, the other ids are numbered.
+        CHECK(scrubber.apply("uuid 3fa2c1d0-1111-2222-3333-444455556666 uniqueid ABCDEF0123456789 again ABCDEF0123456789") ==
+              "uuid <uuid-3fa2> uniqueid <id-1> again <id-1>");
+        // One address, one tag, in every call; the kind is in the tag.
+        CHECK(scrubber.apply("a 192.168.1.9 b 203.0.113.5") == "a <lan-1> b <public-1>");
+        CHECK(scrubber.apply("c 203.0.113.5 d 192.168.1.9 e 2001:db8::9 f 100.64.0.2") == "c <public-1> d <lan-1> e <public6-1> f <tailscale-1>");
+        CHECK(scrubber.apply("mac 00:11:22:33:44:55") == "mac <mac-1>");
+        CHECK(scrubber.apply("rtsp://ps5.home.example.org:48010") == "rtsp://<host-1>:48010");
+        CHECK(scrubber.apply("127.0.0.1 and 0.0.0.0 stay") == "127.0.0.1 and 0.0.0.0 stay");
+        // Without names (the last pass over the whole report) only what has a shape goes.
+        CHECK(scrubber.apply("Tom 192.168.1.9 PPSA99310", false) == "Tom <lan-1> <title>");
+    }
+    {
+        // Tags a host in the debug build made are not given out again for something else.
+        diag::Scrubber scrubber;
+        CHECK(scrubber.apply("<lan-4> was 192.168.1.9") == "<lan-4> was <lan-5>");
+    }
+    {
+        // A cut in the middle of an address would leave half of it: the scrub comes first, then the cut.
+        diag::Scrubber scrubber;
+        const std::string line = "Info: client from 192.168.1.200 asked for something that makes this line longer than the cut";
+        const std::string cut = scrubber.tail(line, 5, 30);
+        CHECK(cut.find("192") == std::string::npos && cut.find("168") == std::string::npos);
+        CHECK(cut == "Info: client from <lan-1> aske\n");
+        CHECK(scrubber.tail("a\nb\nc\nd\n", 2, 10) == "c\nd\n");
+        // Long lines are cut after the scrub, not before: what the scrub made of an address is not cut in two by the width of 4096
+        // it works with.
+        CHECK(scrubber.tail(std::string(4000, 'x') + " 10.1.2.3\n", 1, 5000).find("<lan-2>") != std::string::npos);
+    }
+    {
+        // A name that is part of another is hidden whole, the longer first.
+        diag::Scrubber scrubber;
+        scrubber.add_name("Tom");
+        scrubber.add_name("Tom's iPhone");
+        CHECK(scrubber.apply("Tom's iPhone and Tom") == "<name-2> and <name-1>");
+        // Lines of dashes and short hex stay.
+        CHECK(scrubber.apply("----------------------------------------") == "----------------------------------------");
+        CHECK(scrubber.apply("commit=8fa42cd5 rc=0xe034") == "commit=8fa42cd5 rc=0xe034");
+    }
+}
+
 static void diag_tests()
 {
     CHECK(diag::firmware_text(0x13000040) == "13.00");
@@ -496,6 +561,13 @@ static void diag_tests()
     // No file yet: only the firmware can speak.
     CHECK(diag::parse_host_log("").capture == diag::Capture::unknown);
     CHECK(diag::notice(0x13000040, {}, false).text.empty());
+    // The control socket's development switch goes in front of the home page's line, as a failure.
+    CHECK(diag::with_control_lan({}, false).text.empty());
+    CHECK(diag::with_control_lan({}, true).bad);
+    CHECK(diag::with_control_lan({}, true).text.find("control_lan") != std::string::npos);
+    CHECK(diag::with_control_lan({"Firmware 13.60 is untested.", false}, true).text.find(" Firmware 13.60 is untested.") !=
+          std::string::npos);
+    CHECK(diag::with_control_lan({"Firmware 13.60 is untested.", false}, false).text == "Firmware 13.60 is untested.");
     diag::Notice note = diag::notice(0x10400000, {}, false);
     CHECK(note.text.find("Firmware 10.40 is untested") == 0);
     CHECK(!note.bad);
@@ -539,15 +611,16 @@ static void diag_tests()
     CHECK(diag::notice(0x13000040, log, false).text.find("went down") != std::string::npos);
 
     // Scrubbing keeps the codes and takes what identifies someone.
-    CHECK(diag::scrub("client 192.168.1.20 and 172.16.0.1:47989", {}) == "client <address> and <address>:47989");
+    CHECK(diag::scrub("client 192.168.1.20 and 172.16.0.1:47989", {}) == "client <lan-1> and <lan-2>:47989");
     CHECK(diag::scrub("OpenVideo rc=0x80c78000 version 1.2.3", {}) == "OpenVideo rc=0x80c78000 version 1.2.3");
-    CHECK(diag::scrub("from Living Room PC", {"Living Room PC"}) == "from <name>");
+    CHECK(diag::scrub("from Living Room PC", {"Living Room PC"}) == "from <name-1>");
     CHECK(diag::scrub("name PC stays", {"PC"}) == "name PC stays");
-    CHECK(diag::scrub("id 0123456789abcdef0123 end", {}) == "id <id> end");
-    CHECK(diag::scrub("uuid 1b4e28ba-2fa1-11d2-883f-0016d3cca427.", {}) == "uuid <id>.");
+    CHECK(diag::scrub("id 0123456789abcdef0123 end", {}) == "id <id-1> end");
+    CHECK(diag::scrub("uuid 1b4e28ba-2fa1-11d2-883f-0016d3cca427.", {}) == "uuid <uuid-1b4e>.");
     CHECK(diag::scrub("firmware=0x13000040 known=1", {}) == "firmware=0x13000040 known=1");
     CHECK(diag::scrub("host version=0.1.7 commit=3b912d6a firmware", {}) == "host version=0.1.7 commit=3b912d6a firmware");
     CHECK(diag::scrub("capture RUNNING outcome=timeout active=175,177", {}) == "capture RUNNING outcome=timeout active=175,177");
+    scrubber_tests();
     // Moonlight's placeholder name, and the name offered instead.
     CHECK(diag::pairing_label("roth") == "Moonlight");
     CHECK(diag::pairing_label("") == "Moonlight");
@@ -702,12 +775,19 @@ static void web_tests()
     CHECK(!odd.ok && !odd.reason.empty());
 }
 
-int main()
+// With --svg <file>, also writes the settings page's layout as an SVG picture.
+int main(int argc, char **argv)
 {
     conf_tests();
     autoload_tests();
     diag_tests();
     web_tests();
+    settings_layout_tests();
+    if (argc == 3 && std::string(argv[1]) == "--svg" && !write_settings_svg(argv[2]))
+    {
+        std::printf("FAIL: could not write %s\n", argv[2]);
+        ++failures;
+    }
     std::printf("%s\n", failures == 0 ? "psapp tests passed" : "psapp tests FAILED");
     return failures == 0 ? 0 : 1;
 }

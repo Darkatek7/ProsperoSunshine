@@ -6,14 +6,15 @@
 #include "control/control_server.hpp"
 #include "control/listener_watch.hpp"
 #include "control/stream_list.hpp"
+#include "diag/thread_load.hpp"
 #include "input/title_profile.hpp"
 #include "log/log_filter.hpp"
 #include "log/remote_log.hpp"
 #include "net/upnp_client.hpp"
-#include "probe_scrub.hpp"
 #include "sunshine/self_check.hpp"
 #include "sunshine/video_ps5.hpp"
 #include "platform/ps5/mdns_responder.hpp"
+#include "platform/ps5/thread_counters.hpp"
 #include "web/web_server.hpp"
 #include "platform/ps5/capture.h"
 #include "platform/ps5/experimental.h"
@@ -61,21 +62,28 @@ constexpr bool kDebugBuild = true;
 constexpr bool kDebugBuild = false;
 #endif
 
-// What reaches sunshine.log and the kernel log (log/log_filter.hpp): secrets are hidden in every build; the debug build
-// also masks addresses and holds back floods of similar lines. One filter per sink, as each counts what it wrote.
+// What reaches sunshine.log, the kernel log and host_diag.log (log/log_filter.hpp): secrets are hidden and public addresses
+// masked in every build; the debug build also masks the addresses and names of the home and holds back floods of similar lines.
+// One masker for all of them, so that one address has one tag in every file of the run. One filter per sink, as each counts
+// what it wrote.
+const std::shared_ptr<psapp::mask::Masker> &log_masker() {
+    static const auto masker = std::make_shared<psapp::mask::Masker>(kDebugBuild ? psapp::mask::Scope::all : psapp::mask::Scope::internet);
+    return masker;
+}
 prospero::logs::Options log_options() {
     prospero::logs::Options options;
     options.mask_addresses = kDebugBuild;
     options.limit = kDebugBuild;
     return options;
 }
-prospero::logs::Filter file_filter(log_options()), klog_filter(log_options());
+prospero::logs::Filter file_filter(log_options(), log_masker()), klog_filter(log_options(), log_masker());
 // The debug build's remote log, only when sunshine.conf names an address (log/remote_log.hpp).
 prospero::logs::RemoteLog remote_log;
 
-// host_diag.log in the debug build: addresses masked as in sunshine.log, and each line to the remote log.
+// host_diag.log: masked like sunshine.log (in the normal build only what is public), and in the debug build each line to the
+// remote log.
 size_t mask_diag_line(char *line, size_t length, size_t capacity) {
-    const std::string masked = probe::scrub(std::string(line, length));
+    const std::string masked = log_masker()->apply(std::string_view(line, length));
     const size_t kept = std::min(masked.size(), capacity - 1);
     std::memcpy(line, masked.data(), kept);
     return kept;
@@ -105,15 +113,25 @@ boost::shared_ptr<klog_sink> add_klog_sink() {
 }
 
 using Ports = std::array<uint16_t, 3>;
+// What the app waits for and Moonlight needs, by name for host_diag.log (prospero::ports_where).
+using ServicePorts = std::array<prospero::ServicePort, 4>;
 
 // Returns false when the host was told to stop, true when rest mode has taken its ports: the process runs on, but
 // nothing answers until the services start anew (STATUS.md). RELISTEN on the control socket tests that path.
 bool wait_or_ports_lost(const std::shared_ptr<safe::event_t<bool>> &shutdown_event, const Ports &ports,
-                        prospero::ControlServer &control) {
-    bool up = false;
+                        const ServicePorts &services, prospero::ControlServer &control) {
+    bool up = false, checked = false;
     int refused = 0;
     while (!shutdown_event->view(5s)) {
         if (control.take_relisten()) return true;
+        // Once per start: a bind that failed is otherwise only in sunshine.log, and the app only sees that the host
+        // never came up (GitHub issue 51).
+        if (!checked) {
+            checked = true;
+            if (const auto down = prospero::ports_where(services, prospero::port_refused); !down.empty())
+                ps_diag_log("ProsperoSunshine: host not listening 5 s after the start: %s (sunshine.log has the bind error)\n",
+                            down.c_str());
+        }
         if (std::none_of(ports.begin(), ports.end(), prospero::port_refused)) {
             up = true;
             refused = 0;
@@ -121,6 +139,11 @@ bool wait_or_ports_lost(const std::shared_ptr<safe::event_t<bool>> &shutdown_eve
             return true;
         }
     }
+    // A stop before that first check: Sunshine stops the host when it can't bind HTTP(S) or RTSP. After the check a stop is
+    // the owner's, and the services may have closed their ports already.
+    if (!checked)
+        if (const auto down = prospero::ports_where(services, prospero::port_refused); !down.empty())
+            ps_diag_log("ProsperoSunshine: host stopping within 5 s of the start, not listening: %s\n", down.c_str());
     return false;
 }
 
@@ -133,12 +156,24 @@ void log_stream_stats(std::stop_token stop) {
         int recoveries = 0, missing = 0;
     };
     std::map<std::string, Last> last;
+    prospero::load::ThreadLoad load;
+    bool load_unavailable = false;
     auto next = std::chrono::steady_clock::now() + 5s;
     while (!stop.stop_requested()) {
         std::this_thread::sleep_for(250ms);
         const auto now = std::chrono::steady_clock::now();
         if (now < next) continue;
         next = now + 5s;
+        // What the host costs the console: its threads' CPU, wakeups and page faults since the last line, and its memory
+        // (docs: the performance report). Only at debug level, in both flavors, one sysctl every 5 s.
+        if (config::sunshine.min_log_level <= 1) {
+            prospero::load::Snapshot snapshot;
+            if (prospero::load::read_snapshot(snapshot)) {
+                if (const auto interval = load.update(snapshot, now)) BOOST_LOG(debug) << prospero::load::load_line(*interval);
+            } else if (!std::exchange(load_unavailable, true)) {
+                BOOST_LOG(debug) << "Host load: the console gives no thread counters"sv;
+            }
+        }
         const auto sessions = config::sunshine.min_log_level <= 1 ? rtsp_stream::session_infos()
                                                                   : std::vector<rtsp_stream::session_info_t>{};
         std::vector<prospero::CaptureFacts> captures;
@@ -235,10 +270,8 @@ int main(int argc, char *argv[]) {
     ps_diag_set_timestamps(setting("diag_timestamps") != "0");
     const std::string remote = setting("remote_log");
     const auto remote_address = prospero::logs::parse_remote(remote);
-    if (kDebugBuild) {
-        ps_diag_set_filter(mask_diag_line);
-        if (remote_address && remote_log.open(*remote_address)) ps_diag_set_tap(send_diag_line);
-    }
+    ps_diag_set_filter(mask_diag_line);
+    if (kDebugBuild && remote_address && remote_log.open(*remote_address)) ps_diag_set_tap(send_diag_line);
     logging::set_record_hook([](int severity, std::string message) {
         std::vector<std::pair<int, std::string>> lines;
         for (auto &line : file_filter.take(severity, std::move(message), std::chrono::steady_clock::now())) {
@@ -275,6 +308,11 @@ int main(int argc, char *argv[]) {
         BOOST_LOG(info) << "Terminate App in Moonlight closes the session's game (close_game_on_quit)"sv;
         ps_diag_log("ProsperoSunshine: host close_game_on_quit=1\n");
     }
+    if (config::ps5.pair_over_internet) {
+        // Off by default: pairing from the internet goes over plain HTTP, with only the PIN to guard it (patch 0030).
+        BOOST_LOG(warning) << "Pairing is answered from the internet too (pair_over_internet)"sv;
+        ps_diag_log("ProsperoSunshine: host pair_over_internet=1\n");
+    }
     const auto switched_on = [&](const char *key) { return setting(key) == "1"; };
     int switches[PS_EXP_SWITCH_COUNT];
     for (int i = 0; i < PS_EXP_SWITCH_COUNT; ++i) switches[i] = switched_on(ps_exp_switch_at(i)->key);
@@ -305,6 +343,14 @@ int main(int argc, char *argv[]) {
 
     const Ports ports{net::map_port(nvhttp::PORT_HTTP), net::map_port(nvhttp::PORT_HTTPS),
                       net::map_port(rtsp_stream::RTSP_SETUP_PORT)};
+    const ServicePorts services{{{ports[0], "HTTP"}, {ports[1], "HTTPS"}, {ports[2], "RTSP"},
+                                 {prospero::ControlServer::port, "control"}}};
+    // Another host or payload on these ports makes the binds below fail. Before any of ours listens, a port that doesn't
+    // refuse a connection is someone else's.
+    if (const auto taken = prospero::ports_where(services, [](uint16_t port) { return !prospero::port_refused(port); });
+        !taken.empty())
+        ps_diag_log("ProsperoSunshine: host ports taken before the services start: %s (another host or payload?)\n",
+                    taken.c_str());
     prospero::ControlServer control(shutdown_event);
     prospero::web::WebServer web(control, shutdown_event);
     for (bool again = true; again;) {
@@ -328,10 +374,14 @@ int main(int argc, char *argv[]) {
                                               net::map_port(rtsp_stream::RTSP_SETUP_PORT), net::map_port(stream::VIDEO_STREAM_PORT),
                                               net::map_port(stream::CONTROL_PORT), net::map_port(stream::AUDIO_STREAM_PORT)));
             });
+        } else {
+            // A mapping without a lease that an earlier run left behind (a crash, a power cut) would forward the ports for
+            // good: removed now that UPnP is off. Nothing to do without upnp_permanent.txt.
+            upnp_thread = std::jthread([](std::stop_token stop) { prospero::upnp::remove_leftovers(stop, {}); });
         }
         ps_diag_log("ProsperoSunshine: host ready control_port=%u\n", prospero::ControlServer::port);
 
-        again = wait_or_ports_lost(shutdown_event, ports, control);
+        again = wait_or_ports_lost(shutdown_event, ports, services, control);
         if (again) {
             // The log files stop taking lines after rest mode; the old sunshine.log stays as its rotated copy.
             ps_diag_reopen();

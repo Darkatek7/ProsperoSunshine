@@ -15,4 +15,8 @@ namespace prospero::web {
 // sunshine.log. Takes a moment: it also tries a few local ports.
 std::string build_report(ControlServer &control);
 
+// A log file's text through a fresh scrubber with the names the report hides (the console's, the paired devices', the streaming
+// client's, those waiting to pair), for the page's masked download: the same tags as in the report, from 1 again.
+std::string mask_log(ControlServer &control, const std::string &text);
+
 }  // namespace prospero::web

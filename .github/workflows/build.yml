@@ -57,6 +57,17 @@ jobs:
       - name: Unit tests (ASan/UBSan)
         run: docker run --rm --mount type=bind,source="$PWD",target=/repo prosperosunshine-sdk:v0.45 bash scripts/test.sh
 
+      - name: HTTP library tests (patched Simple-Web-Server, ASan/UBSan)
+        # The code that reads a request before any login, as the host configures it, against the pinned and patched sources:
+        # scripts/dep_headers.sh fetches only Simple-Web-Server and Boost's headers (nothing for the PS5 is built) into the same
+        # .cache/deps/src the host build uses, so a cache miss costs the Boost download once and the build reuses the trees.
+        # A patch that no longer applies fails here. The fuzz step below runs the two sws_* targets from the same trees.
+        run: docker run --rm --mount type=bind,source="$PWD",target=/repo prosperosunshine-sdk:v0.45 bash scripts/test_deps.sh
+
+      - name: Fuzz smoke run (libFuzzer, ASan/UBSan)
+        # Every target for a few seconds from its seed corpus (tests/fuzz); the long runs are for the PC (scripts/fuzz.sh).
+        run: docker run --rm --mount type=bind,source="$PWD",target=/repo prosperosunshine-sdk:v0.45 bash scripts/fuzz.sh 5
+
       - name: Build host and probes
         run: docker run --rm -e PROSPERO_COMMIT="${GITHUB_SHA::8}" --mount type=bind,source="$PWD",target=/repo prosperosunshine-sdk:v0.45 bash scripts/build.sh
 

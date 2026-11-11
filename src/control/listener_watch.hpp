@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <poll.h>
+#include <string>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -39,6 +40,25 @@ inline bool port_refused(uint16_t port) {
     }
     close(fd);
     return error == ECONNREFUSED;
+}
+
+// A port the host's services listen on, with the name host_diag.log gives it.
+struct ServicePort {
+    uint16_t port;
+    const char *name;
+};
+
+// "HTTP TCP 47989, control TCP 47995" for the ports `check` is true for, empty when it is true for none. A bind that fails
+// is otherwise only in sunshine.log, and the app only sees that the host didn't come up (main_ps5.cpp).
+template <typename Ports, typename Check>
+std::string ports_where(const Ports &ports, Check check) {
+    std::string out;
+    for (const ServicePort &service : ports) {
+        if (!check(service.port)) continue;
+        if (!out.empty()) out += ", ";
+        out += std::string(service.name) + " TCP " + std::to_string(service.port);
+    }
+    return out;
 }
 
 // Whether a server could bind this port now, with the options the host's servers use.

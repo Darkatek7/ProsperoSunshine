@@ -10,6 +10,7 @@
 #include <string_view>
 #include <sys/stat.h>
 #include <system_error>
+#include <vector>
 
 namespace prospero::file_bridge {
 namespace fs = std::filesystem;
@@ -86,16 +87,66 @@ std::string stat_line(const fs::path &path) {
 }
 }
 
+namespace {
+constexpr std::array denied_keys{"pkey"sv, "cert"sv, "log_path"sv, "file_state"sv, "credentials_file"sv, "file_apps"sv,
+                                 "global_prep_cmd"sv};
+
+bool is_denied(std::string_view key) { return std::find(denied_keys.begin(), denied_keys.end(), key) != denied_keys.end(); }
+
+// How Sunshine reads sunshine.conf (parse_option and parse_config in its src/config.cpp), step for step, since it is the one
+// that decides which keys count. It is not line by line: a lone CR ends a line too, and the character after a CR or after a
+// closing ] is skipped whatever it is, so "a=b\r\rpkey=x" and "a=[]\npkey=x" hold a pkey that splitting at \n does not show
+// (found by tests/fuzz/file_bridge_fuzz.cpp). The keys in file order.
+bool line_end(char c) { return c == '\r' || c == '\n'; }
+bool blank(char c) { return c == ' ' || c == '\t'; }
+bool white(char c) { return blank(c) || line_end(c); }
+
+std::vector<std::string> sunshine_keys(std::string_view conf) {
+    std::vector<std::string> keys;
+    const char *pos = conf.data(), *const end = conf.data() + conf.size();
+    while (pos < end) {
+        const char *begin = std::find_if_not(pos, end, white);
+        const char *endl = std::find_if(begin, end, line_end);
+        const char *endc = std::find(begin, endl, '#');
+        while (endc > begin && white(endc[-1])) --endc;
+        const char *eq = std::find(begin, endc, '=');
+        if (eq != endc && eq != begin) {
+            const char *end_name = eq;
+            while (end_name > begin && blank(end_name[-1])) --end_name;
+            const char *begin_value = std::find_if_not(eq + 1, endc, blank);
+            if (begin_value != endl) {
+                // A list goes on over lines up to its closing bracket, nested ones included.
+                if (*begin_value == '[') {
+                    int depth = 1;
+                    endl = begin_value + 1;
+                    while (endl != end && depth) {
+                        if (*endl == '[') ++depth;
+                        if (*endl == ']') --depth;
+                        ++endl;
+                    }
+                }
+                // The name up to a comment, as Sunshine copies it (a # cannot be inside it: the = would not be found).
+                keys.emplace_back(begin, std::find(begin, end_name, '#'));
+            }
+        }
+        pos = endl;
+        if (pos != end) pos = std::min(end, pos + (*pos == '\r' ? 2 : 1));
+    }
+    return keys;
+}
+}
+
 std::string path_key(const std::string &conf) {
-    static constexpr std::array denied{"pkey"sv, "cert"sv, "log_path"sv, "file_state"sv, "credentials_file"sv, "file_apps"sv,
-                                       "global_prep_cmd"sv};
+    for (const std::string &key : sunshine_keys(conf))
+        if (is_denied(key)) return key;
+    // And what a plain look at each line finds, in case Sunshine's reading changes: a key in a list's line counts too.
     std::istringstream lines(conf);
     for (std::string line; std::getline(lines, line);) {
         const size_t start = line.find_first_not_of(" \t");
         if (start == std::string::npos || line[start] == '#') continue;
         const size_t end = line.find_first_of(" \t=", start);
         const std::string_view key = std::string_view(line).substr(start, end == std::string::npos ? std::string::npos : end - start);
-        if (std::find(denied.begin(), denied.end(), key) != denied.end()) return std::string(key);
+        if (is_denied(key)) return std::string(key);
     }
     return {};
 }

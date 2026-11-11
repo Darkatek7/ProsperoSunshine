@@ -2,12 +2,14 @@
 // Sunshine's platf:: layer for the PS5: networking, game audio from Avcap2, the native virtual pad, keyboard
 // and mouse, and placeholders for what is not forwarded (touch screen, pen).
 #include "apps/titles.hpp"
+#include "audio/audio_meter.hpp"
 #include "audio/channel_map.hpp"
 #include "input/gamepad_map.hpp"
 #include "input/keyboard_map.hpp"
 #include "input/pad_roles.hpp"
 #include "input/pad_touch.hpp"
 #include "input/profile_rules.hpp"
+#include "net/send_retry.hpp"
 #include "platform/ps5/kbm.h"
 #include "platform/ps5/pad.h"
 #include "platform/ps5/profile_seat.h"
@@ -155,7 +157,8 @@ socklen_t to_sockaddr(const boost::asio::ip::address &address, uint16_t port, so
     return sizeof(sockaddr_in);
 }
 
-bool send_one(int fd, const sockaddr_storage &to, socklen_t to_len, const char *header, size_t header_size,
+// One try: 0 when the datagram left, else the errno.
+int send_once(int fd, const sockaddr_storage &to, socklen_t to_len, const char *header, size_t header_size,
               const char *payload, size_t payload_size) {
     iovec iov[2];
     int count = 0;
@@ -166,34 +169,65 @@ bool send_one(int fd, const sockaddr_storage &to, socklen_t to_len, const char *
     msg.msg_namelen = to_len;
     msg.msg_iov = iov;
     msg.msg_iovlen = count;
-    for (int attempt = 0; attempt < 100; ++attempt) {
-        if (sendmsg(fd, &msg, 0) >= 0) return true;
-        // A full send buffer on a nonblocking socket: give the NIC a moment instead of dropping.
-        if (errno != EAGAIN && errno != ENOBUFS) return false;
-        std::this_thread::sleep_for(100us);
-    }
-    return false;
+    return sendmsg(fd, &msg, 0) >= 0 ? 0 : errno;
+}
+
+// A full send buffer on a nonblocking socket: give the NIC a moment instead of dropping, 100 steps of 100 us per batch
+// (net/send_retry.hpp).
+constexpr int send_max_waits = 100;
+void send_wait() { std::this_thread::sleep_for(100us); }
+
+// What was dropped, in one line at most every 10 s.
+void note_dropped(const prospero::SendBatchResult &result) {
+    static std::mutex mutex;
+    static std::chrono::steady_clock::time_point logged{};
+    static std::size_t dropped = 0, batches = 0;
+    static int error = 0;
+    std::lock_guard lock(mutex);
+    dropped += result.dropped;
+    ++batches;
+    if (result.error) error = result.error;
+    const auto now = std::chrono::steady_clock::now();
+    if (now - logged < 10s) return;
+    logged = now;
+    BOOST_LOG(warning) << "PS5 network: "sv << dropped << " packets in "sv << batches << " sends dropped"sv
+                       << (error ? ", last error: "s + std::strerror(error) : ", the send buffer stayed full"s);
+    dropped = batches = 0;
+    error = 0;
 }
 }
 
+// Always true: Sunshine reads false as "no batched send here" and would send the whole batch again packet by packet, a
+// second copy of what already left, each with its own retries, on the one thread that sends every session's video.
 bool send_batch(const batched_send_info_t &info) {
     sockaddr_storage to;
     const socklen_t to_len = to_sockaddr(info.target_address, info.target_port, to);
-    for (size_t i = 0; i < info.block_count; ++i) {
-        const auto block = info.buffer_for_payload_offset((info.block_offset + i) * info.payload_size);
-        const size_t size = std::min(info.payload_size, block.size);
-        if (!send_one(static_cast<int>(info.native_socket), to, to_len, info.headers ? info.headers + (info.block_offset + i) * info.header_size : nullptr,
-                      info.headers ? info.header_size : 0, block.buffer, size))
-            return false;
-    }
+    const auto result = prospero::send_with_retries(
+        info.block_count, send_max_waits,
+        [&](size_t i) {
+            const auto block = info.buffer_for_payload_offset((info.block_offset + i) * info.payload_size);
+            const size_t size = std::min(info.payload_size, block.size);
+            return send_once(static_cast<int>(info.native_socket), to, to_len,
+                             info.headers ? info.headers + (info.block_offset + i) * info.header_size : nullptr,
+                             info.headers ? info.header_size : 0, block.buffer, size);
+        },
+        send_wait);
+    if (result.dropped) note_dropped(result);
     return true;
 }
 
 bool send(send_info_t &info) {
     sockaddr_storage to;
     const socklen_t to_len = to_sockaddr(info.target_address, info.target_port, to);
-    return send_one(static_cast<int>(info.native_socket), to, to_len, info.header, info.header_size, info.payload,
-                    info.payload_size);
+    const auto result = prospero::send_with_retries(
+        1, send_max_waits,
+        [&](size_t) {
+            return send_once(static_cast<int>(info.native_socket), to, to_len, info.header, info.header_size,
+                             info.payload, info.payload_size);
+        },
+        send_wait);
+    if (result.dropped) note_dropped(result);
+    return result.sent == 1;
 }
 
 namespace {
@@ -253,6 +287,8 @@ struct audio_hub {
     std::array<double, prospero::kAvcapSurroundChannels> squares{};
     std::size_t frames = 0;
     std::chrono::steady_clock::time_point levels_at{};
+    // What was read and what went on to the streams, one line every 5 s at debug level (audio/audio_meter.hpp).
+    prospero::AudioMeter meter;
 };
 
 class avcap_mic final : public mic_t {
@@ -340,6 +376,7 @@ private:
         : shared_(std::move(shared)), channels_(channels), frame_size_(frame_size),
           period_(std::chrono::nanoseconds(1'000'000'000LL * frame_size / sample_rate)), packet_(0xC000) {
         std::lock_guard lock(hub_.mutex);
+        if (hub_.mics.empty()) hub_.meter = {};  // the first stream after a pause starts the debug line's count anew
         hub_.mics.push_back(this);
         hub_.wanted_channels = std::max(hub_.wanted_channels, channels_);
     }
@@ -384,6 +421,7 @@ private:
         std::lock_guard lock(hub_.mutex);
         const int source = hub_.source_channels;
         const size_t frames = count / static_cast<size_t>(source);
+        hub_.meter.read(samples, frames, source);
         if (source == prospero::kAvcapSurroundChannels) log_levels(samples, frames);
         for (avcap_mic *mic : hub_.mics) {
             const size_t most = 48000 / 5 * static_cast<size_t>(mic->channels_);
@@ -400,7 +438,15 @@ private:
         next_ = std::chrono::steady_clock::now();
         frame_buffer.assign(pending_.begin(), pending_.begin() + static_cast<std::ptrdiff_t>(needed));
         pending_.erase(pending_.begin(), pending_.begin() + static_cast<std::ptrdiff_t>(needed));
+        hub_.meter.delivered(frame_size_);
+        log_meter(next_);
         return capture_e::ok;
+    }
+
+    // Caller holds hub_.mutex. Every stream's audio thread comes by here, with sound or with silence, so the line also
+    // comes while the channel is lost.
+    static void log_meter(std::chrono::steady_clock::time_point now) {
+        if (const auto line = hub_.meter.line(now, static_cast<int>(hub_.mics.size()))) BOOST_LOG(debug) << *line;
     }
 
     // Caller holds hub_.mutex.
@@ -483,6 +529,8 @@ private:
             // What arrives during the silence would only play late.
             std::lock_guard lock(hub_.mutex);
             pending_.clear();
+            hub_.meter.filled(frame_size_);
+            log_meter(std::chrono::steady_clock::now());
         }
         next_ = std::max(next_ + period_, std::chrono::steady_clock::now() - period_);
         std::this_thread::sleep_until(next_);

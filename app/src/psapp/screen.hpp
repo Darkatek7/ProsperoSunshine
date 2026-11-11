@@ -5,10 +5,10 @@
 //             restart, start at boot), pairing requests as cards (Cross: the PIN, Square: deny it), the running streams
 //             while someone streams (Cross: a list with what each gets, to end one) and the paired
 //             devices (Cross: a list to rename or remove them);
-//   Settings  one tile per sunshine.conf option (Cross opens its editor, Square puts it back to the
-//             host's default), the Experimental section's switches among them (Cross flips one), then
-//             Save, Save and restart, Revert, and the host's web page (a sheet with its address, to turn
-//             it on or off, set or change its login, or forget it);
+//   Settings  one tile per sunshine.conf option in captioned groups, Host, Playing, Network and Experimental
+//             (settings_layout.hpp; Cross opens its editor or flips a switch, Square puts it back to the
+//             host's default), then Save, Save and restart, Revert, and the host's web page (a sheet with its
+//             address, to turn it on or off, set or change its login, or forget it);
 //   Diagnostics the report for a bug report, to read here, as a file and over the network.
 // Editors and the PIN come up as a sheet over the page: a list for choices, a stepper for numbers,
 // the on-screen keyboard for text and the PIN (R2 or Options: Done; R1 the symbols, L2 shift; R3 shows
@@ -16,7 +16,6 @@
 // kit's glass), and focus, pages, sheets and messages move with springs and fades.
 #pragma once
 
-#include "app/psapp/experimental_list.h"
 #include "app/psapp/host.hpp"
 #include "core/input.hpp"
 #include "gfx/draw_list.hpp"
@@ -188,8 +187,8 @@ class Screen
     int home_row_ = 0; // 0 the actions, 1 the pairing cards and the paired devices
     int home_action_ = 0;
     int home_card_ = 0; // the pairing cards, then the streams card (while someone streams), then the paired devices
-    int tile_ = 0; // the option tiles, then the four actions under them
-    float tile_amount_[8 + PS_EXP_SWITCH_COUNT + 1 + 4] = {};
+    int tile_ = 0; // the option tiles (option_specs()'s order), then the four actions under them
+    std::vector<float> tile_amount_; // the settings page's tiles' and actions' focus (settings_layout.hpp)
     float action_amount_[3] = {};
     float card_amount_[2] = {};
     float devices_amount_ = 0.0f; // the paired devices' focus

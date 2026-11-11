@@ -3,32 +3,11 @@
 // Each fits a square of `size` centred on (cx, cy).
 #pragma once
 
+#include "app/psapp/icon_id.hpp"
 #include "gfx/draw_list.hpp"
 
 namespace psapp::icons
 {
-
-enum class Icon
-{
-    home,
-    sliders,
-    power,
-    restart,
-    boot,     // a rocket-like arrow out of a tray: started with the console
-    link,     // pairing
-    monitor,  // a client device
-    tag,      // the host name
-    log,      // log level
-    timer,    // ping timeout
-    lock,     // encryption
-    globe,    // encryption over the internet
-    plug,     // port
-    check,
-    save,
-    undo,
-    wifi,     // the console's address
-    trash,    // forget the web page's login
-};
 
 void draw(hui::gfx::DrawList &list, Icon icon, float cx, float cy, float size, hui::gfx::Color color);
 

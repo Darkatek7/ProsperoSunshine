@@ -118,6 +118,8 @@ private:
             if (!hex4(low) || low < 0xdc00 || low > 0xdfff) return false;
             code = 0x10000 + ((code - 0xd800) << 10) + (low - 0xdc00);
         }
+        // A surrogate on its own spells no character; as UTF-8 it would be invalid text in the app list's XML.
+        if (code >= 0xd800 && code <= 0xdfff) code = 0xfffd;
         if (code < 0x80) {
             out += static_cast<char>(code);
         } else if (code < 0x800) {

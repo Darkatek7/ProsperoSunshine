@@ -1,0 +1,57 @@
+# Log statements that can hold an address, a device or a person, reviewed (scripts/check_log_sites.sh explains the list).
+# One reason above each group; an entry is the file, '|' and the statement as the script prints it with --list.
+
+# An address of a client, a stranger or a visitor of the web page, in sunshine.log and the kernel log. A public one becomes <public-N> in every build, the home's become <lan-N> and so on in the debug build, and the report masks them all (samples 'SSL verification', 'pairing refused' and 'web page login' in tests/privacy_leak_test.cpp). The patch 0021 line also holds the first 8 bytes of the client certificate's hash: an id, not a secret, and <id-N> in the report.
+patches/sunshine/0021-throttle-verify-log.patch|BOOST_LOG(debug) << line;
+patches/sunshine/0021-throttle-verify-log.patch|BOOST_LOG(warning) << line;
+patches/sunshine/0030-pairing-from-home.patch|BOOST_LOG(info) << "Pairing refused for "sv << address << ": it isn't from the LAN or Tailscale, and pair_over_internet is off"sv << (held_back ? std::format(" ({} more since the last line)", held_back) : ""s);
+src/web/web_server.cpp|BOOST_LOG(info) << "Web page: login from "sv << address << forwarded(address) << (remember ? " (remembered for 30 days)"sv : ""sv);
+src/web/web_server.cpp|BOOST_LOG(warning) << "Web page: failed login from "sv << address << forwarded(address);
+
+# The router's address, its external (public) address and the address of another device that holds a forwarded port, from UPnP. Same masking as above ('UPnP' samples in tests/privacy_leak_test.cpp).
+src/net/upnp_client.cpp|BOOST_LOG(info) << "UPnP: "sv << hop.router << ' ' << describe(port);
+src/net/upnp_client.cpp|BOOST_LOG(info) << "UPnP: "sv << which << " router "sv << hop.router << ", internet side "sv << (hop.external.empty() ? "unknown"s : hop.external) << (hop.external_private ? " (private: another router or the provider's NAT is in front)"sv : ""sv);
+src/net/upnp_client.cpp|BOOST_LOG(warning) << "UPnP: "sv << hop.router << ' ' << describe(port);
+src/net/upnp_client.cpp|for (const auto &line : refused_lines) BOOST_LOG(warning) << "UPnP: "sv << line;
+src/net/upnp_client.cpp|for (const auto &line : unmap(router, ports)) BOOST_LOG(warning) << "UPnP: "sv << line;
+src/net/upnp_client.cpp|if (!before.router.empty()) BOOST_LOG(info) << "UPnP: the "sv << which << " router stopped answering"sv;
+
+# The address the user typed as remote_log (debug build only; the line goes through the filter, which masks it). Sample: 'remote_log'.
+src/sunshine/main_ps5.cpp|BOOST_LOG(info) << "remote_log: each log line also goes to "sv << remote << " (UDP syslog)"sv;
+src/sunshine/main_ps5.cpp|BOOST_LOG(warning) << "remote_log: no socket for "sv << remote << "; nothing is sent"sv;
+
+# The name of the game or app in front: sunshine.log keeps it (a bug about one game needs it), the report hides it ('Session app [<title>]').
+src/sunshine/process_ps5.cpp|BOOST_LOG(info) << "Session app ["sv << _app.name << "] marked running"sv;
+src/sunshine/process_ps5.cpp|BOOST_LOG(info) << "Session app ["sv << _app.name << "] resumed"sv;
+src/sunshine/process_ps5.cpp|if (placebo) BOOST_LOG(info) << "Session app ["sv << _app.name << "] stopped"sv;
+
+# A file name, a number, a reason or the text of an exception: no address, no name of a person (read in the code). 'keyboard_profiles.txt' lines quote what the user wrote in that file; the name of a keyboard profile is the user's own word for a game's layout.
+patches/sunshine/0003-httpcommon-no-curl.patch|BOOST_LOG(warning) << "download_file is unavailable on the PS5: "sv << url;
+patches/sunshine/0017-keyboard-mouse-pad.patch|BOOST_LOG(warning) << "Couldn't save keyboard_sensitivity.txt: "sv << ec.message();
+patches/sunshine/0018-keyboard-pad-profile-by-game.patch|BOOST_LOG(info) << "Keyboard pad profile "sv << (choice.own ? choice.own->name : std::string(prospero::profile_name(choice.profile))) << " for "sv << title << ", from "sv << prospero::source_name(choice.source);
+patches/sunshine/0018-keyboard-pad-profile-by-game.patch|BOOST_LOG(warning) << "keyboard_profiles.txt "sv << problem;
+patches/sunshine/0020-state-file-atomic.patch|BOOST_LOG(error) << "Couldn't move " << path << " aside: " << ec.message();
+patches/sunshine/0020-state-file-atomic.patch|BOOST_LOG(error) << "Couldn't read "sv << config::nvhttp.file_state << ", writing it anew: "sv << e.what();
+patches/sunshine/0020-state-file-atomic.patch|BOOST_LOG(error) << "Couldn't read user credentials, writing them anew: "sv << e.what();
+patches/sunshine/0020-state-file-atomic.patch|BOOST_LOG(warning) << "Moved the unreadable " << path << " to " << path << ".corrupt";
+patches/sunshine/0029-request-limits.patch|BOOST_LOG(fatal) << "HTTP server on port "sv << web_server->config.port << " failed: "sv << err.what();
+patches/sunshine/0026-paced-video.patch|BOOST_LOG(error) << "Broadcast video failed "sv << e.what();
+patches/sunshine/0032-serve-on-and-no-content.patch|BOOST_LOG(error) << "HTTP server on port "sv << web_server->config.port << ": "sv << again.what() << ", serving on"sv;
+patches/sunshine/0032-serve-on-and-no-content.patch|BOOST_LOG(error) << "HTTP server on port "sv << web_server->config.port << ": "sv << err.what() << ", serving on"sv;
+patches/sunshine/0032-serve-on-and-no-content.patch|BOOST_LOG(fatal) << "Couldn't start http server on port "sv << web_server->config.port << ": "sv << err.what();
+src/platform/ps5/capture.c|if (after->failed[i] && !before->failed[i]) ps_diag_log("ProsperoSunshine: experimental disabled feature=%s\n", ps_exp_switch_at(i)->name);
+src/sunshine/platform_ps5.cpp|BOOST_LOG(info) << "PS5 audio: 12-channel levels (RMS, channel 0 to 11):"sv << line;
+src/sunshine/platform_ps5.cpp|if (const auto line = hub_.meter.line(now, static_cast<int>(hub_.mics.size()))) BOOST_LOG(debug) << *line;
+src/sunshine/platform_ps5.cpp|BOOST_LOG(info) << "PS5 virtual "sv << what << " of a device's profile seated ("sv << text << ')';
+src/sunshine/platform_ps5.cpp|BOOST_LOG(info) << "PS5 virtual keyboard attached"sv << (kbm.user ? " in its device's profile"sv : ""sv);
+src/sunshine/platform_ps5.cpp|BOOST_LOG(info) << "PS5 virtual mouse attached"sv << (kbm.user ? " in its device's profile"sv : ""sv);
+src/sunshine/platform_ps5.cpp|BOOST_LOG(info) << "PS5 virtual pad "sv << nr << " attached in its device's profile"sv << (host ? " as the host's controller"sv : ""sv) << " (bound after "sv << bind_ms << " ms)"sv;
+src/sunshine/platform_ps5.cpp|BOOST_LOG(info) << "PS5 virtual pad "sv << nr << " attached"sv << (host ? " as the host's controller"sv : input.roles.host_away() ? ", the console asks who uses it; the host is away and keeps the role"sv : ", the console asks who uses it"sv);
+src/sunshine/platform_ps5.cpp|BOOST_LOG(info) << "PS5 virtual pad "sv << nr << " not added: "sv << reason;
+src/sunshine/platform_ps5.cpp|BOOST_LOG(info) << (raw->user ? "PS5 input: virtual pads ready"sv : "PS5 input: no user for virtual pads"sv);
+src/sunshine/platform_ps5.cpp|BOOST_LOG(warning) << "PS5 virtual "sv << what << " of a device's profile not seated ("sv << rc << "), so it was removed"sv;
+src/sunshine/platform_ps5.cpp|void trace_call(const std::string &what) { ps_diag_trace("%s\n", what.c_str()); } static void greet_spectator(const std::string &cert);
+src/web/web_server.cpp|BOOST_LOG(error) << "Web page could not start: "sv << e.what();
+src/web/web_server.cpp|BOOST_LOG(error) << "Web page failed on port "sv << port << ": "sv << e.what();
+src/web/web_server.cpp|BOOST_LOG(error) << "Web page: restart failed: "sv << problem;
+src/web/web_server.cpp|BOOST_LOG(warning) << "Web page: remembered sign-ins not stored: "sv << problem;
