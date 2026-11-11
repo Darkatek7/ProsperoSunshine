@@ -25,24 +25,30 @@
   <div id="app" hidden>
     <header class="top">
       <div class="brand">
-        <strong id="host-name">ProsperoSunshine</strong>
+        <h1 id="host-name">ProsperoSunshine</h1>
         <span id="host-facts" class="muted"></span>
       </div>
-      <nav class="tabs" role="tablist">
-        <button role="tab" data-tab="overview" aria-selected="true">Overview</button>
-        <button role="tab" data-tab="devices">Devices</button>
-        <button role="tab" data-tab="apps">Apps</button>
-        <button role="tab" data-tab="settings">Settings</button>
-        <button role="tab" data-tab="logs">Logs</button>
-      </nav>
+      <div class="tabs" role="tablist" aria-label="Sections">
+        <button role="tab" id="tabbutton-overview" data-tab="overview" aria-controls="tab-overview" aria-selected="true">Overview</button>
+        <button role="tab" id="tabbutton-devices" data-tab="devices" aria-controls="tab-devices" aria-selected="false" tabindex="-1">Devices</button>
+        <button role="tab" id="tabbutton-apps" data-tab="apps" aria-controls="tab-apps" aria-selected="false" tabindex="-1">Apps</button>
+        <button role="tab" id="tabbutton-settings" data-tab="settings" aria-controls="tab-settings" aria-selected="false" tabindex="-1">Settings</button>
+        <button role="tab" id="tabbutton-logs" data-tab="logs" aria-controls="tab-logs" aria-selected="false" tabindex="-1">Logs</button>
+      </div>
       <div class="actions">
         <button id="restart" class="ghost">Restart host</button>
         <button id="logout" class="ghost" title="Also signs out every device that is remembered">Sign out</button>
       </div>
     </header>
 
-    <p id="notice" class="notice" role="status" title="Tap to close" hidden></p>
-    <div id="risk" class="pending risk" role="status" hidden>
+    <!-- What is announced to a screen reader goes through these two regions, which are always there: a box that appears is not read. -->
+    <div id="announce" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
+    <div id="announce-alert" class="sr-only" role="alert" aria-atomic="true"></div>
+    <div id="notice" class="notice" hidden>
+      <span id="notice-text"></span>
+      <button type="button" id="notice-close" aria-label="Close this message">Close</button>
+    </div>
+    <div id="risk" class="pending risk" hidden>
       <span id="risk-text"></span>
       <span class="risk-actions">
         <button id="risk-review" class="primary">Review in Devices</button>
@@ -50,12 +56,13 @@
         <button id="risk-never" class="ghost">Don't show again</button>
       </span>
     </div>
-    <div id="pending" class="pending" role="status" hidden>
+    <div id="pending" class="pending" hidden>
       <span>Saved settings aren't applied yet: the host reads them when it starts.</span>
       <button id="pending-restart" class="primary">Restart host</button>
     </div>
 
-    <section id="tab-overview" class="tab">
+    <main id="main">
+    <section id="tab-overview" class="tab" role="tabpanel" aria-labelledby="tabbutton-overview">
       <div class="card">
         <h2>Status</h2>
         <dl id="status" class="facts"></dl>
@@ -76,7 +83,7 @@
       </div>
     </section>
 
-    <section id="tab-devices" class="tab" hidden>
+    <section id="tab-devices" class="tab" role="tabpanel" aria-labelledby="tabbutton-devices" hidden>
       <div class="card">
         <h2>Paired devices</h2>
         <p id="devices-risk" class="risk-note" hidden></p>
@@ -90,7 +97,7 @@
       </div>
     </section>
 
-    <section id="tab-apps" class="tab" hidden>
+    <section id="tab-apps" class="tab" role="tabpanel" aria-labelledby="tabbutton-apps" hidden>
       <div class="card">
         <h2>Apps</h2>
         <p class="muted">Some apps can change the console: a store installs, updates or removes games. Hide them from devices you
@@ -101,10 +108,10 @@
       </div>
     </section>
 
-    <section id="tab-settings" class="tab" hidden>
+    <section id="tab-settings" class="tab" role="tabpanel" aria-labelledby="tabbutton-settings" hidden>
       <form id="settings-form" class="card">
         <h2>Settings</h2>
-        <p class="muted">They apply when the host starts again. The Experimental switches that depend on the firmware stay in the app on the console.</p>
+        <p class="muted">They apply when the host starts again. The Experimental switches that depend on the firmware show here, and are changed in the app on the console.</p>
         <div id="settings"></div>
         <div class="row end">
           <button type="submit" class="primary">Save</button>
@@ -113,8 +120,9 @@
       </form>
     </section>
 
-    <section id="tab-logs" class="tab" hidden>
+    <section id="tab-logs" class="tab" role="tabpanel" aria-labelledby="tabbutton-logs" hidden>
       <div class="card">
+        <h2>Logs</h2>
         <div class="row">
           <select id="log-file" aria-label="Log file">
             <option value="sunshine">sunshine.log</option>
@@ -122,12 +130,27 @@
             <option value="report">Diagnostic report</option>
           </select>
           <button id="log-refresh">Refresh</button>
-          <a id="log-download" class="button" download>Download</a>
+          <span id="log-downloads" class="downloads">
+            <a id="log-download-masked" class="button" download>Download masked</a>
+            <a id="log-download" class="button" download>Download raw</a>
+          </span>
         </div>
+        <p id="log-hint" class="log-hint" hidden>This is the raw file. It has addresses and game names. To post in an issue, use the report, or "Download masked".</p>
         <p id="report-hint" class="muted" hidden>The same report as the app's Diagnostics page, without addresses, device names, ids or game titles, so you can paste it into a GitHub issue.</p>
-        <pre id="log" class="log"></pre>
+        <div id="log-tools" class="row log-tools">
+          <input id="log-filter" type="search" aria-label="Filter the lines shown" placeholder="Show only lines with…" autocomplete="off">
+          <select id="log-level" aria-label="Level of the lines shown">
+            <option value="">All levels</option>
+            <option value="info">Info and above</option>
+            <option value="warning">Warnings and errors</option>
+            <option value="error">Errors only</option>
+          </select>
+        </div>
+        <p id="log-count" class="log-count muted" aria-live="polite"></p>
+        <pre id="log" class="log" role="region" tabindex="0" aria-label="Log text"></pre>
       </div>
     </section>
+    </main>
   </div>
 
   <dialog id="profiles-dialog" class="dialog wide" aria-labelledby="profiles-title" aria-describedby="profiles-text">

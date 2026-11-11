@@ -68,6 +68,8 @@ run_test web_lines_test
 run_test uuid_lines_test
 run_test app_access_test
 run_test web_plain_test
+run_test web_logs_test
+run_test stream_health_test
 run_test log_throttle_test
 run_test exposure_test
 run_test thread_load_test
@@ -75,5 +77,7 @@ run_test thread_load_test
 mkdir -p "$root/out/include/app"
 ln -sfn "$root/app/src/psapp" "$root/out/include/app/psapp"
 run_test privacy_leak_test "$root/app/src/psapp/diag.cpp" -I "$root/out/include"
+# The web page's settings groups come from the app's option list and layout.
+run_test web_settings_test "$root/app/src/psapp/conf.cpp" "$root/app/src/psapp/settings_layout.cpp" -I "$root/out/include"
 # A new or changed log statement that can hold an address or a name must be looked at (and have a sample in privacy_leak_test).
 bash "$root/scripts/check_log_sites.sh"

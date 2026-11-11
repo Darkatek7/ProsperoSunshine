@@ -181,7 +181,7 @@ extern const std::size_t prospero_web_asset_count = sizeof prospero_web_assets /
         "${CMAKE_BINARY_DIR}/generated/relaunch_helper_elf.cpp"
         "${CMAKE_BINARY_DIR}/generated/web_page.cpp" src/web/web_server.cpp src/web/web_login.cpp src/web/web_report.cpp
         src/web/web_cert.cpp src/net/upnp_client.cpp
-        app/src/psapp/conf.cpp app/src/psapp/diag.cpp
+        app/src/psapp/conf.cpp app/src/psapp/diag.cpp app/src/psapp/settings_layout.cpp
         ${SUNSHINE_KEPT}
         "${MOONLIGHT_SRC}/src/RtspParser.c"
         src/sunshine/main_ps5.cpp src/sunshine/video_ps5.cpp src/sunshine/process_ps5.cpp

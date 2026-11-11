@@ -5,10 +5,13 @@
 #include "net/upnp_client.hpp"
 #include "web/web_auth.hpp"
 #include "web/web_cert.hpp"
+#include "web/stream_health.hpp"
 #include "web/web_lines.hpp"
+#include "web/web_logs.hpp"
 #include "web/web_plain.hpp"
 #include "web/web_report.hpp"
 #include "web/web_login.hpp"
+#include "web/web_settings.hpp"
 #include "app/psapp/conf.hpp"
 #include "app/psapp/experimental_list.h"
 #include "src/config.h"
@@ -20,6 +23,7 @@
 #include <algorithm>
 #include <cctype>
 #include <map>
+#include <set>
 #include <vector>
 #include <atomic>
 #include <functional>
@@ -155,6 +159,7 @@ struct State {
     Sessions sessions;
     Remembered remembered;
     Lockout lockout;
+    HealthTracker stream_health;  // the readings the overview's polls leave of each running stream (stream_health.hpp)
     unsigned generation = 0;  // of the login this run serves
 
     bool signed_in(const std::string &token) {
@@ -380,6 +385,52 @@ json records(const std::vector<std::string> &lines, Record (*parse)(std::string_
 
 Record stream_record(std::string_view line) { return fields(line, "name"); }
 
+// The running streams with the page's verdict on each (stream_health.hpp): "health" is null, or the plain line and the numbers
+// behind it. The key tells a stream's readings apart across polls: its device's uuid, else its address.
+json streams_json(const std::vector<std::string> &lines, HealthTracker &tracker) {
+    const double now = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    // Where the encoder keeps its own rate (10.x), what a stream asked for says nothing about what it sends.
+    const std::uint32_t firmware = kernel_get_fw_version();
+    const bool rate_honoured = firmware == 0 || !ps_exp_switch_at(PS_EXP_BITRATE)->no_effect(firmware);
+    const auto number = [](const Record &record, const char *key, long long fallback) {
+        const auto it = record.find(key);
+        if (it == record.end() || it->second.empty() || it->second.size() > 9) return fallback;
+        long long value = 0;
+        for (const char c : it->second) {
+            if (c < '0' || c > '9') return fallback;
+            value = value * 10 + (c - '0');
+        }
+        return value;
+    };
+    json list = json::array();
+    std::set<std::string> keys;
+    for (const auto &line : lines) {
+        const Record record = stream_record(line);
+        json stream = record;
+        const auto field = [&record](const char *key) {
+            const auto it = record.find(key);
+            return it == record.end() ? std::string() : it->second;
+        };
+        const std::string key = field("uuid").empty() || field("uuid") == "-" ? "address:" + field("address") : "uuid:" + field("uuid");
+        keys.insert(key);
+        HealthInput in;
+        in.now_s = now;
+        in.secs = number(record, "secs", 0);
+        in.sent_kbps = static_cast<int>(number(record, "sent_kbps", -1));
+        in.asked_kbps = static_cast<int>(number(record, "kbps", 0));
+        in.recoveries = static_cast<int>(number(record, "recoveries", 0));
+        in.starting = field("role") == "starting";
+        in.rate_honoured = rate_honoured;
+        const Health health = tracker.update(key, in);
+        stream["health"] = health.line.empty() ? json(nullptr)
+                                               : json{{"lossy", health.lossy}, {"over", health.over}, {"line", health.line},
+                                                      {"details", health.details}};
+        list.push_back(std::move(stream));
+    }
+    tracker.keep_only(keys);
+    return list;
+}
+
 // A control answer as the page gets it: "OK ..." is fine, "ERR ..." a 400 with the reason.
 void send_answer(const Response &response, const std::string &answer) {
     if (answer.starts_with("OK")) {
@@ -410,27 +461,49 @@ json upnp_json() {
             {"outer", upnp_hop_json(status.outer)}};
 }
 
+// What the Settings tab gets: the app's groups in its order (the same captions, and the note the app puts under Experimental),
+// and every option of the app's list with its group. The Experimental firmware switches are shown and not changed here
+// ("app_only"): the app checks the firmware, and says what a failed trial turned off. Where the firmware makes one of them
+// pointless, the page reads as the app does ("locked", with the app's word and help).
 json settings_json() {
     const auto config = psapp::Config::parse(read_file(config::sunshine.config_file));
+    const std::uint32_t firmware = kernel_get_fw_version();
+    const std::string firmware_name = firmware_text();
     json list = json::array();
     for (const auto &spec : psapp::option_specs()) {
-        if (experimental(spec.key)) continue;  // the Experimental switches stay in the app, with its firmware checks
         json choices = json::array();
         for (const auto &choice : spec.choices) choices.push_back({{"value", choice.value}, {"label", choice.label}});
         const auto value = psapp::option_value(config, spec);
+        const SwitchState state = switch_state(spec, firmware, firmware_name, value.value_or(std::string()));
         const char *kinds[] = {"text", "choice", "number", "toggle"};
         list.push_back({{"key", spec.key},
+                        {"group", static_cast<int>(spec.group)},
                         {"label", spec.label},
-                        {"help", spec.help},
+                        {"help", state.help},
                         {"kind", kinds[static_cast<int>(spec.kind)]},
                         {"default", spec.default_label},
                         {"choices", choices},
                         {"min", spec.min},
                         {"max", spec.max},
                         {"step", spec.step},
+                        {"app_only", state.firmware_switch},
+                        {"locked", state.locked},
+                        {"state", state.state},
                         {"value", value ? json(*value) : json(nullptr)}});
     }
     return list;
+}
+
+json settings_groups_json() {
+    const std::uint32_t firmware = kernel_get_fw_version();
+    const std::string where = firmware_place(firmware, firmware_text());
+    json groups = json::array();
+    for (const auto &group : settings_groups()) {
+        json entry{{"id", group.id}, {"caption", group.caption}, {"note", ""}};
+        if (group.id == static_cast<int>(psapp::OptionGroup::experimental)) entry["note"] = experimental_note(any_switch_needed(firmware), where);
+        groups.push_back(std::move(entry));
+    }
+    return groups;
 }
 
 // {"values": {"key": "value" or null}}: null, and a toggle's "0", remove the key so the host's default applies.
@@ -564,7 +637,7 @@ void routes(Server &server, State &state, ControlServer &control, const std::sha
     });
 
     // What the host is doing: its status, pending pairings, paired devices and running streams.
-    get("^/api/overview$", [&control](const Response &response, const Request &) {
+    get("^/api/overview$", [&control, &state](const Response &response, const Request &) {
         using Caller = ControlServer::Caller;
         const auto status_lines = ok_lines(control.handle("STATUS", Caller::web));
         json host{{"version", PROJECT_VERSION},
@@ -602,7 +675,7 @@ void routes(Server &server, State &state, ControlServer &control, const std::sha
                                  {"trusted", uuid_list("web_trusted.txt")},
                                  {"risk_ack", uuid_list("web_risk_ack.txt")},
                                  {"menus", menus},
-                                 {"streams", records(ok_lines(control.handle("STREAMS", Caller::web)), stream_record)},
+                                 {"streams", streams_json(ok_lines(control.handle("STREAMS", Caller::web)), state.stream_health)},
                                  {"upnp", upnp_json()}});
     });
     // The console's profiles, for choosing which ones a device may play as. Names are shown only here, signed in.
@@ -706,9 +779,10 @@ void routes(Server &server, State &state, ControlServer &control, const std::sha
         send_answer(response, control.handle("ENDSTREAM " + uuid, ControlServer::Caller::web));
     });
 
-    // Settings: the app's list without the Experimental switches. They apply when the host starts again.
+    // Settings: the app's list in the app's groups; the Experimental firmware switches are shown, not changed (save_settings
+    // refuses them). They apply when the host starts again.
     get("^/api/settings$", [](const Response &response, const Request &) {
-        send_json(response, json{{"options", settings_json()}});
+        send_json(response, json{{"groups", settings_groups_json()}, {"options", settings_json()}});
     });
     post("^/api/settings$", [](const Response &response, const json &body) {
         const std::string problem = save_settings(body);
@@ -717,13 +791,17 @@ void routes(Server &server, State &state, ControlServer &control, const std::sha
     });
 
     // Logs and restart.
-    get("^/api/logs$", [](const Response &response, const Request &request) {
+    // `file` is "sunshine" or "diag" and nothing else (web_logs.hpp); `masked=1` runs the text through the report's scrubber,
+    // for a download that is fit to post. Without it the file is as the host wrote it.
+    get("^/api/logs$", [&control](const Response &response, const Request &request) {
         const auto query = request->parse_query_string();
-        const auto which = query.find("file");
-        const bool diag = which != query.end() && which->second == "diag";
+        const auto asked = log_request(query);
+        if (!asked) return send_error(response, SimpleWeb::StatusCode::client_error_bad_request, "unknown log");
         const std::filesystem::path path =
-            diag ? platf::appdata() / "host_diag.log" : std::filesystem::path(config::sunshine.log_file);
-        send(response, SimpleWeb::StatusCode::success_ok, read_tail(path, log_limit), "text/plain; charset=utf-8");
+            asked->diag ? platf::appdata() / "host_diag.log" : std::filesystem::path(config::sunshine.log_file);
+        std::string text = read_tail(path, log_limit);
+        if (asked->masked) text = mask_log(control, text);
+        send(response, SimpleWeb::StatusCode::success_ok, text, "text/plain; charset=utf-8");
     });
     // The same report as the app's Diagnostics page, built by the host: no addresses, names, ids or game titles.
     get("^/api/diagnostics$", [&control](const Response &response, const Request &) {

@@ -90,6 +90,23 @@ std::string no_file(const std::filesystem::path &path) {
     return "  no file: " + std::string(std::filesystem::exists(path, ec) ? "cannot read " : "missing ") + path.string() + "\n";
 }
 
+// The names that go through a Scrubber: the console's (as sunshine.conf has it, and as the host runs with it), the paired devices
+// with their uuids, the streaming client and those waiting to pair. One place for the report and for the masked log download.
+void add_names(psapp::diag::Scrubber &scrubber, const std::string &configured_name, const std::vector<std::string> &devices,
+               const std::string &client, const std::vector<std::string> &pairings) {
+    if (!configured_name.empty()) scrubber.add_console(configured_name);
+    scrubber.add_console(config::nvhttp.sunshine_name);
+    for (const std::string &device_line : devices) {
+        Record record = device(device_line);
+        scrubber.add_device(record["name"], record["uuid"]);
+    }
+    scrubber.add_name(client);
+    for (const std::string &pairing_line : pairings) {
+        const std::string name = pairing(pairing_line)["name"];
+        if (psapp::diag::pairing_label(name) != "Moonlight") scrubber.add_name(name);
+    }
+}
+
 }  // namespace
 
 std::string build_report(ControlServer &control) {
@@ -169,17 +186,9 @@ std::string build_report(ControlServer &control) {
     // section: the console, the paired devices (with their uuids, so a tag matches the uuid's in the logs), the streaming client
     // and those waiting to pair.
     psapp::diag::Scrubber scrubber;
-    if (const auto it = settings.find("sunshine_name"); it != settings.end() && it->second) scrubber.add_console(*it->second);
-    scrubber.add_console(config::nvhttp.sunshine_name);
-    for (const std::string &device_line : devices) {
-        Record record = device(device_line);
-        scrubber.add_device(record["name"], record["uuid"]);
-    }
-    scrubber.add_name(state_value("client"));
-    for (const std::string &pairing_line : pairings) {
-        const std::string name = pairing(pairing_line)["name"];
-        if (psapp::diag::pairing_label(name) != "Moonlight") scrubber.add_name(name);
-    }
+    const auto name_it = settings.find("sunshine_name");
+    add_names(scrubber, name_it != settings.end() && name_it->second ? *name_it->second : std::string(), devices,
+              state_value("client"), pairings);
     std::vector<std::string> switches;
     for (int i = 0; i < PS_EXP_SWITCH_COUNT; ++i) {
         const char *key = ps_exp_switch_at(i)->key;
@@ -199,6 +208,18 @@ std::string build_report(ControlServer &control) {
     out += log_file ? scrubber.tail(*log_file, 80) : no_file(log_path);
     // The lines above hold no one's name, but a line added there later might hold an address: they get the same pass.
     return scrubber.apply(out, false);
+}
+
+std::string mask_log(ControlServer &control, const std::string &text) {
+    const std::vector<std::string> status_lines = ok_lines(control.handle("STATUS", ControlServer::Caller::web));
+    const Record state = status_lines.empty() ? Record() : status(status_lines.front());
+    const auto client = state.find("client");
+    const psapp::Config config = psapp::Config::parse(read_tail(config::sunshine.config_file, 1u << 20).value_or(std::string()));
+    psapp::diag::Scrubber scrubber;
+    add_names(scrubber, config.get("sunshine_name").value_or(std::string()),
+              ok_lines(control.handle("DEVICES", ControlServer::Caller::web)), client == state.end() ? std::string() : client->second,
+              ok_lines(control.handle("PAIRINGS", ControlServer::Caller::web)));
+    return scrubber.apply(text);
 }
 
 }  // namespace prospero::web
