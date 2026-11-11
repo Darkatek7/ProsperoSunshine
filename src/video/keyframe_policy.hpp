@@ -36,38 +36,23 @@
 //     with a loss every 0.4 s, of Wi-Fi with delay spikes and ENet's value stuck at 40 or 80 ms, and of issue 37's path,
 //     IDRs per minute stayed within 15 % of dropping blind requests (a third fewer where every IDR failed), while a real
 //     request that rule 2 took for blind waited up to 367 ms instead of up to 4.1 s.
-//     A blind request counts in rule 3 like any other: within H of the IDR that answered the client's last request, as a
-//     failure. One that crossed an IDR that arrived is one failure, and the level needs two in a row; a client whose every
-//     request looks blind (all its IDRs lost, its round trip overestimated) is still held back.
-//  3. A hold-off for clients whose IDRs don't hold. Each client has a level, 0 to 4. The first request a client sends
-//     after the IDR that answered its last one judges that IDR: within H = W + 4 frame intervals of it (67 ms at 60 fps,
-//     133 ms at 30) the IDR or the frames right behind it were lost, later it held. When two IDRs in a row failed the
-//     level rises by one, with each that held it falls by one, and every 2 s without a request it falls by one (counted
-//     from the IDR that answered it: while it waits it has no reason to ask). One failure alone could be an independent
-//     loss that happened to come soon after; in simulations with random losses every 0.4 s on average on a LAN, single
-//     verdicts drove the level up to 4 now and then, two in a row hardly ever (tests/keyframe_policy_test.cpp). The
-//     encoder's own IDRs and those for others aren't judged, so a loss right after one of them is no sign that IDRs fail
-//     on this client's path. At level 0 the request is answered at once: a single loss on a healthy link gets its IDR as
-//     fast as before, and so does the first request after a quiet time. At level L an IDR for that client follows the last
-//     one no sooner than min(max_gap, base x 2^(L-1)), base = max(100 ms, 2 x airtime), airtime = the last IDR's bytes on
-//     the wire / the client's bitrate: how long the link the client chose needs for one IDR. So its IDRs take at most half
-//     that link at level 1 and less above, down to two a second. A request that waits is answered when its time comes,
-//     or by any IDR before (the encoder's own every 10 s, one for another client or a joining device). Random loss with
-//     room to spare keeps the level low: an IDR fails only when the next loss happens to fall within H. A blind request
-//     waits for the later of blind_hold and the hold-off.
-//     max_gap is 500 ms, measured on the console (2026-11-11, 3.4 Mbit/s, 1024-byte packets): with 2 s, and 10 % of the
-//     packets lost in bursts, an IDR held back for 1.9 s was lost as well and the next one held back again, and the
-//     picture stood for up to 4.5 s, where answering every request at once (0.6.0) left it broken for 0.5 s. Issue 37's
-//     loop was over without the hold-off: once large frames were paced (frame_pacing.hpp), the same stream through a
-//     buffer of 39 packets asked for one IDR in 30 s. So the hold-off is only the limit for a path where paced IDRs still
-//     fail, and it must not cost more than it saves: at most two IDRs a second for such a client, instead of up to five.
-//     Issue 37's stream (3.4 Mbit/s, about 160 kB per IDR on the wire): airtime 380 ms, so while every IDR fails, IDRs at
-//     most every 0.5 s from level 1 on. A LAN stream at 20 Mbit/s with 300 kB IDRs on the wire (240 kB, the largest the
-//     repository measured, frame_pacing.hpp): 0.24 s, 0.48 s, then 0.5 s.
-//     The level is each client's own, so that a device on a bad link doesn't hold back the IDRs of one on a good link
-//     that joined the same channel; the hold-off counts from the last IDR of the channel, whoever it was for.
-//  4. A device that joins a running channel needs an IDR to start: forced, only rule 1 applies.
-//  5. When asking the encoder fails, the request is dropped as before: the encoder's own IDR follows within 10 s.
+//  3. A device that joins a running channel needs an IDR to start: forced, only rule 1 applies.
+//  4. When asking the encoder fails, the request is dropped as before: the encoder's own IDR follows within 10 s.
+//
+// What isn't here: a hold-off for a client whose IDRs keep failing. One was built (after two failed IDRs in a row the
+// next IDR for that client followed the last one no sooner than twice the IDR's airtime at the client's bitrate) and
+// measured on the console (2026-11-11, firmware 13.00, 3.4 Mbit/s at 30 fps, 1024-byte packets, 10 % of the packets lost in
+// bursts of 8, runs of 30 s, the longest time between two frames at the client, median of six runs, the builds taking
+// turns): without a hold-off 561 and 558 ms (two rounds), 0.6.0, which answered every request at once, 619 ms; with the
+// wait doubling for each further pair of failures up to 500 ms, 1025 ms; without the doubling, 1113 ms; with the doubling up
+// to 2 s, 4.5 s in single runs, an IDR that was held back for 1.9 s being lost as well. On a path that loses packets a new
+// try is what brings the picture back, and every wait adds to the time it stands; a few waits of 130 to 430 ms in 10 s
+// were enough to double the longest gap. What a hold-off saves is bitrate where no IDR gets through at all: through a
+// bottleneck of 2.5 Mbit/s for that stream the host sent 4.8 to 4.9 Mbit/s without it and 3.6 to 4.1 with it (0.6.0: 5.8 to
+// 6.4), and no build got a picture through. So rules 1 and 2 are the only limit: at worst, while every IDR fails and the
+// client asks as fast as Moonlight can, one IDR per round trip + blind window + the encoder's 2 to 3 frames, 6 a second
+// for issue 37's stream (3.4 Mbit/s, about 160 kB per IDR on the wire) in tests/keyframe_policy_test.cpp. Issue 37's loop
+// itself ended with the pacing (frame_pacing.hpp): the same stream through a buffer of 39 packets asked for one IDR in 30 s.
 #pragma once
 #include "video/frame_pacing.hpp"
 #include <algorithm>
@@ -89,16 +74,11 @@ public:
     static constexpr ms encoder_patience{250};
     static constexpr ms rtt_cap{250};
     static constexpr ms blind_hold{250};
-    static constexpr int judge_frames = 4;
-    static constexpr ms quiet{2000};
-    static constexpr int max_level = 4;
-    static constexpr ms min_base{100};
-    static constexpr ms max_gap{500};
     static constexpr ms forget_after{60'000};
 
     // The client that asks: who it is (any number that tells the streams of the channel apart), its control
     // connection's smoothed round-trip time (0 while unknown), and its stream's bitrate, frame rate and whether it
-    // streams over the internet, which give an IDR's spread and airtime.
+    // streams over the internet, which give an IDR's spread.
     struct Client {
         std::uintptr_t id = 0;
         ms rtt{0};
@@ -109,43 +89,28 @@ public:
 
     enum class Outcome {
         now,     // the encoder is asked at the next poll
-        waits,   // held back until the client's hold-off has passed (rule 3)
         merged,  // an IDR is already wanted or on its way from the encoder (rule 1)
         blind,   // probably sent before the client could have the last IDR: answered blind_hold later unless one comes (rule 2)
     };
 
     // For the log: what happened to the requests since the last take_counts().
     struct Counts {
-        int requests = 0, merged = 0, blind = 0, waited = 0;
+        int requests = 0, merged = 0, blind = 0;
         int asked = 0;  // times the encoder was asked
-        clock::duration longest_wait{};  // the longest hold-off a request got
     };
 
     Outcome request(time_point now, const Client &client) {
         ++counts_.requests;
         forget_old(now);
         State &state = clients_[client.id];
-        state.client = client;
+        state.seen = now;
+        state.waiting = true;
         if (asked_at_) {
-            state.waiting = true;
             ++counts_.merged;
             return Outcome::merged;
         }
-        state.level = level_at(state, now);
         const bool blind = last_keyframe_ && now < *last_keyframe_ + blind_window(client);
-        if (state.answered && state.answered == last_keyframe_) {
-            if (now - *last_keyframe_ < blind_window(client) + judge_frames * frame_interval(client)) {
-                if (++state.failed_in_row >= 2) state.level = std::min(max_level, state.level + 1);
-            } else {
-                state.failed_in_row = 0;
-                state.level = std::max(0, state.level - 1);
-            }
-            state.answered.reset();
-        }
-        state.quiet_from = now;
-        state.waiting = true;
-        time_point due = last_keyframe_ && state.level > 0 ? std::max(now, *last_keyframe_ + gap(state)) : now;
-        if (blind) due = std::max(due, now + blind_hold);
+        const time_point due = blind ? now + blind_hold : now;
         const bool merged = wanted_.has_value() && *wanted_ <= due;
         want(due);
         if (merged) {
@@ -155,11 +120,6 @@ public:
         if (blind) {
             ++counts_.blind;
             return Outcome::blind;
-        }
-        if (due > now) {
-            ++counts_.waited;
-            counts_.longest_wait = std::max(counts_.longest_wait, due - now);
-            return Outcome::waits;
         }
         return Outcome::now;
     }
@@ -196,8 +156,7 @@ public:
         for (auto &[id, state] : clients_) {
             if (!state.waiting) continue;
             state.waiting = false;
-            state.answered = now;
-            state.quiet_from = now;
+            state.seen = now;
         }
     }
 
@@ -205,17 +164,6 @@ public:
     clock::duration blind_window(const Client &client) const {
         const auto rtt = std::min(client.rtt, rtt_cap);
         return idle_spread(client.kbps, client.fps, client.remote, keyframe_bytes_) + rtt * 3 / 4;
-    }
-
-    // The highest level of the clients as it stands at `now`, for the log.
-    int level(time_point now) const {
-        int highest = 0;
-        for (const auto &[id, state] : clients_) highest = std::max(highest, level_at(state, now));
-        return highest;
-    }
-    int level(std::uintptr_t id, time_point now) const {
-        const auto it = clients_.find(id);
-        return it == clients_.end() ? 0 : level_at(it->second, now);
     }
 
     // A stream left the channel. What only it waited for isn't asked for any more (an IDR the encoder was asked for still
@@ -229,39 +177,14 @@ public:
 
 private:
     struct State {
-        Client client;
-        int level = 0;
-        std::optional<time_point> quiet_from;  // its last request that rules 1 and 2 let through, or the IDR that answered it
-        int failed_in_row = 0;  // IDRs that answered it and failed, one after the other
+        time_point seen{};     // its last request, or the IDR that answered it
         bool waiting = false;  // it asked, and no IDR has come since
-        std::optional<time_point> answered;  // the IDR that answered it, until its next request judges it
     };
 
     void want(time_point due) { wanted_ = wanted_ ? std::min(*wanted_, due) : due; }
 
-    static clock::duration frame_interval(const Client &client) {
-        return std::chrono::duration_cast<clock::duration>(std::chrono::duration<double>(1.0 / (client.fps > 0 ? client.fps : 60)));
-    }
-
-    static int level_at(const State &state, time_point now) {
-        if (state.waiting || !state.quiet_from || now - *state.quiet_from < quiet) return state.level;
-        return std::max(0, state.level - static_cast<int>((now - *state.quiet_from) / quiet));
-    }
-
-    clock::duration gap(const State &state) const {
-        if (state.level <= 0) return clock::duration::zero();
-        clock::duration airtime{};
-        if (state.client.kbps > 0)
-            airtime = std::chrono::duration_cast<clock::duration>(
-                std::chrono::duration<double>(static_cast<double>(keyframe_bytes_) * 8.0 / (state.client.kbps * 1000.0)));
-        const clock::duration base = std::max<clock::duration>(min_base, 2 * airtime);
-        return std::min<clock::duration>(max_gap, base * (1 << (state.level - 1)));
-    }
-
     void forget_old(time_point now) {
-        std::erase_if(clients_, [&](const auto &entry) {
-            return !entry.second.waiting && entry.second.quiet_from && now - *entry.second.quiet_from > forget_after;
-        });
+        std::erase_if(clients_, [&](const auto &entry) { return !entry.second.waiting && now - entry.second.seen > forget_after; });
     }
 
     std::optional<time_point> last_keyframe_;

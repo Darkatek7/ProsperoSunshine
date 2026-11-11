@@ -184,19 +184,18 @@ std::size_t wire_bytes(std::size_t bytes) {
     return bytes + bytes * static_cast<std::size_t>(fec) / 100 + bytes / 25;
 }
 
-// At most every 10 s, and only when requests were held back: what the keyframe policy did. Caller holds captures.mutex.
+// At most every 10 s, and only for a stream that keeps asking: what the keyframe policy did. Caller holds captures.mutex.
 void log_keyframe_policy(int slot, channel_t &ch, std::chrono::steady_clock::time_point now,
                          std::chrono::steady_clock::time_point &last_logged) {
     if (now - last_logged < 10s) return;
     last_logged = now;
     const auto counts = ch.keyframes.take_counts();
-    if (counts.blind == 0 && counts.waited == 0) return;
+    // A stream that loses packets: at least one request a second, or one that crossed an IDR.
+    if (counts.blind == 0 && counts.requests < 10) return;
     BOOST_LOG(info) << "PS5 capture: channel "sv << slot << ", "sv << counts.requests << " keyframe requests in 10 s: "sv
                     << counts.blind << " likely sent before the client could have the last IDR (answered "sv
                     << prospero::KeyframePolicy::blind_hold.count() << " ms later unless one came), "sv << counts.merged
-                    << " answered by one on its way, "sv << counts.waited << " held back (up to "sv
-                    << std::chrono::duration_cast<std::chrono::milliseconds>(counts.longest_wait).count()
-                    << " ms, hold-off level "sv << ch.keyframes.level(now) << "); "sv << counts.asked << " IDRs asked for"sv;
+                    << " answered by one on its way; "sv << counts.asked << " IDRs asked for"sv;
 }
 
 // The channels as choose_channel sees them. Caller holds captures.mutex.

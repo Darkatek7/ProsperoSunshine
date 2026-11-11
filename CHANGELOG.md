@@ -62,8 +62,8 @@
   Tailscale, every large frame lost its end on the way, the client asked for a new picture, and that one was lost too:
   up to five a second, at two to three times the bitrate the client chose. To a client over the internet the host now
   sends large frames, such as a new picture, spread over up to 100 ms at no more than four times the stream's bitrate,
-  in bursts of at most 32 kB. When the new pictures keep failing for a device it sends them less often, at most two
-  a second, while a single loss still gets its new picture at once. On a LAN every frame goes out as before.
+  in bursts of at most 32 kB. A request that comes while a new picture is on its way is answered by that one, and
+  every other request at once, as before. On a LAN every frame goes out as before.
 - A stream no longer ends at its start when the console's video output loses its mode right then for more than a second,
   as while a game comes up behind the console's welcome screen (seen on 13.00). The host now waits for the new mode with
   the time it has left; a start takes 2 s at most, as before.

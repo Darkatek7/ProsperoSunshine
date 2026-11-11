@@ -98,7 +98,7 @@ int main() {
         assert(policy.request(t0 + 1s, pc) == Outcome::now);
         assert(policy.poll(t0 + 1s));
         const auto counts = policy.take_counts();
-        assert(counts.requests == 3 && counts.merged == 1 && counts.asked == 2 && counts.waited == 0);
+        assert(counts.requests == 3 && counts.merged == 1 && counts.asked == 2 && counts.blind == 0);
         assert(policy.take_counts().requests == 0);
     }
 
@@ -162,8 +162,7 @@ int main() {
 
     // A real request that only looks blind: ENet's round trip stuck at 110 ms on a path of 55 ms (the host measures it
     // only from acknowledgements of its own reliable messages). Every request about a lost IDR then falls into the
-    // window. It is answered blind_hold later instead of when the client gives up after 120 frames (4 s at 30 fps), and
-    // when every IDR is lost, the blind requests still count as failures: the IDRs thin out to two a second (max_gap).
+    // window. It is answered blind_hold later instead of when the client gives up after 120 frames (4 s at 30 fps).
     {
         KeyframePolicy::Client stale = phone;
         stale.rtt = 110ms;
@@ -180,19 +179,18 @@ int main() {
         while (!policy.poll(ask_at)) ask_at += 1ms;
         assert(ask_at - asks == KeyframePolicy::blind_hold);
 
-        // Every IDR lost, every request blind.
+        // Every IDR lost, every request blind: one IDR per blind_hold plus the time the request and the encoder take.
         Channel ch{KeyframePolicy{}, phone_idr, {}, 0};
         std::optional<clock_type::time_point> next_ask = t0;
         std::optional<clock_type::time_point> last_idr;
-        clock_type::duration longest{};
-        int late_gaps = 0;
+        clock_type::duration shortest = 1h, longest{};
         for (now = t0; now < t0 + 30s; now += 1ms) {
             const int before = ch.idrs;
             ch.tick(now);
             if (ch.idrs != before) {
                 if (last_idr) {
+                    shortest = std::min(shortest, now - *last_idr);
                     longest = std::max(longest, now - *last_idr);
-                    if (now - *last_idr >= KeyframePolicy::max_gap) ++late_gaps;
                 }
                 last_idr = now;
                 next_ask = now + spread + 10ms + 55ms;
@@ -202,14 +200,16 @@ int main() {
                 next_ask.reset();
             }
         }
-        assert(ch.policy.level(stale.id, now) == KeyframePolicy::max_level);
-        assert(ch.idrs < 62 && late_gaps >= 40 && longest <= KeyframePolicy::max_gap + 100ms);
-        assert(ch.policy.take_counts().blind == ch.idrs);
+        assert(shortest >= KeyframePolicy::blind_hold + 33ms && longest <= KeyframePolicy::blind_hold + 33ms + spread + 70ms);
+        assert(ch.policy.take_counts().blind == ch.idrs && ch.idrs > 60 && ch.idrs < 80);
     }
 
-    // Issue 37's loop: every IDR fails. The client asks once a P-frame lost while the IDR is on its way, once it sees
+    // Issue 37's loop: every IDR fails. The client asks once for a P-frame lost while the IDR is on its way, once it sees
     // that the IDR was lost (its spread, the round trip and a frame after it left), and every 150 ms while it waits, as
-    // in the log. In 0.6.0 that made up to five IDRs a second; the hold-off brings it down to two (max_gap).
+    // in the log. This is the most the two rules let through: the request that crossed the IDR looks blind and is taken
+    // along by the one after the window, which is answered at once; an IDR every 164 ms, 6 a second, while the path
+    // fails every one of them. A hold-off brought that down to two a second, and cost twice the time without a
+    // picture on a path that only loses packets (keyframe_policy.hpp), so there is none.
     {
         LoopClient client{phone, true, {}, {}, 0};
         Channel ch{KeyframePolicy{}, phone_idr, {}, 0};
@@ -228,48 +228,35 @@ int main() {
             }
             client.tick(now, ch.policy);
         }
-        assert(client.requests > 100);
-        // The first request is answered at once (the encoder delivers 2 frames later), and so is the second, since one
-        // failure alone may be chance. From then on the gap is max_gap: twice the airtime (160 kB at 3.4 Mbit/s: 0.37 s)
-        // is already more.
+        // The first request is answered at once (the encoder delivers 2 frames later), and so is every one after it.
         assert(first_idr && *first_idr - t0 < 50ms);
-        assert(gaps.size() >= 8);
-        assert(gaps[0] < 400ms);
-        for (std::size_t i = 1; i < gaps.size(); ++i) assert(gaps[i] >= KeyframePolicy::max_gap && gaps[i] <= KeyframePolicy::max_gap + 100ms);
-        assert(ch.idrs < 42);
-        assert(ch.policy.level(phone.id, now) == KeyframePolicy::max_level);
-        // The requests for P-frames lost while an IDR was on its way look blind; those after it merge into the IDR that
-        // waits for its hold-off.
+        assert(client.requests > 200 && ch.idrs > 110 && ch.idrs < 130);
+        for (const auto gap : gaps) assert(gap >= 150ms && gap <= 180ms);
+        // Each IDR answered two requests: the one that crossed the IDR before it, and the one about that IDR's loss.
         const auto counts = ch.policy.take_counts();
-        assert(counts.blind > 0 && counts.merged > counts.requests / 2 && counts.longest_wait <= KeyframePolicy::max_gap);
+        assert(counts.asked == ch.idrs && counts.blind >= ch.idrs - 2 && counts.requests == client.requests);
 
-        // The path recovers (the pacer gets the IDRs through): the IDR the client waits for holds, the client is quiet,
-        // and its level falls by one every 2 s from then on; while it waited it didn't fall. 8 s later a loss gets its IDR
-        // at once again.
+        // The path recovers (the pacer gets the IDRs through): the IDR the client waits for holds, and the client is quiet.
         client.idrs_fail = false;
         const int idrs = ch.idrs;
         while (ch.idrs == idrs) {
-            assert(ch.policy.level(phone.id, now) == KeyframePolicy::max_level);
             now += 1ms;
             ch.tick(now);
             client.tick(now, ch.policy);
         }
         client.keyframe(now, ch.policy);
-        const auto answered = now;
-        assert(ch.policy.level(phone.id, answered + 1900ms) == 4);
-        assert(ch.policy.level(phone.id, answered + 2s) == 3);
-        assert(ch.policy.level(phone.id, answered + 7s) == 1);
-        assert(ch.policy.level(phone.id, answered + 8s) == 0);
-        for (; now < answered + 8s; now += 1ms) {
+        for (const auto until = now + 5s; now < until; now += 1ms) {
             ch.tick(now);
             client.tick(now, ch.policy);
         }
+        // Only the request that crossed that IDR followed, answered blind_hold later.
+        assert(ch.idrs == idrs + 2);
         assert(ch.policy.request(now, phone) == Outcome::now);
     }
 
     // The same client on a path where IDRs hold: every request is answered at once. Each loss here also brings a request
     // that crossed its IDR; it is answered blind_hold later (the host can't tell it from a request about a lost IDR), so
-    // each loss costs two IDRs, and the second one, which holds, keeps the level at 0.
+    // each loss costs two IDRs.
     {
         LoopClient client{pc, false, {}, {}, 0};
         Channel ch{KeyframePolicy{}, pc_idr, {}, 0};
@@ -284,33 +271,11 @@ int main() {
             }
         }
         const auto counts = ch.policy.take_counts();
-        assert(counts.waited == 0 && counts.blind == 20 && ch.idrs == 40);
-        assert(ch.policy.level(pc.id, now) == 0);
+        assert(counts.blind == 20 && ch.idrs == 40);
     }
 
-    // An IDR that holds lowers the level: the client's next loss comes well after it.
-    {
-        KeyframePolicy policy;
-        auto now = t0;
-        clock_type::time_point idr{};
-        // Five IDRs; the first four fail (the next request comes right after the blind window). The first failure alone
-        // leaves the level at 0, each one after it raises it.
-        for (int i = 0; i < 5; ++i) {
-            policy.request(now, phone);
-            while (!policy.poll(now)) now += 5ms;
-            idr = now + 33ms;
-            policy.keyframe_sent(idr, phone_idr);
-            now = idr + policy.blind_window(phone) + 20ms;
-        }
-        assert(policy.level(phone.id, now) == 3);
-        // The fifth held: the next request comes a second after it. That is past the hold-off (max_gap), so it is answered
-        // at once, and the level is one lower.
-        assert(policy.request(idr + 1s, phone) == Outcome::now);
-        assert(policy.level(phone.id, idr + 1s) == 2);
-    }
-
-    // Random loss with room to spare (a LAN at 20 Mbit/s, a loss every 400 ms on average): most IDRs hold, the level stays
-    // low and nearly every request is answered at once.
+    // Random loss (a LAN at 20 Mbit/s, a loss every 400 ms on average): every request gets its IDR within the encoder's
+    // two frames, or was answered by one on its way.
     {
         Channel ch{KeyframePolicy{}, pc_idr, {}, 0};
         std::mt19937 rng(37);
@@ -320,119 +285,79 @@ int main() {
         };
         auto now = t0;
         auto loss = after(now);
-        std::optional<clock_type::time_point> asks;
-        int requests = 0, highest = 0;
+        std::optional<clock_type::time_point> asks, asked;
+        clock_type::duration longest{};
+        int requests = 0;
         for (; now < t0 + 120s; now += 1ms) {
+            const int before = ch.idrs;
             ch.tick(now);
+            if (ch.idrs != before && asked) {
+                longest = std::max(longest, now - *asked);
+                asked.reset();
+            }
             if (now >= loss) {
                 // The client asks when the next frame is complete, and the request reaches the host a round trip later.
                 if (!asks) asks = now + 17ms;
                 loss = after(now);
             }
             if (asks && *asks <= now) {
-                ch.policy.request(now, pc);
+                const auto outcome = ch.policy.request(now, pc);
+                if (!asked && outcome != Outcome::blind) asked = now;
                 ++requests;
                 asks.reset();
             }
-            highest = std::max(highest, ch.policy.level(pc.id, now));
         }
         const auto counts = ch.policy.take_counts();
-        assert(requests > 200);
-        assert(highest <= 2);
-        // Fewer than one request in twenty waits, and none for long.
-        assert(counts.waited * 20 < counts.requests);
-        assert(counts.longest_wait < 600ms);
+        assert(requests > 200 && counts.requests == requests);
+        assert(longest <= 35ms);
+        // Hardly any request falls into a LAN's blind window of a few milliseconds.
+        assert(counts.blind * 20 < counts.requests);
     }
 
-    // The encoder's own IDR: a request within its blind window is answered by it, one after it at once, also when it
-    // comes soon after it, since that IDR didn't answer this client.
+    // The encoder's own IDR: a request within its blind window is answered by it or blind_hold later, one after the window
+    // at once.
     {
         KeyframePolicy policy;
         policy.keyframe_sent(t0, pc_idr);
         assert(policy.request(t0 + 150ms, pc) == Outcome::now);
-        assert(policy.level(pc.id, t0 + 150ms) == 0);
-        // A request waiting for its hold-off is answered by the encoder's own IDR as well.
-        KeyframePolicy busy;
-        auto now = t0;
-        for (int i = 0; i < 4; ++i) {
-            busy.request(now, phone);
-            while (!busy.poll(now)) now += 5ms;
-            now += 33ms;
-            busy.keyframe_sent(now, phone_idr);
-            now += busy.blind_window(phone) + 20ms;
-        }
-        assert(busy.request(now, phone) == Outcome::waits);
-        assert(!busy.poll(now));
-        busy.keyframe_sent(now + 100ms, phone_idr);  // the periodic one
-        assert(!busy.poll(now + 3s));
+        assert(policy.poll(t0 + 150ms));
     }
 
-    // Two devices on one channel: the phone's bad link holds back its own IDRs, not those of the PC on the LAN.
-    {
-        LoopClient client{phone, true, {}, {}, 0};
-        Channel ch{KeyframePolicy{}, phone_idr, {}, 0};
-        auto now = t0;
-        client.ask(now);
-        for (; now < t0 + 10s; now += 1ms) {
-            const int before = ch.idrs;
-            ch.tick(now);
-            if (ch.idrs != before) client.keyframe(now, ch.policy);
-            client.tick(now, ch.policy);
-        }
-        assert(ch.policy.level(phone.id, now) == KeyframePolicy::max_level);
-        // The phone waits for its hold-off; the PC's single loss is answered at once, and its IDR answers the phone too.
-        // Right after an IDR (past its blind window) the phone's next request waits.
-        const int idrs = ch.idrs;
-        while (ch.idrs == idrs) {
-            now += 1ms;
-            ch.tick(now);
-        }
-        now += ch.policy.blind_window(phone) + 1ms;
-        assert(ch.policy.request(now, phone) == Outcome::waits);
-        assert(ch.policy.level(phone.id, now) >= 3);
-        assert(!ch.policy.poll(now));
-        assert(ch.policy.request(now + 1ms, pc) == Outcome::now);
-        assert(ch.policy.poll(now + 1ms));
-        assert(ch.policy.level(pc.id, now + 1ms) == 0);
-        ch.policy.forget(phone.id);
-        assert(ch.policy.level(phone.id, now) == 0);
-    }
-
-    // A joining device's IDR: at once, whatever the level, but not twice while one is on its way.
+    // Two devices on one channel: a request of the phone that waits for blind_hold doesn't hold back the PC's, and the
+    // IDR for the PC answers the phone as well.
     {
         KeyframePolicy policy;
-        auto now = t0;
-        for (int i = 0; i < 4; ++i) {
-            policy.request(now, phone);
-            while (!policy.poll(now)) now += 5ms;
-            now += 33ms;
-            policy.keyframe_sent(now, phone_idr);
-            now += policy.blind_window(phone) + 20ms;
-        }
-        assert(policy.request(now, phone) == Outcome::waits);
+        policy.keyframe_sent(t0, phone_idr);
+        assert(policy.request(t0 + 10ms, phone) == Outcome::blind);
+        assert(!policy.poll(t0 + 10ms));
+        assert(policy.request(t0 + 11ms, pc) == Outcome::now);
+        assert(policy.poll(t0 + 11ms));
+        policy.keyframe_sent(t0 + 44ms, phone_idr);
+        assert(!policy.poll(t0 + 10ms + KeyframePolicy::blind_hold) && !policy.poll(t0 + 2s));
+    }
+
+    // A joining device's IDR: at once, also while a request waits, but not twice while one is on its way.
+    {
+        KeyframePolicy policy;
+        policy.keyframe_sent(t0, phone_idr);
+        const auto now = t0 + 10ms;
+        assert(policy.request(now, phone) == Outcome::blind);
         assert(!policy.poll(now));
         policy.force();
         assert(policy.poll(now));
         policy.force();
         assert(!policy.poll(now + 10ms));
         policy.keyframe_sent(now + 33ms, phone_idr);
-        assert(!policy.poll(now + 40ms));
+        assert(!policy.poll(now + 40ms) && !policy.poll(now + KeyframePolicy::blind_hold));
     }
 
-    // A device that leaves while it waits for its hold-off: nobody else waits, so no IDR is asked for it.
+    // A device that leaves while its request waits: nobody else waits, so no IDR is asked for it.
     {
         KeyframePolicy policy;
-        auto now = t0;
-        for (int i = 0; i < 4; ++i) {
-            policy.request(now, phone);
-            while (!policy.poll(now)) now += 5ms;
-            now += 33ms;
-            policy.keyframe_sent(now, phone_idr);
-            now += policy.blind_window(phone) + 20ms;
-        }
-        assert(policy.request(now, phone) == Outcome::waits);
+        policy.keyframe_sent(t0, phone_idr);
+        assert(policy.request(t0 + 10ms, phone) == Outcome::blind);
         policy.forget(phone.id);
-        assert(!policy.poll(now + 3s));
+        assert(!policy.poll(t0 + 3s));
         // With another device still waiting, its request stays.
         KeyframePolicy two;
         two.keyframe_sent(t0, phone_idr);
@@ -456,23 +381,23 @@ int main() {
             policy.keyframe_sent(now, 50'000'000);
             now += 10ms;
         }
-        assert(policy.level(odd.id, now) == KeyframePolicy::max_level);
         policy.request(now, odd);
         auto at = now;
         while (!policy.poll(at)) at += 1ms;
-        assert(at - now <= KeyframePolicy::max_gap);
+        assert(at - now <= KeyframePolicy::blind_hold);
     }
 
-    // A client unknown for a minute is forgotten.
+    // Clients that came and went over hours (their state is forgotten a minute after their last request): nothing piles
+    // up that would change an answer.
     {
         KeyframePolicy policy;
-        for (int i = 0; i < 3; ++i) {
-            policy.request(t0 + i * 300ms, phone);
-            policy.poll(t0 + i * 300ms);
-            policy.keyframe_sent(t0 + i * 300ms + 33ms, phone_idr);
+        auto now = t0;
+        for (std::uintptr_t id = 100; id < 400; ++id, now += 2min) {
+            const KeyframePolicy::Client visitor{id, 20ms, 10'000, 60, true};
+            assert(policy.request(now, visitor) == Outcome::now);
+            assert(policy.poll(now));
+            policy.keyframe_sent(now + 33ms, pc_idr);
         }
-        policy.request(t0 + 2min, pc);
-        assert(policy.level(phone.id, t0 + 2min) == 0);
     }
 
     std::cout << "keyframe_policy_test: OK\n";
