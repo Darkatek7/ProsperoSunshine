@@ -8,6 +8,7 @@ verified state with evidence: `STATUS.md` (both German).
 - `src/sunshine/` – PS5 replacements for Sunshine parts (video, audio, input, process, main).
 - `src/platform/ps5/` – Avcap2 capture (`capture.c`), `SharedCapture`, backend glue.
 - `src/capture/`, `src/video/` – portable logic with unit tests in `tests/`.
+- `tests/deps/` – tests built against the patched dependency sources (`scripts/test_deps.sh`, not part of `scripts/test.sh`).
 - `src/payloads/` – standalone payloads that ship: `firmware_probe` and `host_restart` (release archive), `relaunch_helper`
   (embedded into the host).
 - `src/probes/` – probes and spikes, standalone research and test payloads built into `out/` but not shipped.
@@ -29,6 +30,7 @@ docker run --rm -e PROSPERO_COMMIT=$(git rev-parse --short=8 HEAD) --mount type=
 docker run --rm -e PROSPERO_COMMIT=$(git rev-parse --short=8 HEAD) -e PROSPERO_DEBUG=1 --mount type=bind,source="$PWD",target=/repo prosperosunshine-sdk:v0.45 bash scripts/build.sh   # the debug flavor -> out/debug/
 docker run --rm --mount type=bind,source="$PWD",target=/repo prosperosunshine-sdk:v0.45 bash scripts/test.sh
 docker run --rm --mount type=bind,source="$PWD",target=/repo prosperosunshine-sdk:v0.45 bash scripts/fuzz.sh [seconds] [target ...]   # libFuzzer, 0 = replay the seeds
+docker run --rm --mount type=bind,source="$PWD",target=/repo prosperosunshine-sdk:v0.45 bash scripts/test_deps.sh   # Simple-Web-Server as patched, as the host configures it
 ```
 
 `PROSPERO_COMMIT` names the commit the host reports; in a git worktree the container can't find it itself. On a machine with
@@ -38,6 +40,11 @@ Windows, `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 
 `scripts/fuzz.sh` fuzzes the portable parsers (`tests/fuzz/`, seeds in `tests/fuzz/corpus/<target>/`); CI runs it for 5 s per
 target. A crash leaves its input in `out/fuzz/crash-<target>-*` (reproduce with `out/fuzz/<target> <file>`): fix the bug, add
 a case to that file's unit test and move the input into the seeds. Don't edit the script while it runs.
+
+`scripts/test_deps.sh` (`tests/deps/`) and the fuzz targets `sws_parse` and `sws_server` run against the patched
+Simple-Web-Server and Boost's headers: `scripts/dep_headers.sh` fetches and patches only those (`scripts/deps.sh --sources`,
+nothing is built for the PS5), and a patch that no longer applies fails them. A bug in the library is fixed with a patch
+in `patches/simple-web-server/` and a case in `tests/deps/sws_server_test.cpp`.
 
 The app and its tests (the app bundles `out/prospero_sunshine.elf`, so build the host first). Build its image once with
 `docker build -t prosperosunshine-app:2 -f app/Dockerfile app`; the volume `prosperosunshine-app-cache` needs the ps5-opengl

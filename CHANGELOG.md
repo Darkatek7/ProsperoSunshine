@@ -7,6 +7,9 @@
 - **A malformed request could stop the host.** One request on the stream port with a body in chunks, cut off inside a
   chunk, ended the host; it needed no pairing. The stream ports now take no request body at all, which GameStream never
   sends, and keep serving after an error on one connection.
+- **A request could end the web page's server.** A body in chunks with a chunk size near 2^64 got past the size limit
+  (the check added two numbers that wrapped around) and ended the page's HTTPS server, without a login; the page came
+  back after about 10 s. The stream ports were not affected. Found by the new fuzz target for the HTTP library.
 - **Device limits use the request's own connection.** The limits of a device (profiles, hidden apps, console menus)
   were judged by the certificate of the last TLS handshake, so a limited device could be taken for another paired
   device that connected at the same moment.

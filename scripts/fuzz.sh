@@ -7,6 +7,9 @@
 # target      one or more of the names below; default all of them
 # FUZZ_JOBS   targets run at the same time, default 1 (each uses one core)
 # FUZZ_ARGS   more libFuzzer options, e.g. FUZZ_ARGS="-max_len=512 -seed=7"
+# sws_parse and sws_server fuzz Simple-Web-Server, the library that reads a request first. They need its patched sources and
+# Boost's headers, which scripts/dep_headers.sh fetches and checks on first use (no PS5 library is built; the sources are the
+# ones the host is built from). sws_server starts HTTP servers on 127.0.0.1 ports the system picks and sends them each input.
 # Seeds are tests/fuzz/corpus/<target>/ (tracked: hand-written starting points and one file for every bug a fuzzer found).
 # What a run learns goes to out/fuzz/work/<target>/ and is kept for the next run; a crash, hang or sanitizer report leaves its
 # input in out/fuzz/crash-<target>-* (reproduce with out/fuzz/<target> <that file>). Move a fixed bug's input into the seeds.
@@ -34,14 +37,27 @@ declare -A sources=(
     [log]=""
     [input]=""
     [app_diag]="app/src/psapp/diag.cpp app/src/psapp/autoload.cpp"
+    [sws_parse]=""
+    [sws_server]=""
 )
+# Targets built against the patched dependency sources.
+declare -A needs_deps=([sws_parse]=1 [sws_server]=1)
 # Longest input a target uses; mDNS packets and the files are short, a param.sfo can be longer.
-declare -A max_len=([mdns]=600 [titles]=1500 [web_plain]=1500 [file_bridge]=600 [web_auth]=1500 [log]=1500 [app_diag]=1500 [input]=1500)
-all=(mdns upnp web_plain http_guard web_lines web_auth device_files file_bridge conf title_profile titles log app_diag input)
+declare -A max_len=([mdns]=600 [titles]=1500 [web_plain]=1500 [file_bridge]=600 [web_auth]=1500 [log]=1500 [app_diag]=1500 [input]=1500 [sws_parse]=1500 [sws_server]=1500)
+all=(mdns upnp web_plain http_guard web_lines web_auth device_files file_bridge conf title_profile titles log app_diag input sws_parse sws_server)
 targets=("$@")
 [ ${#targets[@]} -gt 0 ] || targets=("${all[@]}")
 for t in "${targets[@]}"; do
     [ -f "$root/tests/fuzz/${t}_fuzz.cpp" ] && [ "${sources[$t]+set}" ] || { echo "unknown target: $t (known: ${all[*]})" >&2; exit 2; }
+done
+
+DEP_FLAGS=()
+for t in "${targets[@]}"; do
+    if [ "${needs_deps[$t]+set}" ]; then
+        # shellcheck source=scripts/dep_headers.sh
+        source "$root/scripts/dep_headers.sh"
+        break
+    fi
 done
 
 build() {
@@ -50,7 +66,8 @@ build() {
     # -fno-sanitize-recover: an undefined-behavior report stops the run and leaves its input, as a crash does.
     clang++-18 -std=c++23 -stdlib=libstdc++ -Wall -Wextra -Werror -O1 -g -UNDEBUG \
         -fsanitize=fuzzer,address,undefined,float-cast-overflow -fno-sanitize-recover=undefined,float-cast-overflow \
-        -I "$root/src" -I "$out/include" -I "$root/tests/fuzz" "$root/tests/fuzz/${name}_fuzz.cpp" "${extra[@]}" -o "$out/$name"
+        -I "$root/src" -I "$out/include" -I "$root/tests/fuzz" -I "$root/tests/deps" "${DEP_FLAGS[@]}" \
+        "$root/tests/fuzz/${name}_fuzz.cpp" "${extra[@]}" -o "$out/$name"
 }
 run() {
     local name=$1 stop=() seeds=()

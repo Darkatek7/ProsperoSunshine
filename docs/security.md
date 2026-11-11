@@ -296,6 +296,10 @@ Gemessen am ausgelieferten `prospero_sunshine.elf` (`readelf`, `objdump`):
   mitten in einem Stück endete, ließ den Host abstürzen; dafür brauchte es keine Kopplung. Die beiden Server nehmen jetzt
   keinen Inhalt mehr an und bedienen nach einem Fehler auf einer Verbindung weiter (Patch 0032,
   `patches/simple-web-server/0002-error-callback-and-no-content.patch`).
+- **Eine Anfrage beendete den Server der Web-Seite:** Eine Chunk-Größe nahe 2^64 umging die Prüfung der Größe (die
+  Summe lief über) und beendete den Server der Web-Seite mit `std::length_error`; eine Anfrage genügte, ohne Login, und
+  die Seite kam nach etwa 10 s wieder (`patches/simple-web-server/0003`, gefunden vom Fuzz-Ziel `sws_server`). Die
+  GameStream-Ports waren nicht betroffen, weil sie keinen Inhalt annehmen.
 - **Logs:** Die normale Fassung schrieb öffentliche Adressen im Klartext (die Außenadresse des Routers aus UPnP, einen
   Fremden, der koppeln wollte), der Bericht maskierte keine IPv6-Adresse, und die Werte, die UDP-Pakete einem Stream
   zuordnen, standen im Debug-Log (Abschnitt „Was Log und Bericht über Besitzer verraten“).
