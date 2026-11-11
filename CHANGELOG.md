@@ -2,8 +2,76 @@
 
 ## Unreleased
 
+### Security
+
+- **A malformed request could stop the host.** One request on the stream port with a body in chunks, cut off inside a
+  chunk, ended the host; it needed no pairing. The stream ports now take no request body at all, which GameStream never
+  sends, and keep serving after an error on one connection.
+- **Device limits use the request's own connection.** The limits of a device (profiles, hidden apps, console menus)
+  were judged by the certificate of the last TLS handshake, so a limited device could be taken for another paired
+  device that connected at the same moment.
+- **Pairing only at home.** Pairing is refused from internet addresses unless **Pair over the internet** is on (off by
+  default); pair on the console's network or over Tailscale. A pending pairing belongs to the address that started it,
+  so another device can no longer end or block it, and one address can have at most two pending. Pairing device names
+  are limited to 128 bytes.
+- With **Quit closes the game**, a device closes only a game it started, unless it is trusted.
+- With encryption **Required**, clients that would send their input under the old control-stream encryption are refused.
+- `serverinfo` over plain HTTP no longer tells internet addresses the running game or the console's LAN address, the
+  report port answers only the LAN and Tailscale, and a hidden app's cover is not served to devices it is hidden from.
+- Port mappings a router keeps without a time limit are removed at the next start after a crash, also with UPnP off.
+- The control socket's development switch `control_lan` shows as a warning in the log, the app and the web page, and an
+  idle client of the control socket is let go after 30 s.
+- **Logs and report hide more.** Public addresses (IPv4 and IPv6) are masked in every build as `<public-1>`: before, the
+  normal build wrote the router's internet side from UPnP and the address of a stranger who tried to pair. The report
+  masked no IPv6 address, and the values that tie a stream's UDP packets to it were readable in the debug log. The debug
+  build and the report now mask the home's addresses by kind (`<lan-1>`, `<tailscale-1>`), host names, and the ids and
+  device names a client sends, with the same tag for the same value. See "What the files hide" in the README.
+- miniupnpc: fixed a one-byte read past the end of a router's answer (CVE-2026-110655, CVE-2026-110656; only with UPnP on).
+- A `sunshine.conf` sent through the app's file bridge can no longer hide a path key behind a lone carriage return or a
+  list: the check reads the file the way Sunshine does.
+
+### Added
+
+- **Error correction in the Settings** of the app and the web page: `fec_percentage`, the share of repair packets for
+  the video (20 % by default, 0 to 80). More of it survives more loss on a bad network but leaves less of the bitrate
+  for the picture.
+- **Web page: Settings in the app's groups** (Host, Playing, Network, Experimental), from the same list. The Experimental
+  firmware switches show as in the app ("Verified here", "No effect here") and are still changed in the app.
+- **Web page: masked log download.** Logs offers "Download masked" (addresses, device names and game titles hidden as in
+  the report) before "Download raw", says that the raw file is not for an issue, and has a filter by text and level.
+- **Web page: stream trouble in one line.** A stream whose device keeps asking for new pictures after lost frames, or
+  that is sent far above what it asked for, gets a plain line, with the numbers behind a button.
+- **Debug log: what the host costs and what the sound does.** With `min_log_level = debug`, every 5 s a `Host load:`
+  line (CPU, wakeups and page faults per thread group, memory) and a `PS5 audio:` line (packets and level read from the
+  console, frames passed on to the streams as sound and as silence). The debug build also times a few basic operations
+  at its start (`perfcheck` lines).
+
+### Changed
+
+- **Web page, use without a mouse or with a screen reader:** named buttons per device, tabs and messages that work from
+  the keyboard, announcements for pairing requests and stream trouble, stronger colours in the light theme, no moving
+  parts with "reduce motion", no sideways scrolling on a phone.
+- The web page's log download takes only `sunshine` and `diag` as file names (anything else meant `sunshine.log` before).
+
 ### Fixed
 
+- **Streams over a slow or lossy link no longer get stuck asking for new pictures** (issue 37). Over mobile data and
+  Tailscale, every large frame lost its end on the way, the client asked for a new picture, and that one was lost too:
+  up to five a second, at two to three times the bitrate the client chose. To a client over the internet the host now
+  sends large frames, such as a new picture, spread over up to 100 ms at no more than four times the stream's bitrate,
+  in bursts of at most 32 kB. When the new pictures keep failing for a device it sends them less often, down to one
+  every 2 s, while a single loss still gets its new picture at once. On a LAN every frame goes out as before.
+- A stream that ended while its last frames were still on their way to the network could make the host use memory it
+  had already freed.
+- A send that failed on the console no longer sends the same video packets twice or holds up every stream for up to a
+  second.
+- **The app's Settings show every option again** (0.6.0). Since UPnP joined the settings, the page placed the options by
+  position: "PS for all players" landed among the Experimental switches and was locked as if it were one, "150 Mbit/s"
+  on 10.x showed no value and no help, "Below 1080p" was not locked on firmware where it is verified, and Surround was
+  missing. The page now lays the options out from their list, in groups, all on one screen.
+- The web page no longer shows a stream sent far above its asked rate in green.
+- A lone surrogate escape in a game's `param.json` no longer puts invalid UTF-8 into the app list, and a mouse wheel
+  report can no longer overflow the step count.
 - **A device gets its profile back after 45 s** (issue 52). When a player left and their profile stayed signed in because
   it was in front on the console, most often because their game was still open there, the host forgot it had signed it
   in. Coming back later than 45 s, their controller could only watch, and the console asked to sign the profile out
