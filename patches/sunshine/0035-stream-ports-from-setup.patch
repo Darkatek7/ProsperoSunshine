@@ -1,0 +1,88 @@
+ProsperoSunshine: the stream's UDP ports open at the first RTSP SETUP instead of at ANNOUNCE
+
+Moonlight starts its audio ping as soon as the SETUP for audio is answered (moonlight-common-c, AudioStream.c, for GameStream's
+sake), but Sunshine opened its UDP ports only at ANNOUNCE, a few round trips later. The first ping went to a closed port, and
+the console answers that with ICMP port unreachable (measured with no stream running: a connected socket gets ECONNREFUSED
+on 48000 and 47998). A direct client doesn't care. ps5-tailscale relays each client over a connected UDP socket to
+127.0.0.1, and its reply loop ends on that error while the pings keep the flow alive: the host's audio then never reaches
+the client (issue 37: picture, no sound, over Tailscale only; reported upstream as holdmysocks/ps5-tailscale#10).
+
+stream::hold_ports() takes a reference on the broadcast context, which opens the ports, and the launch session keeps it
+from its first SETUP until ANNOUNCE has started the session (which holds its own) or failed. A launch session that never
+gets to ANNOUNCE drops it with the launch session.
+
+--- a/src/rtsp.cpp
++++ b/src/rtsp.cpp
+@@ -1046,6 +1046,12 @@
+       return;
+     }
+ 
++    // ProsperoSunshine: open the ports before the client learns them; its audio pings start with this answer.
++    if (!session.held_ports) {
++      session.held_ports = stream::hold_ports();
++      BOOST_LOG(debug) << "Stream ports "sv << (session.held_ports ? "open from SETUP"sv : "could not be opened at SETUP"sv);
++    }
++
+     seqn.next = &session_option;
+ 
+     session_option.option = const_cast<char *>("Session");
+@@ -1316,7 +1322,10 @@
+     auto stream_session = stream::session::alloc(config, session);
+     rtsp_server->insert(stream_session);
+ 
+-    if (stream::session::start(*stream_session, sock.remote_endpoint().address().to_string())) {
++    const bool started = stream::session::start(*stream_session, sock.remote_endpoint().address().to_string()) == 0;
++    // ProsperoSunshine: the session holds the ports now, or the start failed; the hold from SETUP is no longer needed.
++    session.held_ports.reset();
++    if (!started) {
+       BOOST_LOG(error) << "Failed to start a streaming session"sv;
+ 
+       rtsp_server->remove(stream_session);
+--- a/src/rtsp.h
++++ b/src/rtsp.h
+@@ -102,6 +102,9 @@
+     std::string rtsp_url_scheme;  ///< URL scheme selected by the RTSP SETUP flow.
+     uint32_t rtsp_iv_counter;  ///< Counter value mixed into encrypted RTSP IVs.
+     std::string client_cert;  ///< PEM certificate for the paired Moonlight client.
++
++    /// ProsperoSunshine: the stream's UDP ports, held open from the first SETUP until ANNOUNCE starts the session (stream::hold_ports).
++    std::shared_ptr<void> held_ports;
+   };
+ 
+   /**
+--- a/src/stream.cpp
++++ b/src/stream.cpp
+@@ -2099,6 +2099,14 @@
+   /**
+    * @brief Bind the GameStream UDP and control sockets used for a streaming session.
+    */
++  std::shared_ptr<void> hold_ports() {
++    auto ref = broadcast.ref();
++    if (!ref) {
++      return nullptr;
++    }
++    return std::make_shared<decltype(ref)>(std::move(ref));
++  }
++
+   int start_broadcast(broadcast_ctx_t &ctx) {
+     auto address_family = net::get_effective_address_family(net::af_from_enum_string(config::sunshine.address_family));
+     auto protocol = address_family == net::IPV4 ? udp::v4() : udp::v6();
+--- a/src/stream.h
++++ b/src/stream.h
+@@ -43,6 +43,16 @@
+     std::optional<int> gcmap;  ///< Optional game-controller mapping override from the launch request.
+   };
+ 
++  /**
++   * @brief Open the stream's UDP ports (video, audio, control) until the returned handle is dropped.
++   * @details ProsperoSunshine: Moonlight pings the audio port from its RTSP SETUP on, while the ports used to open only at
++   * ANNOUNCE. The console answers a ping to a closed port with ICMP port unreachable, and a relay between client and host
++   * that forwards over a connected UDP socket (ps5-tailscale) can stop passing the host's replies back after that error:
++   * the stream then has no sound. Holding the ports from the first SETUP on leaves no closed port to ping.
++   * @return Handle that keeps the ports open, or nullptr if they could not be opened.
++   */
++  std::shared_ptr<void> hold_ports();
++
+   namespace session {
+     /**
+      * @brief Enumerates supported state options.

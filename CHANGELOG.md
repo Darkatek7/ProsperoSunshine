@@ -10,6 +10,14 @@
   bitrate, still within 100 ms. `internet_pace_percent` (200) and `internet_burst_kb` (16) in `sunshine.conf` change both
   for a path that needs it (README, "Playing over the internet"). A client on the LAN is not paced, as before.
 
+### Fixed
+
+- **No sound over ps5-tailscale** (issue 37). Moonlight pings the audio port as soon as the stream is set up, and the host
+  opened its stream ports only a few steps later. The console answered the first ping with "port unreachable", and
+  ps5-tailscale's relay then stopped passing the host's sound back for the whole stream, while the picture came through.
+  The host now opens the ports at the first setup step. Reported to ps5-tailscale as well
+  ([holdmysocks/ps5-tailscale#10](https://github.com/holdmysocks/ps5-tailscale/issues/10)).
+
 ## 0.6.5 (2026-11-11)
 
 ### Security
