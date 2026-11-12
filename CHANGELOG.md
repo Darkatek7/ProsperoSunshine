@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **Clients over the internet get large frames more slowly** (issue 37). 0.6.5 sent up to 32 kB of a frame at once and
+  the rest at four times the stream's bitrate: at 1080p and 15 Mbit/s that is 60 Mbit/s, more than the console's upload
+  in the report, and over Tailscale the picture froze in waves. Now up to 16 kB leave at once and the rest at twice the
+  bitrate, still within 100 ms. `internet_pace_percent` (200) and `internet_burst_kb` (16) in `sunshine.conf` change both
+  for a path that needs it (README, "Playing over the internet"). A client on the LAN is not paced, as before.
+
 ## 0.6.5 (2026-11-11)
 
 ### Security

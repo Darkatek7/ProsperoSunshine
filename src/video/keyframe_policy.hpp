@@ -50,7 +50,7 @@
 // were enough to double the longest gap. What a hold-off saves is bitrate where no IDR gets through at all: through a
 // bottleneck of 2.5 Mbit/s for that stream the host sent 4.8 to 4.9 Mbit/s without it and 3.6 to 4.1 with it (0.6.0: 5.8 to
 // 6.4), and no build got a picture through. So rules 1 and 2 are the only limit: at worst, while every IDR fails and the
-// client asks as fast as Moonlight can, one IDR per round trip + blind window + the encoder's 2 to 3 frames, 6 a second
+// client asks as fast as Moonlight can, one IDR per round trip + blind window + the encoder's 2 to 3 frames, 5 a second
 // for issue 37's stream (3.4 Mbit/s, about 160 kB per IDR on the wire) in tests/keyframe_policy_test.cpp. Issue 37's loop
 // itself ended with the pacing (frame_pacing.hpp): the same stream through a buffer of 39 packets asked for one IDR in 30 s.
 #pragma once
@@ -85,6 +85,7 @@ public:
         std::uint32_t kbps = 0;
         int fps = 60;
         bool remote = false;
+        PacingSettings pacing{};  // what sunshine.conf sets for streams over the internet
     };
 
     enum class Outcome {
@@ -163,7 +164,7 @@ public:
     // How long after the last IDR a request of `client` was certainly sent before it could have it (rule 2).
     clock::duration blind_window(const Client &client) const {
         const auto rtt = std::min(client.rtt, rtt_cap);
-        return idle_spread(client.kbps, client.fps, client.remote, keyframe_bytes_) + rtt * 3 / 4;
+        return idle_spread(client.kbps, client.fps, client.remote, keyframe_bytes_, client.pacing) + rtt * 3 / 4;
     }
 
     // A stream left the channel. What only it waited for isn't asked for any more (an IDR the encoder was asked for still

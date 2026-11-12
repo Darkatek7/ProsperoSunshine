@@ -51,9 +51,9 @@ int main() {
         assert(pacer.paces());
         auto at = t0;
         for (int i = 0; i < 120; ++i, at += 16667us) assert(send_frame(pacer, at, at, 6000, false) == 0s);
-        // The burst is four average frames (what the client asked for: 7083 bytes), the rate four times the stream's.
-        assert(std::abs(pacer.burst_bytes() - 4 * 3400 * 1000 / 8.0 / 60) < 1);
-        assert(std::abs(pacer.rate() - 4 * 3400 * 1000 / 8.0) < 1);
+        // The burst is four average frames (what the client asked for: 7083 bytes) up to 16 kB, the rate twice the stream's.
+        assert(pacer.burst_bytes() == remote_burst_bytes);
+        assert(std::abs(pacer.rate() - 2 * 3400 * 1000 / 8.0) < 1);
 
         // Its keyframe (180 kB on the wire) is spread over 60 to 100 ms instead of leaving in one burst.
         const auto spread = send_frame(pacer, at, at, 180'000, true);
@@ -61,7 +61,7 @@ int main() {
         // In the first millisecond no more than the burst and a packet or two leave.
         assert(pacer.packets_due(at + 1ms, 0, packet) * packet <= pacer.burst_bytes() + 0.001 * pacer.rate() + 2 * packet);
         // The keyframe didn't change the average it is paced at.
-        assert(std::abs(pacer.burst_bytes() - 4 * 3400 * 1000 / 8.0 / 60) < 1);
+        assert(std::abs(pacer.rate() - 2 * 3400 * 1000 / 8.0) < 1);
 
         // The frame behind it waited for it and follows at the stream's pace: the burst is empty.
         const auto next_arrival = at + 16667us;
@@ -102,7 +102,7 @@ int main() {
     }
 
     // A remote stream that carries more than the client asked for (10.x keeps no bitrate): the pace follows what it
-    // carries; the burst stays at most 32 kB.
+    // carries; the burst stays at most 16 kB.
     {
         FramePacer pacer;
         pacer.configure(3000, 60, true);
@@ -123,12 +123,48 @@ int main() {
     // 30 fps: the same bitrate makes twice the average frame; the rate is the same, the burst at least as large.
     {
         FramePacer p30, p60;
-        p30.configure(3000, 30, true);
-        p60.configure(3000, 60, true);
+        p30.configure(1000, 30, true);
+        p60.configure(1000, 60, true);
         assert(std::abs(p30.rate() - p60.rate()) < 1);
         assert(p30.burst_bytes() >= p60.burst_bytes());
-        assert(std::abs(p60.burst_bytes() - 4 * 3000 * 1000 / 8.0 / 60) < 1);
+        assert(std::abs(p60.burst_bytes() - 4 * 1000 * 1000 / 8.0 / 60) < 1);
         assert(p30.burst_bytes() == remote_burst_bytes);
+        // A very slow stream: the burst is at least 8 kB.
+        FramePacer slow;
+        slow.configure(300, 60, true);
+        assert(slow.burst_bytes() == min_burst_bytes);
+    }
+
+    // sunshine.conf: internet_pace_percent and internet_burst_kb. 400 and 32 are what 0.6.5 did; out of range keeps the
+    // defaults (200 and 16), and a burst set below 8 kB is the burst.
+    {
+        FramePacer old;
+        old.configure(3428, 30, true, PacingSettings{400, 32});
+        assert(std::abs(old.rate() - 4 * 3428 * 1000 / 8.0) < 1);
+        assert(old.burst_bytes() == 32 * 1024);
+        assert(send_frame(old, t0, t0, 25'000, false) == 0s);
+        for (const PacingSettings odd : {PacingSettings{0, 0}, PacingSettings{124, 1}, PacingSettings{801, 65}, PacingSettings{-5, 1000}}) {
+            const auto checked = odd.checked();
+            assert(checked.pace_percent == 200 && checked.burst_kb == 16);
+            FramePacer pacer;
+            pacer.configure(3428, 30, true, odd);
+            assert(std::abs(pacer.rate() - 2 * 3428 * 1000 / 8.0) < 1 && pacer.burst_bytes() == remote_burst_bytes);
+        }
+        FramePacer edge;
+        edge.configure(3428, 30, true, PacingSettings{125, 64});
+        assert(std::abs(edge.rate() - 1.25 * 3428 * 1000 / 8.0) < 1 && std::abs(edge.burst_bytes() - 4 * 3428 * 1000 / 8.0 / 30) < 1);
+        FramePacer tiny;
+        tiny.configure(3428, 30, true, PacingSettings{800, 2});
+        assert(std::abs(tiny.rate() - 8 * 3428 * 1000 / 8.0) < 1 && tiny.burst_bytes() == 2 * 1024);
+        // A slower pace spreads a keyframe longer, up to the 100 ms every frame gets at most.
+        const auto quick = idle_spread(14'988, 60, true, 150'000, PacingSettings{800, 16});
+        const auto normal = idle_spread(14'988, 60, true, 150'000);
+        const auto slower = idle_spread(14'988, 60, true, 150'000, PacingSettings{125, 16});
+        assert(quick < normal && normal < slower && slower <= max_frame_delay);
+        // The LAN ignores both.
+        FramePacer lan;
+        lan.configure(3428, 30, false, PacingSettings{125, 2});
+        assert(!lan.paces() && send_frame(lan, t0, t0, 156'000, true) == 0s);
     }
 
     // Unknown bitrate: no pacing at all.
@@ -163,8 +199,8 @@ int main() {
     assert(ms(idle_spread(150'000, 60, false, 1'000'000)) > 8.99 && ms(idle_spread(150'000, 60, false, 1'000'000)) < 9.01);
     assert(idle_spread(3400, 30, true, 180'000) > idle_spread(3400, 30, false, 180'000));
 
-    // Over the internet (issue 37): no burst above 32 kB, whatever the bitrate, so a path that keeps only the first 42 kB
-    // of a burst gets every packet. Ordinary frames up to that size still leave at once.
+    // Over the internet (issue 37): no burst above 16 kB, whatever the bitrate, so a path that keeps only the first 42 kB
+    // of a burst gets every packet, with room for what it still holds. Ordinary frames up to that size still leave at once.
     {
         assert(remote_packet_size(1024) && remote_packet_size(992) && remote_packet_size(1184) && remote_packet_size(1152));
         assert(!remote_packet_size(1392) && !remote_packet_size(1360) && !remote_packet_size(0));
@@ -185,10 +221,13 @@ int main() {
                 assert(t == at || (a_ms_later - by_then) * 1040 <= 0.001 * std::max(pacer.rate(), 156'000 / 0.1) + 2 * 1040);
             }
         }
-        // A frame of 25 kB still leaves at once.
+        // A frame of 15 kB still leaves at once; one of 25 kB is spread over a few ms.
         FramePacer pacer;
         pacer.configure(3428, 30, true);
-        assert(send_frame(pacer, t0, t0, 25'000, false) == 0s);
+        assert(send_frame(pacer, t0, t0, 15'000, false) == 0s);
+        const auto later = t0 + 1s;
+        const auto spread25 = send_frame(pacer, later, later, 25'000, false);
+        assert(spread25 > 0s && spread25 < 20ms);
         // A LAN stream at the same bitrate isn't paced.
         FramePacer lan;
         lan.configure(3428, 30, false);

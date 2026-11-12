@@ -352,6 +352,13 @@ Tips:
   their own, with their own bitrate. Asking for the same mode as you shares your stream, at your bitrate.
 - **Encryption over the internet** in the app's Settings is on ("Optional") by default, so a client outside your
   network gets an encrypted stream when it supports it.
+- **Short freezes over a slow or relayed path** (mobile data, Tailscale): for a client over the internet the host sends
+  large frames, such as a new picture, spread out instead of in one burst. Two lines in `sunshine.conf` change how, for
+  every client over the internet (a client on the LAN isn't paced), read when the host starts:
+  `internet_pace_percent` (200 by default, 125 to 800) is how fast the rest of a large frame goes, in percent of the
+  stream's bitrate, and `internet_burst_kb` (16 by default, 2 to 64) is how much of a frame leaves at once. A path that
+  still freezes may take lower values, such as 150 and 8; a value out of range keeps the default. The host's log names
+  both at each stream's start (`PS5 video: stream over the internet, ...`).
 
 ### Forwarding the ports by UPnP
 
