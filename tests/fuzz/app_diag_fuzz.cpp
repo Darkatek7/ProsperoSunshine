@@ -55,8 +55,11 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         scrubber.add_device(device, in.ConsumeRandomLengthString(40));
         scrubber.add_console(in.ConsumeRandomLengthString(10));
         std::string before = in.ConsumeRandomLengthString(30), after = in.ConsumeRandomLengthString(30);
+        // The planted addresses must be gone; the same text made up by the fuzzer around them, glued to a word ("x2001:db8:aa::7"
+        // or "2001:db8:aa::7lot"), isn't an address the masker can know.
         for (std::string *piece : {&before, &after})
-            for (std::string::size_type at; (at = piece->find("203.0.113")) != std::string::npos;) piece->erase(at, 1);
+            for (const char *planted : {"203.0.113", "2001:db8:aa::7", "00:11:22:33:44:55"})
+                for (std::string::size_type at; (at = piece->find(planted)) != std::string::npos;) piece->erase(at, 1);
         const std::string text = before + "\nfrom 203.0.113.9 and [2001:db8:aa::7]:50123 and 00:11:22:33:44:55 then\n" + after;
         const std::string out = scrubber.apply(text);
         FUZZ_CHECK(out.find("203.0.113.9") == std::string::npos && out.find("2001:db8:aa::7") == std::string::npos &&
