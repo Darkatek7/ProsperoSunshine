@@ -175,6 +175,7 @@ prospero::KeyframePolicy::Client keyframe_client(stream::session_t *session, con
         client.rtt = std::chrono::milliseconds(stream::session::rtt_ms(*session));
         client.remote = prospero::remote_packet_size(stream::session::packet_size(*session));
     }
+    client.pacing = prospero::PacingSettings{config::ps5.internet_pace_percent, config::ps5.internet_burst_kb}.checked();
     return client;
 }
 
@@ -505,6 +506,12 @@ void capture(safe::mail_t mail, config_t config, stream::session_t *channel_data
             BOOST_LOG(info) << "PS5 capture "sv << (hdr ? "HEVC HDR"sv : hevc ? "HEVC"sv : "H.264"sv)
                             << (slot ? " (second channel)"sv : ""sv) << " bitrate "sv << ps_capture_slot_opening_average(slot) / 1000
                             << " kbit/s (requested "sv << requested / 1000 << ')';
+            if (const auto asked = keyframe_client(channel_data, config); asked.remote) {
+                const auto pacing = asked.pacing;
+                BOOST_LOG(info) << "PS5 video: stream over the internet, up to "sv << pacing.burst_kb
+                                << " kB of a frame at once, the rest at "sv << pacing.pace_percent
+                                << "% of the stream's rate (internet_burst_kb, internet_pace_percent)"sv;
+            }
             // The audio thread may have opened the channel earlier, and the next periodic IDR can be ten seconds away.
             std::lock_guard lock(captures.mutex);
             ch.keyframes.force();

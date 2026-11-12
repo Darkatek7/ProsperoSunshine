@@ -120,7 +120,7 @@ int main() {
         policy.keyframe_sent(t0, phone_idr);
         const auto window = policy.blind_window(phone);
         // The IDR's spread over an internet path plus 3/4 of the round trip.
-        assert(window > 3 * phone.rtt / 4 && window < 3 * phone.rtt / 4 + max_frame_delay);
+        assert(window > 3 * phone.rtt / 4 && window <= 3 * phone.rtt / 4 + max_frame_delay);
         const auto blind_at = t0 + window - 1ms;
         assert(policy.request(blind_at, phone) == Outcome::blind);
         assert(!policy.poll(t0 + window));
@@ -207,7 +207,7 @@ int main() {
     // Issue 37's loop: every IDR fails. The client asks once for a P-frame lost while the IDR is on its way, once it sees
     // that the IDR was lost (its spread, the round trip and a frame after it left), and every 150 ms while it waits, as
     // in the log. This is the most the two rules let through: the request that crossed the IDR looks blind and is taken
-    // along by the one after the window, which is answered at once; an IDR every 164 ms, 6 a second, while the path
+    // along by the one after the window, which is answered at once; an IDR every 189 ms, 5 a second, while the path
     // fails every one of them. A hold-off brought that down to two a second, and cost twice the time without a
     // picture on a path that only loses packets (keyframe_policy.hpp), so there is none.
     {
@@ -230,8 +230,8 @@ int main() {
         }
         // The first request is answered at once (the encoder delivers 2 frames later), and so is every one after it.
         assert(first_idr && *first_idr - t0 < 50ms);
-        assert(client.requests > 200 && ch.idrs > 110 && ch.idrs < 130);
-        for (const auto gap : gaps) assert(gap >= 150ms && gap <= 180ms);
+        assert(client.requests > 200 && ch.idrs > 95 && ch.idrs < 115);
+        for (const auto gap : gaps) assert(gap >= 175ms && gap <= 200ms);
         // Each IDR answered two requests: the one that crossed the IDR before it, and the one about that IDR's loss.
         const auto counts = ch.policy.take_counts();
         assert(counts.asked == ch.idrs && counts.blind >= ch.idrs - 2 && counts.requests == client.requests);

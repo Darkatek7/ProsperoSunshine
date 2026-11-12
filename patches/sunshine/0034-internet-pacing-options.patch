@@ -1,0 +1,51 @@
+ProsperoSunshine: sunshine.conf sets how the video is paced for clients over the internet
+
+Patch 0026 paces large frames for a client over the internet (video/frame_pacing.hpp). Two of its numbers depend on the path
+and can now be set: internet_pace_percent, how fast the part of a large frame beyond the burst leaves, in percent of the
+stream's rate (200 by default, 125 to 800), and internet_burst_kb, the most of a frame that leaves at once (16 by default,
+2 to 64). A value out of range keeps the default. Issue 37's reporter streams over ps5-tailscale, which relays from the
+console itself; at 1080p and 15 Mbit/s the pace of 0.6.5 (four times the rate, 32 kB at once) was more than that path
+took.
+
+--- a/src/config.h
++++ b/src/config.h
+@@ -421,6 +421,8 @@
+   struct ps5_t {
+     bool close_game_on_quit;  ///< Moonlight's Terminate App closes the session's game too (off by default).
+     bool pair_over_internet;  ///< Pairing requests from outside the LAN and Tailscale are answered (off by default).
++    int internet_pace_percent;  ///< Clients over the internet: the rest of a large frame leaves at this percent of the stream's rate.
++    int internet_burst_kb;  ///< Clients over the internet: the most of a frame that leaves at once, in kB.
+   };
+ 
+   extern ps5_t ps5;
+--- a/src/config.cpp
++++ b/src/config.cpp
+@@ -909,6 +909,8 @@
+   ps5_t ps5 {
+     false,  // close_game_on_quit
+     false,  // pair_over_internet
++    200,  // internet_pace_percent (video/frame_pacing.hpp)
++    16,  // internet_burst_kb
+   };
+ #endif
+ 
+@@ -1772,6 +1774,8 @@
+ #ifdef __SCE__
+     bool_f(vars, "close_game_on_quit", ps5.close_game_on_quit);
+     bool_f(vars, "pair_over_internet", ps5.pair_over_internet);
++    int_between_f(vars, "internet_pace_percent", ps5.internet_pace_percent, {125, 800});
++    int_between_f(vars, "internet_burst_kb", ps5.internet_burst_kb, {2, 64});
+ #endif
+     generic_f(vars, "dd_mode_remapping", video.dd.mode_remapping, dd::mode_remapping_from_view);
+     {
+--- a/src/stream.cpp
++++ b/src/stream.cpp
+@@ -1825,7 +1825,7 @@
+       if (!frame.started) {
+         // The console delivers 30 or 60 fps (video_ps5.cpp); a client may ask for more.
+         const auto &monitor = session->config.monitor;
+-        pacer.configure(monitor.bitrate > 0 ? (std::uint32_t) monitor.bitrate : 0, monitor.framerate > 0 && monitor.framerate <= 30 ? 30 : 60, prospero::remote_packet_size(session->config.packetsize));
++        pacer.configure(monitor.bitrate > 0 ? (std::uint32_t) monitor.bitrate : 0, monitor.framerate > 0 && monitor.framerate <= 30 ? 30 : 60, prospero::remote_packet_size(session->config.packetsize), prospero::PacingSettings {config::ps5.internet_pace_percent, config::ps5.internet_burst_kb});
+         pacer.begin(now, frame.arrival, frame.bytes, frame.idr);
+         frame.started = true;
+         if (pacer.spread() > std::chrono::steady_clock::duration::zero()) {
