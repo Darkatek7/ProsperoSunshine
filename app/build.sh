@@ -71,6 +71,13 @@ if [ "$flavor" = debug ]; then
     sed -i '1i #define PROSPERO_DEBUG 1' "$stage/src/app/psapp/flavor.hpp"
     grep -q "^#define PROSPERO_DEBUG 1" "$stage/src/app/psapp/flavor.hpp"
 fi
+# rsync gives the staged files their source's time, so after a debug build the normal flavor.hpp looked older than the
+# debug objects, and the normal build kept them (0.6.6's local app said "debug"). A change of flavor touches it, so
+# everything that includes it is built again.
+flavor_stamp="$stage/build/.flavor"
+if [ "$(cat "$flavor_stamp" 2>/dev/null)" != "$flavor" ]; then
+    touch "$stage/src/app/psapp/flavor.hpp"
+fi
 rm -rf "$stage/sce_sys"
 mkdir -p "$stage/sce_sys"
 cp "$sce_sys/param.json" "$sce_sys/icon0.png" "$stage/sce_sys/"
@@ -87,6 +94,7 @@ fi
 
 # ---- build -------------------------------------------------------------------------
 make -C "$stage" app PS5_OPENGL_PREFIX="$glsdk" USE_CCACHE=0 PS5_CLANG=clang-18
+echo "$flavor" > "$flavor_stamp"
 
 # ---- the title folder --------------------------------------------------------------
 title_id=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["titleId"])' "$sce_sys/param.json")
