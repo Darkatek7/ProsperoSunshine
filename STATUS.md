@@ -1,6 +1,6 @@
 # Arbeitsstand
 
-Stand: 8. November 2026, nach Release 0.5.0. Hier steht nur, was live geprüft ist, mit dem Messweg. Was ausgeliefert ist:
+Stand: 13. November 2026, nach Release 0.6.6. Hier steht nur, was live geprüft ist, mit dem Messweg. Was ausgeliefert ist:
 `CHANGELOG.md`. Plan und Reihenfolge: `ROADMAP.md`. Architektur: `docs/adr/001-sunshine-port.md`.
 
 Die älteren Einträge (bis 4. November 2026) und die ersten Nachweise nach Roadmap stehen unverändert und mit denselben
@@ -12,7 +12,7 @@ hier fehlt (etwa in Code-Kommentaren), meinen diese Datei. „Archiv“ unten he
 **Der Host streamt.** Moonlight paart sich mit der PS5, startet „PS5 Screen“ oder ein installiertes Spiel und bekommt Bild,
 Spielton und Controller. Eine 30-Minuten-Sitzung und zehn Wiederverbindungen liefen fehlerfrei (Archiv, „Nachweise nach
 Roadmap“). Jedes Release seit 0.3.2 lief auf der Konsole mit 13.00 je 30 s in H.264 und HEVC 1080p60 und dekodierte
-fehlerfrei („Release 0.5.0 auf der Konsole“ und die Einträge davor).
+fehlerfrei („Release 0.6.6 auf der Konsole“ und die Einträge davor).
 
 **Firmware:** 13.00 und 10.20 (PS5 Pro) sind geprüft. Von 9.60, 10.40, 11.40, 13.40 und 13.60 gibt es Berichte von
 Nutzern und Mitwirkenden, gemessen ist dort hier nichts („Firmware-Sonde auf 9.60“, „Berichte nach 0.3.1“, „Belegter
@@ -92,6 +92,57 @@ Issue 36“) und ein Debug-Build in jedem Release („Debug-Build (PR 29) zusamm
     Store nicht eigens installiert worden.
 
 ## Neuere Nachweise
+
+### Release 0.6.6 auf der Konsole (2026-11-13, 13.00)
+
+Testclient (`run_smoke.sh`, Linux, `--network host`), Mario-64-Demo vorne, je 30 s 1080p60. Dazu lief bei jedem H.264-Lauf
+`icmp_watch.py` mit, das jedes ICMP „port unreachable“ der Konsole an den Rechner zählt. Erst der lokale Build (`f922cd8f`),
+dann die Release-Dateien der CI aus dem Tag (`6da55c0c`, mit SHA256SUMS geprüft):
+
+| Variante | H.264: Bilder, fehlend, Tonpakete | HEVC: Bilder, fehlend, Tonpakete | ICMP (H.264) |
+| --- | --- | --- | --- |
+| Lokal, Debug aus dem Speicher (Selbsttest `problems=0`) | 1794, 0, 5800 | – | keins |
+| Lokal, normal installiert | 1794, 0, 5805 | 1794, 0, 5800 | keins |
+| CI, Debug aus dem Speicher (Selbsttest `problems=0`) | 1794, 0, 5800 | – | keins |
+| CI, normal installiert | 1793, 0, 5800 | 1795, 0, 5805 | keins |
+
+Alle fehlerfrei dekodiert, Ton in jedem Lauf. Die lokal gebaute App zeigte `v01.000.027 debug`: Ein normaler App-Build nach
+einem Debug-Build hatte die Debug-Objekte behalten (behoben in `app/build.sh`, vor dem Release-Commit). Die App der CI zeigt
+`v01.000.027` ohne „debug“ und schließt über `app.quit`; die Webseite antwortet. Installiert sind die CI-Dateien: Host-Datei,
+Autoload-Kopie und die ELF in der App haben dieselbe Prüfsumme, `host version=0.6.6 commit=6da55c0c`.
+
+Nicht gemessen: der echte Pfad über das Internet und ps5-tailscale. Den hat der Melder von Issue 37 mit demselben Code
+(Test-Build `test-0.6.5-i37-3`) über 5G und Tailscale geprüft: Ton da, Bild flüssig.
+
+### Stream-Ports ab RTSP SETUP, Issue 37 (2026-11-12, 13.00, Patch 0035, Debug-Build aus dem Speicher)
+
+Moonlight pingt den Audio-Port (UDP 48000) ab dem RTSP SETUP, der Host öffnete ihn erst bei ANNOUNCE. Gemessen mit
+`icmp_watch.py` neben `run_smoke.sh` (Linux, `--network host`, Mario-64-Demo):
+
+- Vorher (installiertes 0.6.5, H.264 1080p60, 3 Läufe à 10 s): in jedem Lauf genau ein „port unreachable“ für UDP 48000,
+  2,4 bis 2,6 s nach dem Start der Messung.
+- Mit Patch 0035 (`c719170a` plus 0035): in 9 Streams keins, darunter dreimal H.264, einmal HEVC 30 s und zwei Paare direkt
+  hintereinander. 0 fehlende Frames, Ton in jedem Stream, `Stream ports open from SETUP` einmal je Stream im Log.
+- 5 s nach dem Streamende antworten 48000, 47998 und 47999 wieder mit ECONNREFUSED, der Halt am Port bleibt also nicht
+  hängen.
+
+Im Log nur die bekannte RTSP-Zeile `End of file`, die auch 0.6.0 schreibt.
+
+### Release 0.6.5 auf der Konsole (2026-11-11, 13.00)
+
+Testclient (`run_smoke.sh`, Linux, `--network host`), Mario-64-Demo vorne, je 30 s 1080p60. Erst der lokale Build, dann
+die Release-Dateien der CI aus dem Tag (beide `bcb3defd`):
+
+| Variante | H.264: Bilder, fehlend | HEVC: Bilder, fehlend |
+| --- | --- | --- |
+| Lokal, Debug aus dem Speicher (Selbsttest `problems=0`) | 1795, 0 | 1796, 0 |
+| Lokal, normal installiert | 1797, 0 | 1796, 0 |
+| CI, Debug aus dem Speicher (Selbsttest `problems=0`) | 1794, 0 | – |
+| CI, normal installiert | 1794, 0 | 1794, 0 |
+
+Alle fehlerfrei dekodiert, mit Ton. Mit dem lokalen Build lief ein frischer Start der Demo über `/launch` vom
+Home-Bildschirm, die App öffnete (`v01.000.026`), die Webseite antwortete, und 10 % Verlust in Bursts bei 3,4 Mbit/s und
+30 fps ergab als längste Lücke 501 und 534 ms. Danach installiert: die CI-Dateien, `host version=0.6.5 commit=bcb3defd`.
 
 ### Stand von `work/integration` auf der Konsole (2026-11-11, 13.00, lokal, nicht veröffentlicht)
 
