@@ -185,6 +185,13 @@ std::size_t wire_bytes(std::size_t bytes) {
     return bytes + bytes * static_cast<std::size_t>(fec) / 100 + bytes / 25;
 }
 
+// OpenVideo returned -1 (issue 56): the console's own capture path is stuck, and its recording and Remote Play fail too.
+// Restarting the host doesn't free it; only a console restart did.
+void log_capture_stuck() {
+    BOOST_LOG(error) << "PS5 capture: the console's video capture is stuck (OpenVideo -1). Restart the console; restarting "
+                        "the host doesn't help (issue 56)"sv;
+}
+
 // At most every 10 s, and only for a stream that keeps asking: what the keyframe policy did. Caller holds captures.mutex.
 void log_keyframe_policy(int slot, channel_t &ch, std::chrono::steady_clock::time_point now,
                          std::chrono::steady_clock::time_point &last_logged) {
@@ -495,6 +502,7 @@ void capture(safe::mail_t mail, config_t config, stream::session_t *channel_data
                     continue;
                 }
                 BOOST_LOG(error) << "PS5 capture failed to start: "sv << start_rc;
+                if (ps_capture_stuck()) log_capture_stuck();
                 shutdown_event->raise(true);
                 return;
             }
@@ -561,6 +569,7 @@ void capture(safe::mail_t mail, config_t config, stream::session_t *channel_data
                         break;
                     }
                     if ((size_refused = ps_capture_slot_size_refused(slot))) break;
+                    if (ps_capture_stuck()) break;  // more tries only hold the stream up (issue 56)
                 }
                 ps_capture_slot_set_reopening(slot, 0);
                 if (size_refused) {
@@ -573,6 +582,7 @@ void capture(safe::mail_t mail, config_t config, stream::session_t *channel_data
                 }
                 if (!recovered) {
                     BOOST_LOG(error) << "PS5 capture could not be reopened; ending the session"sv;
+                    if (ps_capture_stuck()) log_capture_stuck();
                     shutdown_event->raise(true);
                     lost = true;
                     break;

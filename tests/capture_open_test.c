@@ -184,6 +184,13 @@ static int start_refuses_slices(const char *step, const uint8_t *record)
 {
     return !strcmp(step, "Start") && record[0x44] ? START_FAILED : 0;
 }
+// The console's capture path stuck (issue 56): OpenVideo returns -1 for every mode until the console restarts.
+static int capture_stuck_now;
+static int stuck_capture(const char *step, const uint8_t *record)
+{
+    (void)record;
+    return !strcmp(step, "OpenVideo") && capture_stuck_now ? (int)0xffffffff : 0;
+}
 static int marker_seen;
 static int look_for_marker(const char *step, const uint8_t *record)
 {
@@ -704,6 +711,19 @@ int main(void)
     assert(!memcmp(standard, variant, sizeof standard));
     unlink(marker);
 
-    puts("PASS: experimental switches through the open path (variants, first frame, fallback, off until restart, verified firmware)");
+    // OpenVideo -1 (issue 56): one open, no 1080p fallback, no variant, nothing disabled; the next open tries again.
+    setup_small(0x10200006u, 0, 0, 3);
+    capture_stuck_now = 1;
+    fake_decide = stuck_capture;
+    assert(open_and_close() == PS_CAPTURE_ERROR);
+    assert(fake_opens == 1 && ps_capture_stuck() && ps_capture_video_resolution() == 3);
+    assert(logged("stuck: OpenVideo returned -1") && !logged("disabled") && ps_capture_small_modes_allowed());
+    capture_stuck_now = 0;
+    fake_opens = 0;
+    assert(open_and_close() == 0 && fake_opens == 1 && !ps_capture_stuck());
+    fake_decide = NULL;
+    unlink(marker);
+
+    puts("PASS: experimental switches through the open path (variants, first frame, fallback, off until restart, verified firmware, stuck capture)");
     return 0;
 }
