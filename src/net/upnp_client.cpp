@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "net/upnp_client.hpp"
+#include "net/upnp_lookup.hpp"
 
 #include "platform/ps5/diag.h"
-#include "src/file_handler.h"
 #include "src/logging.h"
 #include "src/platform/common.h"
 
+#include <algorithm>
+#include <cerrno>
 #include <chrono>
+#include <fcntl.h>
+#include <unistd.h>
 #include <condition_variable>
 #include <cstdio>
 #include <filesystem>
@@ -58,6 +62,26 @@ std::string error_text(int error) {
     return text ? std::string(text) + " (" + std::to_string(error) + ')' : "error " + std::to_string(error);
 }
 
+// The fallback is restricted to recorded identities and cross-checks both router query forms.
+upnp_identity::Entry read_mapping(const std::string &control, const std::string &service,
+                                 const std::string &target, const std::string &number,
+                                 const std::string &protocol, const std::string &label, bool recorded) {
+    const auto specific = [&] {
+        char client[64]{}, port[6]{}, description[80]{}, enabled[4]{}, lease[16]{};
+        const int result = UPNP_GetSpecificPortMappingEntry(control.c_str(), service.c_str(), number.c_str(),
+            protocol.c_str(), nullptr, client, port, description, enabled, lease);
+        return upnp_identity::Entry{result, client, port, description, enabled, lease};
+    };
+    const auto generic = [&](std::size_t index) {
+        char external[6]{}, client[64]{}, port[6]{}, proto[4]{}, description[80]{}, enabled[4]{}, remote[64]{}, lease[16]{};
+        const auto text = std::to_string(index);
+        const int result = UPNP_GetGenericPortMappingEntry(control.c_str(), service.c_str(), text.c_str(),
+            external, client, port, proto, description, enabled, remote, lease);
+        return upnp_identity::Entry{result, client, port, description, enabled, lease, external, proto, remote};
+    };
+    return upnp_identity::lookup({target, number, label, number, protocol}, recorded, specific, generic);
+}
+
 // A router that answered: its control URL and service, kept to remove the mappings when the host stops.
 struct Router {
     std::string host;
@@ -82,32 +106,93 @@ std::vector<PermanentMapping> read_permanent() {
     return parse_permanent(text.str());
 }
 
-// Notes what was added without a lease and forgets what was removed; the file is written only when that changes it. False
-// when it couldn't be written. No logging: the removal thread calls it too.
+// Commit recovery intent durably BEFORE a permanent add. A failed write must not expose an unrecorded port.
 bool change_permanent(const std::vector<PermanentMapping> &added, const std::vector<PermanentMapping> &removed) {
     if (added.empty() && removed.empty()) return true;
     std::lock_guard lock(permanent_mutex());
+    std::error_code error;
+    const bool exists = std::filesystem::exists(permanent_file(), error);
+    if (error || (exists && !std::ifstream(permanent_file()).good())) return false;
     const auto before = read_permanent();
     const auto after = merge_permanent(before, added, removed);
-    if (after == before) return true;
-    std::error_code ec;
-    if (after.empty()) return std::filesystem::remove(permanent_file(), ec) || !ec;
-    return file_handler::write_file_atomically(permanent_file().c_str(), format_permanent_list(after)) == 0;
+    const auto path = permanent_file();
+    const auto temporary = path.string() + ".tmp";
+    for (const auto &entry : after) if (format_permanent(entry).empty()) return false;
+    const auto text = format_permanent_list(after);
+    const int fd = ::open(temporary.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (fd < 0) return false;
+    std::size_t offset = 0;
+    bool ok = true;
+    while (offset < text.size()) {
+        const auto count = ::write(fd, text.data() + offset, text.size() - offset);
+        if (count < 0 && errno == EINTR) continue;
+        if (count <= 0) { ok = false; break; }
+        offset += static_cast<std::size_t>(count);
+    }
+    if (ok) ok = ::fsync(fd) == 0;
+    if (::close(fd) != 0) ok = false;
+    if (!ok || ::rename(temporary.c_str(), path.c_str()) != 0) return false;
+    const int parent = ::open(path.parent_path().c_str(), O_RDONLY);
+    if (parent < 0) return false;
+    ok = ::fsync(parent) == 0;
+    if (::close(parent) != 0) ok = false;
+    return ok;
 }
 
-// Notes a hop's mappings without a lease after a pass.
-void note_permanent(const std::vector<PermanentMapping> &added) {
-    if (!change_permanent(added, {}))
-        BOOST_LOG(warning) << "UPnP: upnp_permanent.txt could not be written; a mapping without a lease may outlive the host"sv;
+struct OwnedMapping {
+    PermanentMapping identity;
+    bool permanent = false;
+};
+using OwnedMappings = std::vector<OwnedMapping>;
+
+auto find_owned(OwnedMappings &owned, const PermanentMapping &identity) {
+    return std::find_if(owned.begin(), owned.end(), [&](const auto &item) { return item.identity == identity; });
 }
 
-// A hop's mappings that the router took only without a lease. `client` is where they go.
-std::vector<PermanentMapping> permanent_of(const Router &router, const std::string &client, const std::vector<PortStatus> &ports) {
-    std::vector<PermanentMapping> list;
-    for (const auto &port : ports)
-        if (port.added && port.permanent)
-            list.push_back({router.control_url, router.service_type, client, port.mapping.udp, port.mapping.port});
-    return list;
+upnp_identity::Entry read_mapping(const PermanentMapping &m, bool recorded) {
+    return read_mapping(m.control_url, m.service_type, m.client, std::to_string(m.port), m.udp ? "UDP" : "TCP",
+                        m.description, recorded);
+}
+
+Existing classify(const upnp_identity::Entry &entry, const PermanentMapping &wanted) {
+    return prospero::upnp::classify(entry.result, entry.client, entry.internal_port, entry.description, wanted.client, wanted.port,
+                    wanted.description);
+}
+
+// Remove only fresh matches. Keep ambiguous records (including old journal entries without a description) for retry.
+std::vector<std::string> unmap(OwnedMappings &owned, const std::string &control = {}, const PermanentMapping *replacement = nullptr) {
+    std::vector<std::string> refused;
+    std::erase_if(owned, [&](const OwnedMapping &record) {
+        const auto &m = record.identity;
+        if (!control.empty() && m.control_url != control) return false;
+        if (replacement && (m.service_type != replacement->service_type || m.port != replacement->port ||
+                            m.udp != replacement->udp || m == *replacement)) return false;
+        const auto entry = read_mapping(m, !m.description.empty());
+        const auto state = classify(entry, m);
+        if (state != Existing::none && (m.description.empty() || state != Existing::mine)) {
+            refused.push_back(std::to_string(m.port) + " ownership could not be confirmed; retained");
+            return false;
+        }
+        if (state == Existing::mine) {
+            const auto number = std::to_string(m.port);
+            const int removed = UPNP_DeletePortMapping(m.control_url.c_str(), m.service_type.c_str(), number.c_str(),
+                                                       m.udp ? "UDP" : "TCP", nullptr);
+            if (removed != 0 && removed != 714) {
+                refused.push_back(number + " not removed: " + error_text(removed));
+                return false;
+            }
+        }
+        if (record.permanent && !change_permanent({}, {m})) {
+            refused.push_back(std::to_string(m.port) + " recovery record could not be retired");
+            return false;
+        }
+        return true;
+    });
+    return refused;
+}
+
+void unmap_now(OwnedMappings &owned, const Router &router) {
+    for (const auto &line : unmap(owned, router.control_url)) BOOST_LOG(warning) << "UPnP: "sv << line;
 }
 
 // Every router that answered discovery and describes a WAN connection service.
@@ -159,99 +244,102 @@ std::string external_address(const Router &router) {
 // One pass over the ports on one router, forwarding them to `client`: the console on the inner router, the inner router's
 // address on the outer one.
 // Returns early when the host stops: between ports, and between the lookup and the add.
-void map_ports(const Router &router, const std::string &client, std::vector<PortStatus> &ports, const std::stop_token &stop) {
-    const char *control = router.control_url.c_str();
-    const char *service = router.service_type.c_str();
+void map_ports(const Router &router, const std::string &client, std::vector<PortStatus> &ports,
+               const std::stop_token &stop, OwnedMappings &owned) {
     for (auto &port : ports) {
         if (stop.stop_requested()) return;
         const std::string number = std::to_string(port.mapping.port);
         const char *proto = port.mapping.udp ? "UDP" : "TCP";
-        char other[64]{}, internal_port[8]{}, description[80]{}, enabled[8]{}, lease[16]{};
-        const int lookup = UPNP_GetSpecificPortMappingEntry(control, service, number.c_str(), proto, nullptr, other,
-                                                            internal_port, description, enabled, lease);
-        switch (classify(lookup, other, description, client)) {
-        case Existing::other:
+        const PermanentMapping wanted{router.control_url, router.service_type, client, port.mapping.udp,
+                                      port.mapping.port, std::string(label_prefix) + port.mapping.name};
+        // An address change must not overwrite or forget the old identity. Remove it only if still verified as ours.
+        for (const auto &line : unmap(owned, router.control_url, &wanted)) BOOST_LOG(warning) << "UPnP: "sv << line;
+        const auto recorded = find_owned(owned, wanted);
+        const bool previously_owned = recorded != owned.end();
+        const bool previously_permanent = previously_owned && recorded->permanent;
+        port.added = previously_owned;
+        port.permanent = previously_permanent;
+        auto entry = read_mapping(wanted, previously_owned);
+        const auto state = classify(entry, wanted);
+        if (state == Existing::other) {
             port.outcome = Outcome::taken;
-            port.detail = other;
-            port.added = false;
+            port.detail = entry.client;
             continue;
-        case Existing::to_us:
-            port.outcome = Outcome::open;
-            port.detail.clear();
-            port.added = false;
+        }
+        if (state == Existing::unknown) {
+            port.outcome = Outcome::failed;
+            port.detail = "ownership lookup failed; unchanged";
             continue;
-        case Existing::mine:
-            if (renew_by_removing(lease)) UPNP_DeletePortMapping(control, service, number.c_str(), proto, nullptr);
-            break;
-        case Existing::none:
-        case Existing::unknown:
-            break;
+        }
+        if (state == Existing::to_us || (state == Existing::mine && !previously_owned)) {
+            port.added = false;
+            port.outcome = entry.enabled == "1" ? Outcome::open : Outcome::failed;
+            port.detail = entry.enabled == "1" ? "" : "existing mapping is disabled; unchanged";
+            continue;
         }
         if (stop.stop_requested()) return;
-        const std::string label = std::string(label_prefix) + port.mapping.name;
-        bool permanent = false;  // the mapping that stays has no lease
-        int added = UPNP_AddPortMapping(control, service, number.c_str(), number.c_str(), client.c_str(), label.c_str(),
-                                        proto, nullptr, lease_seconds);
-        // Some routers refuse to add a mapping that is already there, even the same one (718 ConflictInMappingEntry from
-        // the ISP router here), and the first lookup can fail on a busy router: ask again. If the port already goes to
-        // the target, by the host's own mapping or by someone else's, it is open.
-        if (added != UPNPCOMMAND_SUCCESS) {
-            char again[64]{}, again_port[8]{}, again_description[80]{}, again_enabled[8]{}, again_lease[16]{};
-            const int check = UPNP_GetSpecificPortMappingEntry(control, service, number.c_str(), proto, nullptr, again,
-                                                               again_port, again_description, again_enabled, again_lease);
-            const Existing now = classify(check, again, again_description, client);
-            if (now == Existing::mine) {
-                added = UPNPCOMMAND_SUCCESS;
-                permanent = std::string_view(again_lease) == "0";
-            }
-            if (now == Existing::to_us) {
-                port.outcome = Outcome::open;
-                port.detail.clear();
-                port.added = false;
+        if (state == Existing::mine) {
+            if (entry.lease == "0") {
+                if (!change_permanent({wanted}, {})) {
+                    port.outcome = Outcome::failed;
+                    port.detail = "recovery record could not be written";
+                    continue;
+                }
+                recorded->permanent = port.permanent = true;
+                port.outcome = entry.enabled == "1" ? Outcome::open : Outcome::failed;
                 continue;
             }
+            if (renew_by_removing(entry.lease)) {
+                const int removed = UPNP_DeletePortMapping(router.control_url.c_str(), router.service_type.c_str(),
+                                                           number.c_str(), proto, nullptr);
+                if (removed != 0 && removed != 714) {
+                    port.outcome = Outcome::failed;
+                    port.detail = error_text(removed);
+                    continue;
+                }
+            }
         }
-        // A router that only takes permanent mappings: one without a lease. It stays on the router until the host removes
-        // it, so only for that answer, not for any failure (README, "Forwarding the ports by UPnP").
+        if (stop.stop_requested()) return;
+        bool permanent = false, intent_written = false;
+        int added = UPNP_AddPortMapping(router.control_url.c_str(), router.service_type.c_str(), number.c_str(),
+                                        number.c_str(), client.c_str(), wanted.description.c_str(), proto, nullptr, lease_seconds);
         if (added == upnp_error_only_permanent_leases && !stop.stop_requested()) {
-            added = UPNP_AddPortMapping(control, service, number.c_str(), number.c_str(), client.c_str(), label.c_str(),
-                                        proto, nullptr, "0");
-            permanent = added == UPNPCOMMAND_SUCCESS;
+            if (!change_permanent({wanted}, {})) {
+                port.outcome = Outcome::failed;
+                port.detail = "permanent mapping refused: recovery intent could not be synced";
+                continue;
+            }
+            intent_written = true;
+            if (stop.stop_requested()) {
+                if (!previously_permanent) change_permanent({}, {wanted});
+                return;
+            }
+            added = UPNP_AddPortMapping(router.control_url.c_str(), router.service_type.c_str(), number.c_str(),
+                                        number.c_str(), client.c_str(), wanted.description.c_str(), proto, nullptr, "0");
+            permanent = added == 0;
         }
-        if (added == UPNPCOMMAND_SUCCESS) {
+        if (added == 0) {
+            if (previously_owned) recorded->permanent = permanent || previously_permanent;
+            else owned.push_back({wanted, permanent});
             port.outcome = Outcome::open;
             port.detail.clear();
             port.added = true;
-            port.permanent = permanent;
+            port.permanent = permanent || previously_permanent;
+        } else if (added == 718) {
+            // A conflict proves no creation. Never adopt a matching pre-existing rule or retain a new creation intent.
+            if (intent_written && !previously_permanent && !change_permanent({}, {wanted}))
+                BOOST_LOG(warning) << "UPnP: unused recovery intent could not be retired"sv;
+            entry = read_mapping(wanted, previously_owned);
+            const auto now = classify(entry, wanted);
+            port.outcome = entry.enabled == "1" && (now == Existing::mine || now == Existing::to_us)
+                               ? Outcome::open : Outcome::failed;
+            port.detail = port.outcome == Outcome::open ? "" : error_text(added);
         } else {
+            // A lost response after a permanent add may hide success: retain the durable intent for next-start recovery.
             port.outcome = Outcome::failed;
             port.detail = error_text(added);
         }
     }
-}
-
-// Removes the mappings the host added; returns a line for each the router refused. The permanent ones removed are no longer
-// noted. No logging here: it also runs on the removal thread, which may outlive the wait at stop.
-std::vector<std::string> unmap(const Router &router, const std::vector<PortStatus> &ports) {
-    std::vector<std::string> refused;
-    std::vector<PermanentMapping> gone;
-    for (const auto &port : ports) {
-        if (!port.added) continue;  // also after a later pass failed: the mapping may still be there
-        const std::string number = std::to_string(port.mapping.port);
-        const char *proto = port.mapping.udp ? "UDP" : "TCP";
-        const int removed =
-            UPNP_DeletePortMapping(router.control_url.c_str(), router.service_type.c_str(), number.c_str(), proto, nullptr);
-        if (removed != UPNPCOMMAND_SUCCESS && removed != 714)
-            refused.push_back(router.host + ' ' + proto + ' ' + number + " not removed: " + error_text(removed));
-        else if (port.permanent)
-            gone.push_back({router.control_url, router.service_type, {}, port.mapping.udp, port.mapping.port});
-    }
-    change_permanent({}, gone);
-    return refused;
-}
-
-void unmap_now(const Router &router, const std::vector<PortStatus> &ports) {
-    for (const auto &line : unmap(router, ports)) BOOST_LOG(warning) << "UPnP: "sv << line;
 }
 
 // The removal at stop runs on a thread of its own, and the host waits for it at most removal_budget. A run() that starts
@@ -268,21 +356,15 @@ Removals &removals() {
     return *instance;
 }
 
-void remove_at_stop(const Router &inner, const Hop &inner_hop, const Router &outer, const Hop &outer_hop) {
+void remove_at_stop(OwnedMappings owned) {
     {
         std::lock_guard lock(removals().mutex);
         ++removals().running;
     }
     auto refused = std::make_shared<std::promise<std::vector<std::string>>>();
     auto result = refused->get_future();
-    std::thread([inner, inner_ports = inner_hop.ports, outer, outer_ports = outer_hop.ports,
-                 has_inner = !inner_hop.router.empty(), has_outer = !outer_hop.router.empty(), refused] {
-        std::vector<std::string> lines;
-        if (has_outer) lines = unmap(outer, outer_ports);
-        if (has_inner) {
-            auto more = unmap(inner, inner_ports);
-            lines.insert(lines.end(), more.begin(), more.end());
-        }
+    std::thread([owned = std::move(owned), refused]() mutable {
+        auto lines = unmap(owned);
         refused->set_value(std::move(lines));
         std::lock_guard lock(removals().mutex);
         --removals().running;
@@ -291,7 +373,7 @@ void remove_at_stop(const Router &inner, const Hop &inner_hop, const Router &out
     // Also in host_diag.log, which is written at once: around rest mode the other logs can miss these lines.
     if (result.wait_for(removal_budget) != std::future_status::ready) {
         ps_diag_log("ProsperoSunshine: host UPnP removal not done within %lld s\n", static_cast<long long>(removal_budget.count()));
-        BOOST_LOG(warning) << "UPnP: the router is slow to remove the mappings; the host goes on, and they lapse within the hour"sv;
+        BOOST_LOG(warning) << "UPnP: the router is slow to remove the mappings; the host goes on, finite leases expire; permanent recovery records are retained"sv;
         return;
     }
     const auto refused_lines = result.get();
@@ -328,8 +410,7 @@ std::vector<PortStatus> fresh(const std::vector<Mapping> &mappings) {
     return ports;
 }
 
-// Carries a hop's port results over to the next pass while it is the same router, so added mappings are renewed and
-// removed at stop; a different router starts afresh.
+// Carries display status between passes; ownership lives separately and survives these resets.
 void keep_or_reset(Hop &hop, const std::string &router, const std::vector<Mapping> &mappings) {
     if (hop.router != router) {
         hop = Hop{};
@@ -349,9 +430,14 @@ void run(std::stop_token stop, std::vector<Mapping> mappings) {
         if (!removals().done.wait(lock, stop, [] { return removals().running == 0; })) return;
     }
     BOOST_LOG(info) << "UPnP: looking for the router to forward Moonlight's ports (upnp in sunshine.conf)"sv;
-    // Mappings without a lease that an earlier run left on ports this one doesn't map (another Base port): nothing would renew
-    // or remove them. The ports mapped now are renewed by the passes below.
-    remove_leftovers(stop, mappings);
+    // Recovery uses full identities, never just the ports configured for this run.
+    OwnedMappings owned;
+    {
+        std::lock_guard lock(permanent_mutex());
+        for (const auto &m : read_permanent()) owned.push_back({m, true});
+    }
+    // Verify and clean old identities even if their ports happen to be used on a different gateway now.
+    for (const auto &line : unmap(owned)) BOOST_LOG(warning) << "UPnP: "sv << line;
 
     Router inner, outer;
     int inner_misses = 0, outer_misses = 0;
@@ -373,13 +459,12 @@ void run(std::stop_token stop, std::vector<Mapping> mappings) {
         } else {
             inner_misses = 0;
             status.state = State::ready;
-            if (!status.inner.router.empty() && status.inner.router != routers[i].host) unmap_now(inner, status.inner.ports);
+            if (!status.inner.router.empty() && status.inner.router != routers[i].host) unmap_now(owned, inner);
             inner = routers[i];
             keep_or_reset(status.inner, inner.host, mappings);
             status.inner.external = external_address(inner);
             status.inner.external_private = private_ipv4(status.inner.external).value_or(false);
-            map_ports(inner, inner.lan_address, status.inner.ports, stop);
-            note_permanent(permanent_of(inner, inner.lan_address, status.inner.ports));
+            map_ports(inner, inner.lan_address, status.inner.ports, stop, owned);
             log_hop("console's", status.inner, before.inner);
             if (stop.stop_requested()) break;
 
@@ -389,16 +474,15 @@ void run(std::stop_token stop, std::vector<Mapping> mappings) {
             const int o = status.inner.external_private ? outer_router(status.inner.external, inner.host, hosts) : -1;
             if (o >= 0) {
                 outer_misses = 0;
-                if (!status.outer.router.empty() && status.outer.router != routers[o].host) unmap_now(outer, status.outer.ports);
+                if (!status.outer.router.empty() && status.outer.router != routers[o].host) unmap_now(owned, outer);
                 outer = routers[o];
                 keep_or_reset(status.outer, outer.host, mappings);
                 status.outer.external = external_address(outer);
                 status.outer.external_private = private_ipv4(status.outer.external).value_or(false);
-                map_ports(outer, status.inner.external, status.outer.ports, stop);
-                note_permanent(permanent_of(outer, status.inner.external, status.outer.ports));
+                map_ports(outer, status.inner.external, status.outer.ports, stop, owned);
             } else if (!status.inner.external_private) {
                 // The console's router is on the internet now: nothing in front to forward through.
-                if (!status.outer.router.empty()) unmap_now(outer, status.outer.ports);
+                if (!status.outer.router.empty()) unmap_now(owned, outer);
                 status.outer = Hop{};
             } else if (!status.outer.router.empty() && ++outer_misses >= misses_before_gone) {
                 status.outer = Hop{};  // gone: what it still forwards lapses within the hour
@@ -412,9 +496,9 @@ void run(std::stop_token stop, std::vector<Mapping> mappings) {
         if (wake.wait_for(lock, stop, next, [] { return false; }) || stop.stop_requested()) break;
     }
     // Whatever the last pass found: also after the routers stopped answering, the mappings the host added are worth a try.
-    if (!status.inner.router.empty() || !status.outer.router.empty()) {
+    if (!owned.empty()) {
         BOOST_LOG(info) << "UPnP: removing the port mappings"sv;
-        remove_at_stop(inner, status.inner, outer, status.outer);
+        remove_at_stop(std::move(owned));
     }
     publish(Status{});
 }
@@ -424,45 +508,19 @@ Status status() {
     return current;
 }
 
-void remove_leftovers(std::stop_token stop, const std::vector<Mapping> &mappings) {
-    std::vector<PermanentMapping> noted;
+void remove_leftovers(std::stop_token stop, const std::vector<Mapping> &) {
+    // Serialize with previous shutdown cleanup, also when UPnP is disabled.
+    {
+        std::unique_lock lock(removals().mutex);
+        if (!removals().done.wait(lock, stop, [] { return removals().running == 0; })) return;
+    }
+    OwnedMappings owned;
     {
         std::lock_guard lock(permanent_mutex());
-        noted = read_permanent();
+        for (const auto &m : read_permanent()) owned.push_back({m, true});
     }
-    std::vector<PermanentMapping> done;  // removed, gone, or no longer the host's: no longer noted
-    std::set<std::string> silent;        // routers that didn't answer: their notes stay for the next start
-    for (const auto &m : noted) {
-        if (stop.stop_requested()) break;
-        if (mapped_now(m, mappings) || silent.contains(m.control_url)) continue;
-        const std::string number = std::to_string(m.port);
-        const char *proto = m.udp ? "UDP" : "TCP";
-        char other[64]{}, internal_port[8]{}, description[80]{}, enabled[8]{}, lease[16]{};
-        const int lookup = UPNP_GetSpecificPortMappingEntry(m.control_url.c_str(), m.service_type.c_str(), number.c_str(), proto,
-                                                            nullptr, other, internal_port, description, enabled, lease);
-        // Only a mapping that is still the host's (its description, to the address noted) is removed.
-        switch (classify(lookup, other, description, m.client)) {
-        case Existing::unknown:
-            silent.insert(m.control_url);
-            continue;
-        case Existing::mine: {
-            const int removed = UPNP_DeletePortMapping(m.control_url.c_str(), m.service_type.c_str(), number.c_str(), proto, nullptr);
-            if (removed != UPNPCOMMAND_SUCCESS && removed != 714) {
-                BOOST_LOG(warning) << "UPnP: "sv << proto << ' ' << number << ", mapped without a lease by an earlier run, not removed: "sv
-                                   << error_text(removed);
-                continue;
-            }
-            BOOST_LOG(info) << "UPnP: removed "sv << proto << ' ' << number << ", mapped without a lease by an earlier run"sv;
-            break;
-        }
-        case Existing::none:
-        case Existing::to_us:
-        case Existing::other:
-            break;  // gone, or not the host's any more: left as it is
-        }
-        done.push_back(m);
-    }
-    change_permanent({}, done);
+    if (stop.stop_requested()) return;
+    for (const auto &line : unmap(owned)) BOOST_LOG(warning) << "UPnP: "sv << line;
 }
 
 }  // namespace prospero::upnp

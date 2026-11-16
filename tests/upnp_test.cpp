@@ -16,20 +16,17 @@ int main() {
     assert(tcp == 3 && udp == 3);
     assert(!ports[0].udp && ports[0].port == 47984 && ports[3].udp && ports[3].port == 47998);
 
-    // What the router had: nothing, this console with or without a lease, another device, or no answer.
-    // Only the host's own description makes a mapping its own: hand-made rules come with any lease.
-    const char *lan = "192.168.1.88";
-    assert(classify(714, "", "", lan) == Existing::none);
-    assert(classify(0, "", "", lan) == Existing::none);
-    assert(classify(0, lan, "ProsperoSunshine Video", lan) == Existing::mine);
-    assert(classify(0, lan, "Sunshine - HTTPS", lan) == Existing::to_us);
-    assert(classify(0, lan, "", lan) == Existing::to_us);
-    assert(classify(0, "192.168.1.20", "Sunshine - Video", lan) == Existing::other);
-    assert(classify(0, "192.168.1.20", "ProsperoSunshine Video", lan) == Existing::other);  // another console's
-    assert(classify(606, "", "", lan) == Existing::unknown);
-    assert(classify(-3, "", "", lan) == Existing::unknown);
-    // On the outer router the target is the inner router's address.
-    assert(classify(0, "10.0.0.86", "Sunshine - HTTPS", "10.0.0.86") == Existing::to_us);
+    // Full endpoint and description matches still need a recorded creation before management.
+    const auto check = [](int error, std::string_view client, std::string_view port, std::string_view label) {
+        return classify(error, client, port, label, "198.51.100.88", 47998, "ProsperoSunshine Video");
+    };
+    assert(check(714, "", "", "") == Existing::none);
+    assert(check(0, "", "", "") == Existing::unknown);
+    assert(check(0, "198.51.100.88", "47998", "ProsperoSunshine Video") == Existing::mine);
+    assert(check(0, "198.51.100.88", "47999", "ProsperoSunshine Video") == Existing::other);
+    assert(check(0, "198.51.100.88", "47998", "ProsperoSunshine Video manual") == Existing::to_us);
+    assert(check(0, "198.51.100.89", "47998", "ProsperoSunshine Video") == Existing::other);
+    assert(check(501, "198.51.100.88", "47998", "ProsperoSunshine Video") == Existing::unknown);
 
     // Addresses the internet can't reach.
     for (const char *p : {"10.0.0.86", "192.168.1.1", "172.16.0.1", "172.31.255.255", "100.64.0.1", "100.127.1.1",
@@ -58,18 +55,11 @@ int main() {
     PermanentMapping moved = inner;
     moved.client = "198.51.100.89";
     assert(merge_permanent({}, {inner, https}, {}) == (std::vector<PermanentMapping>{inner, https}));
-    assert(merge_permanent({inner, https}, {moved}, {}) == (std::vector<PermanentMapping>{https, moved}));
-    assert(merge_permanent({inner, https}, {}, {{inner.control_url, inner.service_type, "", true, 47998}}) ==
-           (std::vector<PermanentMapping>{https}));
+    assert(merge_permanent({inner, https}, {moved}, {}) == (std::vector<PermanentMapping>{inner, https, moved}));
+    assert(merge_permanent({inner, https}, {}, {{inner.control_url, inner.service_type, "", true, 47998}}).size() == 2);
     assert(merge_permanent({inner}, {}, {{"http://other.example/ctl", inner.service_type, "", true, 47998}}).size() == 1);
     assert(merge_permanent({inner, https}, {}, {inner, https}).empty());
     assert(merge_permanent({inner}, {inner, inner}, {}).size() == 1);
-
-    // The ports mapped now are left to the run; a port from an earlier Base port is removed.
-    assert(mapped_now(inner, ports) && mapped_now(https, ports));
-    assert(!mapped_now({inner.control_url, inner.service_type, inner.client, false, 47998}, ports));  // TCP, not UDP
-    assert(!mapped_now({inner.control_url, inner.service_type, inner.client, true, 48098}, ports));
-    assert(!mapped_now(inner, {}));
 
     // A lease near its end is renewed by removing the mapping first; a permanent one (0) or a fresh one is not.
     assert(renew_by_removing("599") && renew_by_removing("1") && renew_by_removing("120"));
@@ -94,6 +84,13 @@ int main() {
     assert(outer_router("172.20.5.9", "192.168.1.100", hosts) == -1);  // the provider's NAT: nobody to ask
     assert(outer_router("192.168.1.7", "192.168.1.100", hosts) == 2);  // 192.168.63.12 shares 18 bits
     assert(outer_router("10.0.0.86", "10.0.0.1", {"10.0.0.1"}) == -1);
+
+    assert(outer_router("198.51.100.86", "203.0.113.1", {"198.51.100.1", "198.51.100.2"}) == -1);
+    auto labelled = inner;
+    labelled.description = "ProsperoSunshine Video";
+    assert(parse_permanent(format_permanent_list({labelled})).front() == labelled);
+    assert(merge_permanent({inner, labelled}, {}, {labelled}) == std::vector<PermanentMapping>{inner});
+    assert(parse_permanent("u s c TCP 1 \"unterminated").empty());
 
     // Log lines.
     PortStatus p{{47999, true, "Control"}, Outcome::taken, "192.168.1.20", false};

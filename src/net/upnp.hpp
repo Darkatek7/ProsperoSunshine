@@ -6,7 +6,9 @@
 #pragma once
 #include <cstdint>
 #include <cstdio>
+#include <iomanip>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -33,22 +35,22 @@ inline constexpr std::string_view label_prefix = "ProsperoSunshine ";
 
 // What the router has for a port before the host maps it, from GetSpecificPortMappingEntry.
 enum class Existing {
-    none,     // no entry (UPnP error 714, or an empty answer)
-    mine,     // forwarded here by the host (its description): renew it, and remove it when the host stops
+    none,     // explicit NoSuchEntryInArray (714)
+    mine,     // exact identity match; management ALSO requires a local ownership record
     to_us,    // forwarded here by someone else, by hand for example: leave it, it already works
     other,    // forwarded to another address: leave it and report it
-    unknown,  // the router failed to answer: try to map anyway
+    unknown,  // the router failed to answer: do not mutate it
 };
 
 // `client` is where the router forwards the port, `target` where the host wants it (the console, or the inner router).
-// Routers report hand-made rules with any lease (0, or 4294967295 on some), so only the description tells the host's own
-// mappings from them.
-inline Existing classify(int error, std::string_view client, std::string_view description, std::string_view target) {
+// Matching text is not proof of creation: callers must also require a recorded full identity before mutating a rule.
+inline Existing classify(int error, std::string_view client, std::string_view internal_port, std::string_view description,
+                         std::string_view target, uint16_t port, std::string_view label) {
     if (error == 714) return Existing::none;
     if (error != 0) return Existing::unknown;
-    if (client.empty()) return Existing::none;
-    if (client != target) return Existing::other;
-    return description.starts_with(label_prefix) ? Existing::mine : Existing::to_us;
+    if (client.empty() || internal_port.empty()) return Existing::unknown;
+    if (client != target || internal_port != std::to_string(port)) return Existing::other;
+    return !label.empty() && description == label ? Existing::mine : Existing::to_us;
 }
 
 // A dotted IPv4 address the internet can't reach: private, carrier-grade NAT, link-local, loopback or unspecified.
@@ -110,7 +112,7 @@ enum class State { off, searching, no_router, ready };
 struct PortStatus {
     Mapping mapping;
     Outcome outcome = Outcome::pending;
-    std::string detail;     // the other device's address (taken), or the router's error (failed)
+    std::string detail = {}; // the other device's address (taken), or the router's error (failed)
     bool added = false;     // mapped by the host, so removed again when it stops
     bool permanent = false; // added without a lease, as the router takes no other (UPnP error 725)
 };
@@ -124,11 +126,12 @@ struct PermanentMapping {
     std::string client;        // where the port went: the console, or the inner router
     bool udp = false;
     uint16_t port = 0;
+    std::string description = {};   // empty only for legacy records: preserve, never infer ownership from a prefix
 
     bool operator==(const PermanentMapping &) const = default;
 };
 
-// "<control url> <service type> <client> <TCP|UDP> <port>"; empty when a field would not stay one word.
+// Legacy five-field lines are retained; new lines append the complete quoted description.
 inline std::string format_permanent(const PermanentMapping &m) {
     const auto word = [](const std::string &text) {
         if (text.empty()) return false;
@@ -137,7 +140,14 @@ inline std::string format_permanent(const PermanentMapping &m) {
         return true;
     };
     if (!word(m.control_url) || !word(m.service_type) || !word(m.client) || m.port == 0) return {};
-    return m.control_url + ' ' + m.service_type + ' ' + m.client + (m.udp ? " UDP " : " TCP ") + std::to_string(m.port);
+    std::string line = m.control_url + ' ' + m.service_type + ' ' + m.client + (m.udp ? " UDP " : " TCP ") + std::to_string(m.port);
+    if (m.description.find_first_of("\r\n") != std::string::npos) return {};
+    if (!m.description.empty()) {
+        std::ostringstream quoted;
+        quoted << ' ' << std::quoted(m.description);
+        line += quoted.str();
+    }
+    return line;
 }
 
 // The lines of the file; a line that isn't one of format_permanent()'s is left out.
@@ -147,21 +157,23 @@ inline std::vector<PermanentMapping> parse_permanent(std::string_view text) {
         const size_t end = text.find('\n');
         std::string_view line = text.substr(0, end);
         text = end == std::string_view::npos ? std::string_view() : text.substr(end + 1);
-        std::vector<std::string> words;
-        while (!line.empty()) {
-            const size_t space = line.find(' ');
-            if (space != 0) words.emplace_back(line.substr(0, space));
-            line = space == std::string_view::npos ? std::string_view() : line.substr(space + 1);
+        std::istringstream entry{std::string(line)};
+        PermanentMapping m;
+        std::string protocol, port;
+        if (!(entry >> m.control_url >> m.service_type >> m.client >> protocol >> port)) continue;
+        if (protocol != "TCP" && protocol != "UDP") continue;
+        if (port.empty() || port.size() > 5 || port.find_first_not_of("0123456789") != std::string::npos) continue;
+        const auto number = std::stoul(port);
+        if (number == 0 || number > 65535) continue;
+        m.port = static_cast<uint16_t>(number);
+        m.udp = protocol == "UDP";
+        entry >> std::ws;
+        if (!entry.eof()) {
+            if (entry.peek() != '"' || !(entry >> std::quoted(m.description))) continue;
+            entry >> std::ws;
+            if (!entry.eof() || m.description.empty()) continue;
         }
-        if (words.size() != 5 || (words[3] != "TCP" && words[3] != "UDP") || words[4].empty() || words[4].size() > 5) continue;
-        unsigned long port = 0;
-        bool digits = true;
-        for (const char c : words[4]) {
-            digits = digits && c >= '0' && c <= '9';
-            port = port * 10 + static_cast<unsigned>(c - '0');
-        }
-        if (!digits || port == 0 || port > 65535) continue;
-        list.push_back({words[0], words[1], words[2], words[3] == "UDP", static_cast<uint16_t>(port)});
+        if (!format_permanent(m).empty()) list.push_back(std::move(m));
     }
     return list;
 }
@@ -182,35 +194,22 @@ inline std::string format_permanent_list(const std::vector<PermanentMapping> &li
     return text;
 }
 
-// The noted list after some mappings were added and others removed. A router has one mapping per port and protocol, so that is
-// what identifies one; a mapping added again replaces its old note (the console may have another address now).
+// Merge by FULL identity. A new destination must not erase an unresolved record for an older destination.
 inline std::vector<PermanentMapping> merge_permanent(std::vector<PermanentMapping> list, const std::vector<PermanentMapping> &added,
                                                      const std::vector<PermanentMapping> &removed) {
-    const auto same_port = [](const PermanentMapping &a, const PermanentMapping &b) {
-        return a.control_url == b.control_url && a.service_type == b.service_type && a.udp == b.udp && a.port == b.port;
-    };
     std::vector<PermanentMapping> kept;
     for (const auto &m : list) {
         bool replaced = false;
-        for (const auto &r : removed) replaced = replaced || same_port(m, r);
-        for (const auto &a : added) replaced = replaced || same_port(m, a);
+        for (const auto &r : removed) replaced = replaced || m == r;
+        for (const auto &a : added) replaced = replaced || m == a;
         if (!replaced) kept.push_back(m);
     }
     for (const auto &a : added) {
         bool twice = false;
-        for (const auto &k : kept) twice = twice || same_port(k, a);
+        for (const auto &k : kept) twice = twice || k == a;
         if (!twice) kept.push_back(a);
     }
     return kept;
-}
-
-// Whether a mapping noted earlier is one of the ports the host maps now: the run renews those itself, by port and protocol,
-// as it doesn't know yet which router answers. The others are left from an earlier Base port, or from a run with upnp on
-// when it's off now.
-inline bool mapped_now(const PermanentMapping &m, const std::vector<Mapping> &mappings) {
-    for (const auto &now : mappings)
-        if (now.port == m.port && now.udp == m.udp) return true;
-    return false;
 }
 
 // One router and what it forwards. `router` is empty while there is none.
@@ -233,12 +232,19 @@ struct Status {
 // prefix with it, at least 16 bits (one network), and not the inner router itself. -1 when there is none.
 inline int outer_router(std::string_view inner_external, std::string_view inner_router, const std::vector<std::string> &hosts) {
     int best = -1, best_bits = 15;
+    bool tied = false;
     for (int i = 0; i < static_cast<int>(hosts.size()); ++i) {
         if (hosts[i] == inner_router) continue;
         const int bits = shared_prefix(inner_external, hosts[i]);
-        if (bits > best_bits) best = i, best_bits = bits;
+        if (bits > best_bits) {
+            best = i;
+            best_bits = bits;
+            tied = false;
+        } else if (bits == best_bits && best >= 0 && hosts[i] != hosts[best]) {
+            tied = true;
+        }
     }
-    return best;
+    return tied ? -1 : best;
 }
 
 inline const char *name(Outcome outcome) {

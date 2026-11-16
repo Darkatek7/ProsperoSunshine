@@ -26,10 +26,14 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     FUZZ_CHECK(host.find_first_of(":/") == std::string::npos);
     FUZZ_CHECK(host.size() <= c.size());
 
-    const Existing existing = classify(error, a, c, d);
+    const uint16_t expected_port = in.ConsumeIntegral<uint16_t>();
+    const std::string internal_port = in.ConsumeBool() ? std::to_string(expected_port) : b;
+    const std::string label = in.ConsumeBool() ? c : std::string(label_prefix) + "HTTP";
+    const Existing existing = classify(error, a, internal_port, c, d, expected_port, label);
     if (error == 714) FUZZ_CHECK(existing == Existing::none);
     if (error != 0 && error != 714) FUZZ_CHECK(existing == Existing::unknown);
-    if (existing == Existing::mine) FUZZ_CHECK(c.starts_with(label_prefix) && a == d && !a.empty());
+    if (existing == Existing::mine)
+        FUZZ_CHECK(c == label && !label.empty() && a == d && !a.empty() && internal_port == std::to_string(expected_port));
 
     if (renew_by_removing(a)) {
         FUZZ_CHECK(!a.empty() && a.size() <= 10);
