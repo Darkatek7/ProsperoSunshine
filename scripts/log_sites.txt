@@ -13,7 +13,7 @@ src/net/upnp_client.cpp|BOOST_LOG(info) << "UPnP: "sv << hop.router << ' ' << de
 src/net/upnp_client.cpp|BOOST_LOG(info) << "UPnP: "sv << which << " router "sv << hop.router << ", internet side "sv << (hop.external.empty() ? "unknown"s : hop.external) << (hop.external_private ? " (private: another router or the provider's NAT is in front)"sv : ""sv);
 src/net/upnp_client.cpp|BOOST_LOG(warning) << "UPnP: "sv << hop.router << ' ' << describe(port);
 src/net/upnp_client.cpp|for (const auto &line : refused_lines) BOOST_LOG(warning) << "UPnP: "sv << line;
-src/net/upnp_client.cpp|for (const auto &line : unmap(router, ports)) BOOST_LOG(warning) << "UPnP: "sv << line;
+src/net/upnp_client.cpp|for (const auto &line : unmap(owned, router.control_url)) BOOST_LOG(warning) << "UPnP: "sv << line;
 src/net/upnp_client.cpp|if (!before.router.empty()) BOOST_LOG(info) << "UPnP: the "sv << which << " router stopped answering"sv;
 
 # The address the user typed as remote_log (debug build only; the line goes through the filter, which masks it). Sample: 'remote_log'.
@@ -55,3 +55,7 @@ src/web/web_server.cpp|BOOST_LOG(error) << "Web page could not start: "sv << e.w
 src/web/web_server.cpp|BOOST_LOG(error) << "Web page failed on port "sv << port << ": "sv << e.what();
 src/web/web_server.cpp|BOOST_LOG(error) << "Web page: restart failed: "sv << problem;
 src/web/web_server.cpp|BOOST_LOG(warning) << "Web page: remembered sign-ins not stored: "sv << problem;
+
+# Ownership cleanup messages contain only the port, fixed reason and UPnP error text; no endpoint or client values.
+src/net/upnp_client.cpp|for (const auto &line : unmap(stale)) BOOST_LOG(warning) << "UPnP: "sv << line;
+src/net/upnp_client.cpp|for (const auto &line : unmap(owned, router.control_url, &wanted)) BOOST_LOG(warning) << "UPnP: "sv << line;

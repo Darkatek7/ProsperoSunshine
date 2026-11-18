@@ -39,6 +39,7 @@ run_test client_app_test
 run_test title_profile_test
 run_test listener_watch_test
 run_test upnp_test
+run_test upnp_client_test -I "$root/tests/upnp_stubs" -pthread
 run_test device_modes_test
 run_test device_profiles_test
 run_test profile_rules_test

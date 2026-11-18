@@ -15,10 +15,8 @@ void run(std::stop_token stop, std::vector<Mapping> mappings);
 // The last pass's result, for the web page. State::off while run() is not running.
 Status status();
 
-// Removes the mappings an earlier run added without a lease (upnp_permanent.txt, upnp.hpp) and couldn't remove, after a crash
-// or a power cut, except those on the ports in `mappings`, which a run renews. run() calls it first; with upnp off the host
-// calls it with no mappings, so turning UPnP off removes them too. Only mappings still the host's go; a router that doesn't
-// answer keeps its notes for the next start. Returns at once without the file.
-void remove_leftovers(std::stop_token stop, const std::vector<Mapping> &mappings);
+// With UPnP off: removes what an earlier run noted in upnp_permanent.txt and left on the router. Only full current identity
+// matches are removed; a replaced or uncertain rule keeps its record for the next start.
+void remove_leftovers(std::stop_token stop);
 
 }  // namespace prospero::upnp

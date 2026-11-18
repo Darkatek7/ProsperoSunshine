@@ -77,6 +77,8 @@ std::vector<Sample> samples() {
     out.push_back({"upnp.hpp describe: port forwarded to another device (warning)", cat({"UPnP: ", lan_router, " TCP 47984 forwarded to another device (", lan_other, "), left as it is"}),
                    {lan_router, lan_other}, {lan_router, lan_other}, {}, {"TCP 47984", "left as it is"}});
     out.push_back({"upnp_client.cpp: removal refused (warning)", cat({"UPnP: ", lan_router, " UDP 47998 not removed: ConflictInMappingEntry"}), {lan_router}, {lan_router}, {}, {"UDP 47998"}});
+    out.push_back({"upnp_client.cpp: ambiguous ownership retained (warning)", "UPnP: 47989 ownership could not be confirmed; retained",
+                   {}, {}, {}, {"47989", "ownership could not be confirmed", "retained"}});
     // ---- The debug build's remote log line --------------------------------------------------------------------------------------
     out.push_back({"main_ps5.cpp: remote_log (info), the address the user typed", cat({"remote_log: each log line also goes to ", lan_other, ":5514 (UDP syslog)"}), {lan_other}, {lan_other}, {}, {"UDP syslog"}});
     // ---- What Sunshine dumps at debug level (also reachable in the normal build with min_log_level = debug) ---------------------
