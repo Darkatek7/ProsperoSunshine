@@ -64,21 +64,36 @@ std::string error_text(int error) {
 }
 
 // The fallback is restricted to recorded identities and cross-checks both router query forms.
+// A read that failed on the way (UPNPCOMMAND_HTTP_ERROR) is sent once more. A router can drop a request now and then (an
+// ISP router here fails about one SOAP call in 250), and a router that reports internal port 0 is checked against its
+// whole table, ~40 calls per port: one dropped call left that port failed for a pass while its rule was there all along.
+// Only reads are repeated.
+constexpr int upnp_http_error = -3;
+template<class Read>
+upnp_identity::Entry read_twice(Read read) {
+    auto entry = read();
+    return entry.result == upnp_http_error ? read() : entry;
+}
+
 upnp_identity::Entry read_mapping(const std::string &control, const std::string &service,
                                  const std::string &target, const std::string &number,
                                  const std::string &protocol, const std::string &label, bool recorded) {
     const auto specific = [&] {
-        char client[64]{}, port[6]{}, description[80]{}, enabled[4]{}, lease[16]{};
-        const int result = UPNP_GetSpecificPortMappingEntry(control.c_str(), service.c_str(), number.c_str(),
-            protocol.c_str(), nullptr, client, port, description, enabled, lease);
-        return upnp_identity::Entry{result, client, port, description, enabled, lease};
+        return read_twice([&] {
+            char client[64]{}, port[6]{}, description[80]{}, enabled[4]{}, lease[16]{};
+            const int result = UPNP_GetSpecificPortMappingEntry(control.c_str(), service.c_str(), number.c_str(),
+                protocol.c_str(), nullptr, client, port, description, enabled, lease);
+            return upnp_identity::Entry{result, client, port, description, enabled, lease};
+        });
     };
     const auto generic = [&](std::size_t index) {
-        char external[6]{}, client[64]{}, port[6]{}, proto[4]{}, description[80]{}, enabled[4]{}, remote[64]{}, lease[16]{};
-        const auto text = std::to_string(index);
-        const int result = UPNP_GetGenericPortMappingEntry(control.c_str(), service.c_str(), text.c_str(),
-            external, client, port, proto, description, enabled, remote, lease);
-        return upnp_identity::Entry{result, client, port, description, enabled, lease, external, proto, remote};
+        return read_twice([&] {
+            char external[6]{}, client[64]{}, port[6]{}, proto[4]{}, description[80]{}, enabled[4]{}, remote[64]{}, lease[16]{};
+            const auto text = std::to_string(index);
+            const int result = UPNP_GetGenericPortMappingEntry(control.c_str(), service.c_str(), text.c_str(),
+                external, client, port, proto, description, enabled, remote, lease);
+            return upnp_identity::Entry{result, client, port, description, enabled, lease, external, proto, remote};
+        });
     };
     return upnp_identity::lookup({target, number, label, number, protocol}, recorded, specific, generic);
 }

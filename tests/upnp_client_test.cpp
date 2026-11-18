@@ -13,6 +13,18 @@ using Key = std::tuple<std::string, std::string, std::string>;
 static std::map<Key, Entry> rules;
 static int adds, deletes, lookup_error, add_error, delete_error, generic_error, fsyncs;
 static bool broken_port, only_permanent, conflict_on_add, conflict_on_permanent, lose_permanent_reply, fail_sync, empty_answer;
+// The removal at stop runs one thread per router: the fake router state is shared, so every call takes this lock.
+static std::recursive_mutex stub_mutex;
+// drop_read: the read (specific or generic, counted in read_calls) that fails once on the way, as a router dropping a request.
+static int read_calls, drop_read;
+// Every read on slow_url waits slow_delay first (outside the lock), as a router that checks each port slowly.
+static std::string slow_url;
+static std::chrono::milliseconds slow_delay{0};
+static bool dropped(const char *url) {
+    if (slow_url == url) std::this_thread::sleep_for(slow_delay);
+    std::lock_guard lock(stub_mutex);
+    return ++read_calls == drop_read;
+}
 extern "C" int fsync(int fd) {
     ++fsyncs;
     if (fail_sync) { errno = EIO; return -1; }
@@ -28,6 +40,8 @@ const char *strupnperror(int) { return "fake error"; }
 extern "C" void ps_diag_log(const char *, ...) {}
 int UPNP_GetSpecificPortMappingEntry(const char *url, const char *, const char *port, const char *proto, const char *,
                                    char *client, char *internal, char *desc, char *enabled, char *lease) {
+    if (dropped(url)) return -3;
+    std::lock_guard lock(stub_mutex);
     if (lookup_error) return lookup_error;
     auto it = rules.find({url, port, proto});
     // miniupnpc 2.3.3 returns 0 when a router answers a free port with an empty NewInternalClient.
@@ -43,6 +57,8 @@ int UPNP_GetSpecificPortMappingEntry(const char *url, const char *, const char *
 }
 int UPNP_GetGenericPortMappingEntry(const char *url, const char *, const char *index, char *external, char *client,
                                   char *internal, char *proto, char *desc, char *enabled, char *remote, char *lease) {
+    if (dropped(url)) return -3;
+    std::lock_guard lock(stub_mutex);
     if (generic_error) return generic_error;
     auto offset = std::stoul(index);
     for (const auto &[key, r] : rules) {
@@ -57,6 +73,7 @@ int UPNP_GetGenericPortMappingEntry(const char *url, const char *, const char *i
 }
 int UPNP_AddPortMapping(const char *url, const char *service, const char *port, const char *internal,
                        const char *client, const char *desc, const char *proto, const char *, const char *lease) {
+    std::lock_guard lock(stub_mutex);
     ++adds;
     if (add_error) return add_error;
     if (only_permanent && std::string_view(lease) != "0") return 725;
@@ -73,6 +90,7 @@ int UPNP_AddPortMapping(const char *url, const char *service, const char *port, 
     return conflict_on_add || (conflict_on_permanent && std::string_view(lease) == "0") ? 718 : 0;
 }
 int UPNP_DeletePortMapping(const char *url, const char *, const char *port, const char *proto, const char *) {
+    std::lock_guard lock(stub_mutex);
     ++deletes;
     if (delete_error) return delete_error;
     rules.erase({url, port, proto});
@@ -96,6 +114,7 @@ int main() {
         adds = deletes = lookup_error = add_error = delete_error = generic_error = fsyncs = 0;
         broken_port = only_permanent = conflict_on_add = conflict_on_permanent = lose_permanent_reply = fail_sync = false;
         empty_answer = false;
+        read_calls = 0; drop_read = -1; slow_url.clear(); slow_delay = std::chrono::milliseconds(0);
         platf::test_appdata = base;
         std::filesystem::remove(permanent_file());
     };
@@ -213,6 +232,16 @@ int main() {
     assert(unmap(owned).size() == 1 && unmap(owned).empty());
     assert(unmap(owned, {}, nullptr, true).size() == 1 && unmap(owned, {}, nullptr, true).size() == 1);
     delete_error = 0; assert(unmap(owned).empty() && owned.empty());
+
+    // A router that drops a request now and then (an ISP router here: about one SOAP call in 250). On a router that
+    // reports internal port 0 each port is checked against the whole table; wherever the dropped read falls, it is sent
+    // again: the port stays open, also when the router answers 718 to the renewal as that one does, and is removed at stop.
+    for (int drop = 1; drop <= 12; ++drop) {
+        reset(); map(); broken_port = true; conflict_on_add = true;
+        read_calls = 0; drop_read = drop; map();
+        assert(ports[0].outcome == Outcome::open && ports[0].added && owned.size() == 1 && deletes == 0);
+        read_calls = 0; drop_read = drop; assert(unmap(owned).empty() && owned.empty() && rules.empty());
+    }
     // Status resets and gateway changes cannot discard ownership of previous destinations.
     reset(); map(); ports = {{mapping}};
     const Router second{"second.example", "http://second.example/control", router.service_type, "203.0.113.20"};
