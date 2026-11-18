@@ -104,6 +104,10 @@ int ps_capture_open_or_fall_back(ps_capture **out);
 // reopen may get it; once the output is settled, ps_capture_size_refused says so and the stream has to end.
 void ps_capture_set_reopening(int on);
 int ps_capture_size_refused(void);
+// Whether the last OpenVideo returned -1 (issue 56): the console's capture path is stuck, and only a console restart
+// frees it. ps_capture_open_or_fall_back then gives up at once, without another mode or variant; the next open, for a
+// new stream, tries again and clears it when it works.
+int ps_capture_stuck(void);
 // Whether the session was opened with the mode set now for its slot. NULL counts as not current.
 int ps_capture_mode_current(const ps_capture *session);
 

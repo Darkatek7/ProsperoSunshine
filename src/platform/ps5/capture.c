@@ -24,6 +24,10 @@
 static _Atomic int resource_id[PS_CAPTURE_SLOTS] = {180, 175}, session_resource[PS_CAPTURE_SLOTS] = {180, 175};
 #define AGAIN ((int)0x81950002)
 #define RESOURCE_NOT_ACTIVE ((int)0x81950008)
+// What OpenVideo returned on 10.20 once the console's own capture path was stuck (issue 56): every open after it got the
+// same, the console's own recording and Remote Play failed too, and only a console restart freed it. All the calls before
+// it returned 0, as in the opens that worked. Repeating the open, in this mode or another, never got past it.
+#define CAPTURE_STUCK ((int)0xffffffff)
 // What ReadVideo2 returned on 10.20 shortly after each open while the encoder's QP was too fine for the picture (issue 50).
 #define READ_QP_TOO_FINE ((int)0x8195000d)
 // Slices per H.264 frame asked of 10.x (cfg+0x44), well below what the decoders take.
@@ -75,6 +79,7 @@ static atomic_int refused_value[PS_CAPTURE_SLOTS];  // data[0] of the answer tha
 // The last open was refused while the output had no mode or changed it; the next opens reopen a running stream's capture;
 // the last reopen was refused by a settled output, so the stream can't go on at its size.
 static atomic_int unsettled[PS_CAPTURE_SLOTS], reopening[PS_CAPTURE_SLOTS], size_refused[PS_CAPTURE_SLOTS];
+static atomic_int stuck;  // the last OpenVideo, on either slot, returned CAPTURE_STUCK
 static int resource_event(int id, int event, const uint8_t *data)
 {
     for (int slot = 0; slot < PS_CAPTURE_SLOTS; slot++) {
@@ -801,6 +806,7 @@ static int open_slot(int slot, ps_capture **out)
     atomic_store(&last_open_rc, rc);
     atomic_store(&failure_rc[slot], rc);
     SLOG(slot, "OpenVideo rc=%#x\n", rc);
+    atomic_store(&stuck, rc == CAPTURE_STUCK);
     if (rc) atomic_store(&refused[slot], 1);
     if (rc == RESOURCE_NOT_ACTIVE) {
         // For the app's report: is our resource listed, and which others are?
@@ -833,7 +839,8 @@ static int open_slot(int slot, ps_capture **out)
     return 0;
 fail:
     if (slice_fields && error != PS_CAPTURE_REVOKED && atomic_load(&reached_encoder[slot]) && !atomic_load(&open_only) &&
-        !(strcmp(step, "OpenVideo") == 0 && atomic_load(&failure_rc[slot]) == RESOURCE_NOT_ACTIVE)) {
+        !(strcmp(step, "OpenVideo") == 0 &&
+          (atomic_load(&failure_rc[slot]) == RESOURCE_NOT_ACTIVE || atomic_load(&failure_rc[slot]) == CAPTURE_STUCK))) {
         // The firmware may not know the fields: ps_capture_slot_open tries once more without them. Not after the probe's
         // open only, which stops on purpose.
         atomic_store(&retry_without_slices[slot], 1);
@@ -1021,6 +1028,11 @@ static int open_or_fall_back(int slot, ps_capture **out)
                 ps_diag_log("ProsperoSunshine: experimental result=ok %s error=0 rc=0 step=none\n", fields);
             if (unproven) marker_clear();
         }
+        if (rc && atomic_load(&stuck)) {
+            // No other mode, variant or rate gets past it, and it says nothing about the switches (issue 56).
+            SLOG(slot, "stuck: OpenVideo returned -1, only a console restart frees the capture (issue 56)\n");
+            return rc;
+        }
         pthread_mutex_lock(&experiment_lock);
         enum ps_exp_next next = PS_EXP_GIVE_UP;
         if (rc) {
@@ -1104,6 +1116,8 @@ void ps_capture_set_reopening(int on) { ps_capture_slot_set_reopening(0, on); }
 int ps_capture_slot_size_refused(int slot) { return valid_slot(slot) && atomic_load(&size_refused[slot]); }
 
 int ps_capture_size_refused(void) { return ps_capture_slot_size_refused(0); }
+
+int ps_capture_stuck(void) { return atomic_load(&stuck); }
 
 int ps_capture_change_scan_in(ps_capture *s, uint32_t resolution)
 {

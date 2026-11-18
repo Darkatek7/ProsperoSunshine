@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **A stuck capture is said plainly and no longer retried** (issue 56). Rarely, the console's own capture path gets stuck:
+  `OpenVideo` returns -1 for every open, the console's recording and Remote Play fail too, and only a console restart
+  frees it. The host tried other modes and kept reopening for 20 s, and every new stream did the same. Now it stops at
+  the first -1 and `sunshine.log` says to restart the console. Each new stream still tries once.
+
 ## 0.6.6 (2026-11-13)
 
 ### Changed
