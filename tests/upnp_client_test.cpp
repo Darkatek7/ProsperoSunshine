@@ -242,6 +242,26 @@ int main() {
         assert(ports[0].outcome == Outcome::open && ports[0].added && owned.size() == 1 && deletes == 0);
         read_calls = 0; drop_read = drop; assert(unmap(owned).empty() && owned.empty() && rules.empty());
     }
+
+    // At stop each router is cleaned on its own thread: a slow one doesn't use up the fast one's budget.
+    reset();
+    const Router slow{"slow.example", "http://slow.example/control", router.service_type, "203.0.113.30"};
+    map_ports(slow, slow.lan_address, ports, {}, owned); ports = {{mapping}}; map();
+    assert(owned.size() == 2 && owned[0].identity.control_url == slow.control_url);
+    slow_url = slow.control_url; slow_delay = std::chrono::milliseconds(4000);
+    const auto started = std::chrono::steady_clock::now();
+    remove_at_stop(owned);
+    const auto waited = std::chrono::steady_clock::now() - started;
+    {
+        std::lock_guard lock(stub_mutex);
+        assert(rules.count(key) == 0 && rules.count({slow.control_url, "47989", "TCP"}) == 1);
+    }
+    assert(waited >= removal_budget && waited < removal_budget + 1s);
+    {
+        std::unique_lock lock(removals().mutex);
+        removals().done.wait(lock, [] { return removals().running == 0; });
+    }
+    assert(rules.empty() && read_permanent().empty());
     // Status resets and gateway changes cannot discard ownership of previous destinations.
     reset(); map(); ports = {{mapping}};
     const Router second{"second.example", "http://second.example/control", router.service_type, "203.0.113.20"};

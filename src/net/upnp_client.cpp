@@ -17,6 +17,7 @@
 #include <fstream>
 #include <future>
 #include <iterator>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -63,7 +64,6 @@ std::string error_text(int error) {
     return text ? std::string(text) + " (" + std::to_string(error) + ')' : "error " + std::to_string(error);
 }
 
-// The fallback is restricted to recorded identities and cross-checks both router query forms.
 // A read that failed on the way (UPNPCOMMAND_HTTP_ERROR) is sent once more. A router can drop a request now and then (an
 // ISP router here fails about one SOAP call in 250), and a router that reports internal port 0 is checked against its
 // whole table, ~40 calls per port: one dropped call left that port failed for a pass while its rule was there all along.
@@ -75,6 +75,7 @@ upnp_identity::Entry read_twice(Read read) {
     return entry.result == upnp_http_error ? read() : entry;
 }
 
+// The fallback is restricted to recorded identities and cross-checks both router query forms.
 upnp_identity::Entry read_mapping(const std::string &control, const std::string &service,
                                  const std::string &target, const std::string &number,
                                  const std::string &protocol, const std::string &label, bool recorded) {
@@ -432,28 +433,45 @@ Removals &removals() {
     return *instance;
 }
 
+// One thread per router, all within the same budget: a slow router must not use up a fast one's time. A router that
+// reports internal port 0 is checked against its whole table (~0.7 s per port on an ISP router here), and removing its six
+// mappings first left the inner router's untouched.
 void remove_at_stop(OwnedMappings owned) {
-    {
-        std::lock_guard lock(removals().mutex);
-        ++removals().running;
+    std::map<std::string, OwnedMappings> by_router;
+    for (auto &record : owned) by_router[record.identity.control_url].push_back(std::move(record));
+    std::vector<std::future<std::vector<std::string>>> results;
+    for (auto &[control, records] : by_router) {
+        {
+            std::lock_guard lock(removals().mutex);
+            ++removals().running;
+        }
+        auto refused = std::make_shared<std::promise<std::vector<std::string>>>();
+        results.push_back(refused->get_future());
+        std::thread([records = std::move(records), refused]() mutable {
+            auto lines = unmap(records, {}, nullptr, true);
+            refused->set_value(std::move(lines));
+            std::lock_guard lock(removals().mutex);
+            --removals().running;
+            removals().done.notify_all();
+        }).detach();
     }
-    auto refused = std::make_shared<std::promise<std::vector<std::string>>>();
-    auto result = refused->get_future();
-    std::thread([owned = std::move(owned), refused]() mutable {
-        auto lines = unmap(owned, {}, nullptr, true);
-        refused->set_value(std::move(lines));
-        std::lock_guard lock(removals().mutex);
-        --removals().running;
-        removals().done.notify_all();
-    }).detach();
+    const auto deadline = std::chrono::steady_clock::now() + removal_budget;
+    std::vector<std::string> refused_lines;
+    bool late = false;
+    for (auto &result : results) {
+        if (result.wait_until(deadline) != std::future_status::ready) {
+            late = true;
+            continue;
+        }
+        for (auto &line : result.get()) refused_lines.push_back(std::move(line));
+    }
     // Also in host_diag.log, which is written at once: around rest mode the other logs can miss these lines.
-    if (result.wait_for(removal_budget) != std::future_status::ready) {
+    if (late) {
         ps_diag_log("ProsperoSunshine: host UPnP removal not done within %lld s\n", static_cast<long long>(removal_budget.count()));
         BOOST_LOG(warning) << "UPnP: the router is slow to remove the mappings; the host goes on, and what is left stays recorded for the next start"sv;
-        return;
+    } else {
+        ps_diag_log("ProsperoSunshine: host UPnP removal done, %zu refused\n", refused_lines.size());
     }
-    const auto refused_lines = result.get();
-    ps_diag_log("ProsperoSunshine: host UPnP removal done, %zu refused\n", refused_lines.size());
     for (const auto &line : refused_lines) BOOST_LOG(warning) << "UPnP: "sv << line;
 }
 
