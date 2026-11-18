@@ -35,11 +35,11 @@ inline constexpr std::string_view label_prefix = "ProsperoSunshine ";
 
 // What the router has for a port before the host maps it, from GetSpecificPortMappingEntry.
 enum class Existing {
-    none,     // explicit NoSuchEntryInArray (714)
+    none,     // no entry: NoSuchEntryInArray (714), or an empty answer
     mine,     // exact identity match; management ALSO requires a local ownership record
     to_us,    // forwarded here by someone else, by hand for example: leave it, it already works
     other,    // forwarded to another address: leave it and report it
-    unknown,  // the router failed to answer: do not mutate it
+    unknown,  // the router failed to answer: never renew or remove on that; adding is still tried (see map_ports)
 };
 
 // `client` is where the router forwards the port, `target` where the host wants it (the console, or the inner router).
@@ -48,6 +48,9 @@ inline Existing classify(int error, std::string_view client, std::string_view in
                          std::string_view target, uint16_t port, std::string_view label) {
     if (error == 714) return Existing::none;
     if (error != 0) return Existing::unknown;
+    // miniupnpc 2.3.3 returns 0 as soon as the answer has a NewInternalClient element, even an empty one: some routers
+    // answer that way for a free port.
+    if (client.empty() && internal_port.empty()) return Existing::none;
     if (client.empty() || internal_port.empty()) return Existing::unknown;
     if (client != target || internal_port != std::to_string(port)) return Existing::other;
     return !label.empty() && description == label ? Existing::mine : Existing::to_us;

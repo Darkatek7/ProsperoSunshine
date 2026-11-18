@@ -375,9 +375,11 @@ with **Copy**: that's the address a friend adds in Moonlight.
   ports, the router already sends them there; the host says so instead of taking them away. Turn UPnP off on the PC, or
   give the console another **Base port**. A rule you made by hand for the console counts as forwarded and isn't touched.
   Even an identical description does not make a pre-existing rule the host's. Renewal and removal require a recorded
-  creation and a fresh match of the destination, internal port and full description. Failed or ambiguous queries leave
-  the rule unchanged. On routers that report an internal port of zero, the host cross-checks the complete mapping table
-  and rechecks the exact description before managing a recorded rule; it never treats zero as a wildcard.
+  creation and a fresh match of the destination, internal port and full description. Failed or ambiguous queries never
+  renew or remove a rule; the host still asks to add the port, which the router refuses when it goes to another device,
+  and only a successful add makes the mapping the host's. On routers that report an internal port of zero, the host
+  cross-checks the complete mapping table and rechecks the exact description before managing a recorded rule; it never
+  treats zero as a wildcard.
 - **A port the router keeps for itself** is refused with 729 (ConflictWithOtherMechanisms), even with nothing mapped
   on it. Status shows it as failed: give the console another **Base port**.
 - **A router that only takes permanent mappings** gets them without a lease: they stay on the router until the host

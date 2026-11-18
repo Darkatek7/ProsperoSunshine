@@ -266,11 +266,6 @@ void map_ports(const Router &router, const std::string &client, std::vector<Port
             port.detail = entry.client;
             continue;
         }
-        if (state == Existing::unknown) {
-            port.outcome = Outcome::failed;
-            port.detail = "ownership lookup failed; unchanged";
-            continue;
-        }
         if (state == Existing::to_us || (state == Existing::mine && !previously_owned)) {
             port.added = false;
             port.outcome = entry.enabled == "1" ? Outcome::open : Outcome::failed;
@@ -299,6 +294,9 @@ void map_ports(const Router &router, const std::string &client, std::vector<Port
                 }
             }
         }
+        // No entry, the host's own to renew, or no answer (Existing::unknown): some routers don't implement the lookup
+        // (401, 501). The add is still tried then: a router must refuse with 718 a port forwarded to another client, and
+        // only a successful add makes the mapping the host's.
         if (stop.stop_requested()) return;
         bool permanent = false, intent_written = false;
         int added = UPNP_AddPortMapping(router.control_url.c_str(), router.service_type.c_str(), number.c_str(),

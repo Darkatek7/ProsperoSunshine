@@ -32,6 +32,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     const Existing existing = classify(error, a, internal_port, c, d, expected_port, label);
     if (error == 714) FUZZ_CHECK(existing == Existing::none);
     if (error != 0 && error != 714) FUZZ_CHECK(existing == Existing::unknown);
+    if (error == 0 && a.empty() && internal_port.empty()) FUZZ_CHECK(existing == Existing::none);
     if (existing == Existing::mine)
         FUZZ_CHECK(c == label && !label.empty() && a == d && !a.empty() && internal_port == std::to_string(expected_port));
 

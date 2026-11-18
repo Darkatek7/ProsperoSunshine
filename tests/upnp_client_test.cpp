@@ -12,7 +12,7 @@ using upnp_identity::Entry;
 using Key = std::tuple<std::string, std::string, std::string>;
 static std::map<Key, Entry> rules;
 static int adds, deletes, lookup_error, add_error, delete_error, generic_error;
-static bool broken_port, only_permanent, conflict_on_add, conflict_on_permanent, lose_permanent_reply, fail_sync;
+static bool broken_port, only_permanent, conflict_on_add, conflict_on_permanent, lose_permanent_reply, fail_sync, empty_answer;
 extern "C" int fsync(int fd) {
     if (fail_sync) { errno = EIO; return -1; }
     return static_cast<int>(::syscall(SYS_fsync, fd));
@@ -29,6 +29,11 @@ int UPNP_GetSpecificPortMappingEntry(const char *url, const char *, const char *
                                    char *client, char *internal, char *desc, char *enabled, char *lease) {
     if (lookup_error) return lookup_error;
     auto it = rules.find({url, port, proto});
+    // miniupnpc 2.3.3 returns 0 when a router answers a free port with an empty NewInternalClient.
+    if (it == rules.end() && empty_answer) {
+        for (char *out : {client, internal, desc, enabled, lease}) copy(out, "");
+        return 0;
+    }
     if (it == rules.end()) return 714;
     const auto &r = it->second;
     copy(client, r.client); copy(internal, broken_port ? "0" : r.internal_port); copy(desc, r.description);
@@ -60,6 +65,8 @@ int UPNP_AddPortMapping(const char *url, const char *service, const char *port, 
         auto noted = read_permanent();
         assert(std::find(noted.begin(), noted.end(), identity) != noted.end()); // intent exists before the call
     }
+    // As the spec asks: a port forwarded to another client is refused, never overwritten.
+    if (const auto it = rules.find({url, port, proto}); it != rules.end() && it->second.client != client) return 718;
     rules[{url, port, proto}] = {0, client, internal, desc, "1", lease, port, proto, ""};
     if (lose_permanent_reply && std::string_view(lease) == "0") return -1;
     return conflict_on_add || (conflict_on_permanent && std::string_view(lease) == "0") ? 718 : 0;
@@ -87,24 +94,34 @@ int main() {
         rules.clear(); owned.clear(); ports = {{mapping}};
         adds = deletes = lookup_error = add_error = delete_error = generic_error = 0;
         broken_port = only_permanent = conflict_on_add = conflict_on_permanent = lose_permanent_reply = fail_sync = false;
+        empty_answer = false;
         platf::test_appdata = base;
         std::filesystem::remove(permanent_file());
     };
     const auto map = [&] { map_ports(router, router.lan_address, ports, {}, owned); };
-    // Identical manual rules, prefix matches, wrong ports, disabled rules and lookup failures must never be mutated.
-    for (int variant = 0; variant < 8; ++variant) {
+    // Identical manual rules, prefix matches, wrong ports and disabled rules must never be mutated. A failed or broken
+    // lookup still tries the add, which the router refuses for a port forwarded to another device: nothing changes.
+    for (int variant = 0; variant < 7; ++variant) {
         reset(); auto entry = original;
         if (variant == 1) entry.description += " manual";
         if (variant == 2) entry.internal_port = "48000";
         if (variant == 3) entry.client = "198.51.100.99";
         if (variant == 4) entry.enabled = "0";
-        if (variant == 5) lookup_error = 501;
+        if (variant == 5) { lookup_error = 501; entry.client = "198.51.100.99"; }
         if (variant == 6) entry.client.clear();
-        if (variant == 7) entry.internal_port.clear();
         entry.lease = "5"; rules[key] = entry;
         map(); unmap(owned);
-        assert(adds == 0 && deletes == 0 && owned.empty() && rules.size() == 1);
+        assert(adds == (variant >= 5 ? 1 : 0) && deletes == 0 && owned.empty() && rules.size() == 1);
+        assert(rules[key].client == entry.client && rules[key].lease == "5" && read_permanent().empty());
     }
+    // An empty answer for a free port (miniupnpc 2.3.3 returns 0 for it) is no entry: the port is mapped.
+    reset(); empty_answer = true; map();
+    assert(adds == 1 && owned.size() == 1 && ports[0].outcome == Outcome::open && ports[0].added);
+    // Gone from the router (it restarted) and answered empty: the record is dropped, not retained for good.
+    rules.clear(); assert(unmap(owned).empty() && owned.empty() && deletes == 0);
+    // A router that fails the lookup (401, 501) still gets the add; only its success makes the mapping the host's.
+    reset(); lookup_error = 501; map(); assert(adds == 1 && owned.size() == 1 && ports[0].outcome == Outcome::open);
+    reset(); lookup_error = 501; add_error = 501; map(); assert(adds == 1 && owned.empty() && ports[0].outcome == Outcome::failed);
     // A real creation authorizes renewal, but only while the full current identity still matches.
     reset(); map(); assert(owned.size() == 1 && adds == 1);
     rules[key].lease = "100"; map(); assert(deletes == 1 && adds == 2);
@@ -114,9 +131,11 @@ int main() {
     assert(deletes == 1 && rules.size() == 1);
     rules[key] = original; delete_error = 501; unmap(owned); assert(owned.size() == 1);
     delete_error = 0; unmap(owned); assert(owned.empty() && rules.empty());
-    // Unknown lookup / failed delete must not fall through to AddPortMapping, even for an owned expiring rule.
-    reset(); map(); lookup_error = 501; map(); assert(adds == 1 && owned.size() == 1);
-    lookup_error = 0; rules[key].lease = "10"; delete_error = 501; map(); assert(adds == 1 && rules.size() == 1);
+    // An unknown lookup never renews by removing or removes an owned rule; the add is sent again. A failed delete before
+    // a renewal keeps the rule as it is.
+    reset(); map(); lookup_error = 501; map(); assert(adds == 2 && deletes == 0 && owned.size() == 1);
+    unmap(owned); assert(deletes == 0 && owned.size() == 1);
+    lookup_error = 0; rules[key].lease = "10"; delete_error = 501; map(); assert(adds == 2 && rules.size() == 1);
     // An add conflict is not proof of creation, even when the other rule has our exact description.
     reset(); conflict_on_add = true; map(); assert(owned.empty()); unmap(owned); assert(deletes == 0 && rules.size() == 1);
     // Permanent creation is refused if the journal cannot be written. Never send the permanent add in that case.
