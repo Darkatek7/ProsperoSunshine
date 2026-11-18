@@ -369,8 +369,16 @@ void map_ports(const Router &router, const std::string &client, std::vector<Port
         if (stop.stop_requested()) return;
         const bool noted = previously_owned && recorded->journaled;
         bool permanent = false, intent_written = false;
-        int added = UPNP_AddPortMapping(router.control_url.c_str(), router.service_type.c_str(), number.c_str(),
-                                        number.c_str(), client.c_str(), wanted.description.c_str(), proto, nullptr, lease_seconds);
+        const auto add_leased = [&] {
+            return UPNP_AddPortMapping(router.control_url.c_str(), router.service_type.c_str(), number.c_str(), number.c_str(),
+                                       client.c_str(), wanted.description.c_str(), proto, nullptr, lease_seconds);
+        };
+        int added = add_leased();
+        // A leased add that failed on the way is sent once more, like a read. If the first one did reach the router, the
+        // repeat answers 0 or 718, and a 718 never makes a new mapping the host's: at worst it lapses with its lease, as
+        // without the repeat. The permanent add below is not repeated: a 718 there would retire the record of a rule that
+        // exists.
+        if (added == upnp_http_error && !stop.stop_requested()) added = add_leased();
         if (added == upnp_error_only_permanent_leases && !stop.stop_requested()) {
             if (!noted) {
                 if (!change_permanent({wanted}, {})) {

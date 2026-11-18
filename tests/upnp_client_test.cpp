@@ -17,6 +17,9 @@ static bool broken_port, only_permanent, conflict_on_add, conflict_on_permanent,
 static std::recursive_mutex stub_mutex;
 // drop_read: the read (specific or generic, counted in read_calls) that fails once on the way, as a router dropping a request.
 static int read_calls, drop_read;
+// drop_add: the add (counted in adds) that fails once with -3; drop_add_lost: it reached the router, only the reply was lost.
+static int drop_add;
+static bool drop_add_lost;
 // Every read on slow_url waits slow_delay first (outside the lock), as a router that checks each port slowly.
 static std::string slow_url;
 static std::chrono::milliseconds slow_delay{0};
@@ -83,9 +86,11 @@ int UPNP_AddPortMapping(const char *url, const char *service, const char *port, 
         auto noted = read_permanent();
         assert(std::find(noted.begin(), noted.end(), identity) != noted.end()); // intent exists before the call
     }
+    if (adds == drop_add && !drop_add_lost) return -3;
     // As the spec asks: a port forwarded to another client is refused, never overwritten.
     if (const auto it = rules.find({url, port, proto}); it != rules.end() && it->second.client != client) return 718;
     rules[{url, port, proto}] = {0, client, internal, desc, "1", lease, port, proto, ""};
+    if (adds == drop_add) return -3;
     if (lose_permanent_reply && std::string_view(lease) == "0") return -1;
     return conflict_on_add || (conflict_on_permanent && std::string_view(lease) == "0") ? 718 : 0;
 }
@@ -115,6 +120,7 @@ int main() {
         broken_port = only_permanent = conflict_on_add = conflict_on_permanent = lose_permanent_reply = fail_sync = false;
         empty_answer = false;
         read_calls = 0; drop_read = -1; slow_url.clear(); slow_delay = std::chrono::milliseconds(0);
+        drop_add = -1; drop_add_lost = false;
         platf::test_appdata = base;
         std::filesystem::remove(permanent_file());
     };
@@ -241,6 +247,20 @@ int main() {
         read_calls = 0; drop_read = drop; map();
         assert(ports[0].outcome == Outcome::open && ports[0].added && owned.size() == 1 && deletes == 0);
         read_calls = 0; drop_read = drop; assert(unmap(owned).empty() && owned.empty() && rules.empty());
+    }
+
+    // A leased add that fails on the way is sent once more, whether the request or only its reply was lost. A renewal ends
+    // open and the host's, also on a router that answers 718 to a repeated add. A new mapping is the host's after a 0; a
+    // 718 to the repeat doesn't make it the host's. The permanent add is never repeated, and its record stays.
+    for (const bool lost : {false, true}) {
+        for (const bool conflict : {false, true}) {
+            reset(); map(); conflict_on_add = conflict; drop_add = adds + 1; drop_add_lost = lost; map();
+            assert(adds == 3 && ports[0].outcome == Outcome::open && ports[0].added && owned.size() == 1);
+            reset(); conflict_on_add = conflict; drop_add = 1; drop_add_lost = lost; map();
+            assert(adds == 2 && ports[0].outcome == Outcome::open && owned.size() == (conflict ? 0u : 1u));
+        }
+        reset(); only_permanent = true; drop_add = 2; drop_add_lost = lost; map();
+        assert(adds == 2 && owned.empty() && ports[0].outcome == Outcome::failed && read_permanent().size() == 1);
     }
 
     // At stop each router is cleaned on its own thread: a slow one doesn't use up the fast one's budget.
