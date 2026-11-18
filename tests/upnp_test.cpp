@@ -24,6 +24,8 @@ int main() {
     assert(check(0, "", "", "") == Existing::none);  // miniupnpc 2.3.3 returns 0 for an empty NewInternalClient
     assert(check(0, "", "47998", "") == Existing::unknown);
     assert(check(0, "198.51.100.88", "", "") == Existing::unknown);
+    assert(host_label("ProsperoSunshine Video") && host_label("ProsperoSunshine HTTPS"));
+    assert(!host_label("ProsperoSunshine ") && !host_label("ProsperoSunshine Video manual") && !host_label("Sunshine Video"));
     assert(check(0, "198.51.100.88", "47998", "ProsperoSunshine Video") == Existing::mine);
     assert(check(0, "198.51.100.88", "47999", "ProsperoSunshine Video") == Existing::other);
     assert(check(0, "198.51.100.88", "47998", "ProsperoSunshine Video manual") == Existing::to_us);

@@ -144,6 +144,7 @@ struct OwnedMapping {
     PermanentMapping identity;
     bool permanent = false;  // added without a lease
     bool journaled = false;  // its line is in upnp_permanent.txt, retired when the mapping is gone
+    std::string reported = {};  // the last line unmap() logged for it, so a retained record isn't logged every pass
 };
 using OwnedMappings = std::vector<OwnedMapping>;
 
@@ -169,11 +170,29 @@ Existing classify(const upnp_identity::Entry &entry, const PermanentMapping &wan
                     wanted.description);
 }
 
-// Remove only fresh matches. Keep ambiguous records (including old journal entries without a description) for retry.
-std::vector<std::string> unmap(OwnedMappings &owned, const std::string &control = {}, const PermanentMapping *replacement = nullptr) {
+// A record from 0.6.x has no description. It is adopted once when the router still forwards that exact port to that exact
+// client under one of the host's own descriptions: the line is rewritten with it, and from then on the record is managed
+// like any other. Anything less (no answer, another client or port, a description the host doesn't give) keeps it as it is.
+bool upgrade_legacy(OwnedMapping &record, const upnp_identity::Entry &entry) {
+    const auto &m = record.identity;
+    if (!m.description.empty() || entry.result != 0 || entry.client != m.client ||
+        entry.internal_port != std::to_string(m.port) || !host_label(entry.description))
+        return false;
+    auto upgraded = m;
+    upgraded.description = entry.description;
+    if (!change_permanent({upgraded}, {m})) return false;
+    record.identity = std::move(upgraded);
+    return true;
+}
+
+// Remove only fresh matches. Keep ambiguous records for retry. A record that is refused again for the same reason is
+// logged once, unless `every_time` (the removal at stop).
+std::vector<std::string> unmap(OwnedMappings &owned, const std::string &control = {}, const PermanentMapping *replacement = nullptr,
+                               bool every_time = false) {
     std::vector<std::string> refused;
-    const auto refuse = [&](OwnedMapping &, std::string line) {
-        refused.push_back(std::move(line));
+    const auto refuse = [&](OwnedMapping &record, std::string line) {
+        if (every_time || record.reported != line) refused.push_back(line);
+        record.reported = std::move(line);
         return false;
     };
     // Whether the record is done with: removed from the router (or gone from it) and retired from the file.
@@ -183,6 +202,8 @@ std::vector<std::string> unmap(OwnedMappings &owned, const std::string &control 
         if (replacement && (m.service_type != replacement->service_type || m.port != replacement->port ||
                             m.udp != replacement->udp || m == *replacement)) return false;
         const auto entry = read_mapping(m, !m.description.empty());
+        // Upgraded into the very mapping being renewed: it is the record of that mapping now, not one to replace.
+        if (upgrade_legacy(record, entry) && replacement && m == *replacement) return false;
         const auto state = classify(entry, m);
         if (state != Existing::none && (m.description.empty() || state != Existing::mine))
             return refuse(record, std::to_string(m.port) + " ownership could not be confirmed; retained");
@@ -404,7 +425,7 @@ void remove_at_stop(OwnedMappings owned) {
     auto refused = std::make_shared<std::promise<std::vector<std::string>>>();
     auto result = refused->get_future();
     std::thread([owned = std::move(owned), refused]() mutable {
-        auto lines = unmap(owned);
+        auto lines = unmap(owned, {}, nullptr, true);
         refused->set_value(std::move(lines));
         std::lock_guard lock(removals().mutex);
         --removals().running;
@@ -541,7 +562,7 @@ Status status() {
     return current;
 }
 
-void remove_leftovers(std::stop_token stop, const std::vector<Mapping> &) {
+void remove_leftovers(std::stop_token stop) {
     // Serialize with previous shutdown cleanup, also when UPnP is disabled.
     {
         std::unique_lock lock(removals().mutex);

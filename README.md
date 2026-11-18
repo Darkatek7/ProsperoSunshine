@@ -386,8 +386,8 @@ with **Copy**: that's the address a friend adds in Moonlight.
 - **A router that only takes permanent mappings** gets them without a lease: they stay on the router until the host
   removes them. The host must first save and sync a recovery record; if that fails, it refuses the permanent mapping.
   After a crash, the next start checks those records, including when UPnP is off. A replaced or uncertain rule is left
-  alone and its record retained. Older records without a full description are preserved for manual inspection, not
-  guessed from a prefix; remove any stale rule in the router after verifying its destination.
+  alone and its record retained. A record from 0.6.x, which has no description, is adopted once when the router still
+  forwards that exact port to that exact address under one of the host's own descriptions; otherwise it is kept as it is.
 - **Behind two routers** (your own router behind the provider's), the host asks the router the console is attached to,
   and when the one in front answers UPnP from your network too, it forwards the same ports there to your router. If the
   one in front doesn't answer, the web page says its internet side is private: forward the ports on the router in front

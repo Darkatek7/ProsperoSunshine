@@ -33,6 +33,15 @@ inline std::vector<Mapping> stream_mappings(uint16_t https, uint16_t http, uint1
 // The description the host gives its mappings: "ProsperoSunshine " and the port's name.
 inline constexpr std::string_view label_prefix = "ProsperoSunshine ";
 
+// A description the host gives one of its ports: the prefix and one of stream_mappings()'s names.
+inline bool host_label(std::string_view description) {
+    if (!description.starts_with(label_prefix)) return false;
+    description.remove_prefix(label_prefix.size());
+    for (const auto &m : stream_mappings(1, 2, 3, 4, 5, 6))
+        if (description == m.name) return true;
+    return false;
+}
+
 // What the router has for a port before the host maps it, from GetSpecificPortMappingEntry.
 enum class Existing {
     none,     // no entry: NoSuchEntryInArray (714), or an empty answer
@@ -132,7 +141,7 @@ struct PermanentMapping {
     std::string client;        // where the port went: the console, or the inner router
     bool udp = false;
     uint16_t port = 0;
-    std::string description = {};   // empty only for legacy records: preserve, never infer ownership from a prefix
+    std::string description = {};   // empty only in records from 0.6.x (upnp_client.cpp, upgrade_legacy)
 
     bool operator==(const PermanentMapping &) const = default;
 };
