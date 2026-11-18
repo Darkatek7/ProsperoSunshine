@@ -375,8 +375,8 @@ int main(int argc, char *argv[]) {
                                               net::map_port(stream::CONTROL_PORT), net::map_port(stream::AUDIO_STREAM_PORT)));
             });
         } else {
-            // A mapping without a lease that an earlier run left behind (a crash, a power cut) would forward the ports for
-            // good: removed now that UPnP is off. Nothing to do without upnp_permanent.txt.
+            // A mapping that an earlier run left behind (a crash, a power cut) would forward the ports until its lease ends,
+            // or for good without one: removed now that UPnP is off. Nothing to do without upnp_permanent.txt.
             upnp_thread = std::jthread([](std::stop_token stop) { prospero::upnp::remove_leftovers(stop, {}); });
         }
         ps_diag_log("ProsperoSunshine: host ready control_port=%u\n", prospero::ControlServer::port);

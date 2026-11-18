@@ -120,9 +120,12 @@ struct PortStatus {
     bool permanent = false; // added without a lease, as the router takes no other (UPnP error 725)
 };
 
-// A mapping the host added without a lease. It stays on the router until someone removes it, also after a crash, a power cut
-// or a start with upnp off, when the host doesn't remove it at stop. So the host notes each in a file in appdata
-// (upnp_permanent.txt, one per line) and removes the ones still noted at its next start (upnp_client.cpp).
+// A mapping the host added, noted in a file in appdata (upnp_permanent.txt, one per line) until the host removed it. A
+// mapping without a lease stays on the router until someone removes it, also after a crash, a power cut or a start with
+// upnp off, so its line is written before it is added. A mapping with a lease is noted once it is added: when the host
+// couldn't remove it at stop (a crash, a removal past the budget, rest mode taking the network first), the next run
+// knows it as its own and renews it instead of leaving it to lapse. Records of ports the next run doesn't map are removed
+// at its start (upnp_client.cpp). The name of the file is kept from when it held permanent mappings only.
 struct PermanentMapping {
     std::string control_url;   // the router's control URL, from its description
     std::string service_type;  // the WAN connection service the mapping was added on

@@ -57,5 +57,5 @@ src/web/web_server.cpp|BOOST_LOG(error) << "Web page: restart failed: "sv << pro
 src/web/web_server.cpp|BOOST_LOG(warning) << "Web page: remembered sign-ins not stored: "sv << problem;
 
 # Ownership cleanup messages contain only the port, fixed reason and UPnP error text; no endpoint or client values.
-src/net/upnp_client.cpp|for (const auto &line : unmap(owned)) BOOST_LOG(warning) << "UPnP: "sv << line;
+src/net/upnp_client.cpp|for (const auto &line : unmap(stale)) BOOST_LOG(warning) << "UPnP: "sv << line;
 src/net/upnp_client.cpp|for (const auto &line : unmap(owned, router.control_url, &wanted)) BOOST_LOG(warning) << "UPnP: "sv << line;

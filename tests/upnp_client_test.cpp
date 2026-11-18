@@ -11,9 +11,10 @@ using namespace prospero::upnp;
 using upnp_identity::Entry;
 using Key = std::tuple<std::string, std::string, std::string>;
 static std::map<Key, Entry> rules;
-static int adds, deletes, lookup_error, add_error, delete_error, generic_error;
+static int adds, deletes, lookup_error, add_error, delete_error, generic_error, fsyncs;
 static bool broken_port, only_permanent, conflict_on_add, conflict_on_permanent, lose_permanent_reply, fail_sync, empty_answer;
 extern "C" int fsync(int fd) {
+    ++fsyncs;
     if (fail_sync) { errno = EIO; return -1; }
     return static_cast<int>(::syscall(SYS_fsync, fd));
 }
@@ -92,7 +93,7 @@ int main() {
     OwnedMappings owned;
     const auto reset = [&] {
         rules.clear(); owned.clear(); ports = {{mapping}};
-        adds = deletes = lookup_error = add_error = delete_error = generic_error = 0;
+        adds = deletes = lookup_error = add_error = delete_error = generic_error = fsyncs = 0;
         broken_port = only_permanent = conflict_on_add = conflict_on_permanent = lose_permanent_reply = fail_sync = false;
         empty_answer = false;
         platf::test_appdata = base;
@@ -117,11 +118,13 @@ int main() {
     // An empty answer for a free port (miniupnpc 2.3.3 returns 0 for it) is no entry: the port is mapped.
     reset(); empty_answer = true; map();
     assert(adds == 1 && owned.size() == 1 && ports[0].outcome == Outcome::open && ports[0].added);
-    // Gone from the router (it restarted) and answered empty: the record is dropped, not retained for good.
-    rules.clear(); assert(unmap(owned).empty() && owned.empty() && deletes == 0);
+    // Gone from the router (it restarted) and answered empty: the record is retired, not retained for good.
+    rules.clear(); assert(unmap(owned).empty() && owned.empty() && deletes == 0 && read_permanent().empty());
     // A router that fails the lookup (401, 501) still gets the add; only its success makes the mapping the host's.
-    reset(); lookup_error = 501; map(); assert(adds == 1 && owned.size() == 1 && ports[0].outcome == Outcome::open);
-    reset(); lookup_error = 501; add_error = 501; map(); assert(adds == 1 && owned.empty() && ports[0].outcome == Outcome::failed);
+    reset(); lookup_error = 501; map();
+    assert(adds == 1 && owned.size() == 1 && ports[0].outcome == Outcome::open && read_permanent().size() == 1);
+    reset(); lookup_error = 501; add_error = 501; map();
+    assert(adds == 1 && owned.empty() && ports[0].outcome == Outcome::failed && read_permanent().empty());
     // A real creation authorizes renewal, but only while the full current identity still matches.
     reset(); map(); assert(owned.size() == 1 && adds == 1);
     rules[key].lease = "100"; map(); assert(deletes == 1 && adds == 2);
@@ -146,7 +149,7 @@ int main() {
     // Crash recovery knows the exact description and destination; replacements keep the recovery intent.
     reset(); only_permanent = true; map(); assert(adds == 2 && owned.size() == 1 && owned[0].permanent);
     auto journal = read_permanent(); assert(journal.size() == 1 && !journal[0].description.empty());
-    owned = {{journal[0], true}}; rules[key].description += " replacement"; unmap(owned);
+    owned = {{journal[0], true, true}}; rules[key].description += " replacement"; unmap(owned);
     assert(deletes == 0 && read_permanent() == journal);
     rules[key].description = original.description; unmap(owned); assert(rules.empty() && read_permanent().empty());
     reset(); only_permanent = true; conflict_on_permanent = true; map();
@@ -154,12 +157,36 @@ int main() {
     // A timed-out permanent add retains intent without claiming runtime ownership.
     reset(); only_permanent = true; lose_permanent_reply = true; map(); journal = read_permanent();
     assert(owned.empty() && journal.size() == 1 && rules.size() == 1);
-    owned.push_back({journal[0], true}); unmap(owned);
+    owned.push_back({journal[0], true, true}); unmap(owned);
     assert(owned.empty() && rules.empty() && read_permanent().empty());
     // Legacy records have no complete description: retain them rather than guessing from a prefix.
     reset(); auto legacy = PermanentMapping{router.control_url, router.service_type, router.lan_address, false, 47989};
-    assert(change_permanent({legacy}, {})); owned.push_back({legacy, true}); rules[key] = original; unmap(owned);
+    assert(change_permanent({legacy}, {})); owned.push_back({legacy, true, true}); rules[key] = original; unmap(owned);
     assert(deletes == 0 && read_permanent().size() == 1);
+
+    // A mapping with a lease that a run couldn't remove at stop (rest mode takes the network first) is noted, and the
+    // next run renews it and removes it at its own stop. Without the line, an identical rule stays someone else's.
+    reset(); map(); journal = read_permanent();
+    assert(journal.size() == 1 && journal[0].description == original.description && owned[0].journaled);
+    owned.clear(); lookup_error = 501; owned = recover({mapping});
+    assert(owned.size() == 1 && owned[0].identity == journal[0] && deletes == 0);
+    lookup_error = 0; rules[key].lease = "100"; ports = {{mapping}}; map();
+    assert(deletes == 1 && adds == 2 && ports[0].added && ports[0].outcome == Outcome::open);
+    unmap(owned); assert(rules.empty() && owned.empty() && read_permanent().empty());
+    // The same at a start with the router there: kept and renewed, not removed and added again.
+    reset(); map(); owned = recover({mapping}); assert(owned.size() == 1 && deletes == 0);
+    map(); assert(deletes == 0 && adds == 2 && owned.size() == 1 && ports[0].added);
+    // A record of a port this run doesn't map (an earlier Base port) is removed at the start; so is every record with
+    // UPnP off.
+    reset(); map(); owned = recover({{48989, false, "HTTP"}});
+    assert(owned.empty() && rules.empty() && deletes == 1 && read_permanent().empty());
+    reset(); map(); remove_leftovers({}, {}); assert(rules.empty() && deletes == 1 && read_permanent().empty());
+
+    // Renewing an owned mapping writes nothing: neither a permanent one nor one with a lease, also when renewed by
+    // removing it first.
+    reset(); only_permanent = true; map(); assert(owned[0].permanent); fsyncs = 0; map(); map();
+    assert(fsyncs == 0 && adds == 2 && read_permanent().size() == 1);
+    reset(); map(); fsyncs = 0; map(); rules[key].lease = "100"; map(); assert(fsyncs == 0 && deletes == 1 && adds == 3);
     // Status resets and gateway changes cannot discard ownership of previous destinations.
     reset(); map(); ports = {{mapping}};
     const Router second{"second.example", "http://second.example/control", router.service_type, "203.0.113.20"};

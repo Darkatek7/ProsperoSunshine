@@ -364,8 +364,9 @@ Tips:
 
 With **UPnP port forwarding** on (the app's or the web page's **Settings**, `upnp = 1` in `sunshine.conf`, off by default),
 the host asks the router to forward the six ports above to the console when it starts, renews them every 2 minutes and
-removes them when it stops, waiting at most 3 seconds for the router (finite leases it cannot remove expire within the hour;
-permanent mappings retain a recovery record).
+removes them when it stops, waiting at most 3 seconds for the router. Each mapping it adds is recorded, so what it can't
+remove then (a crash, rest mode taking the network first) is renewed by the next start, or removed by it when that port
+isn't mapped anymore or UPnP is off. Without that start, a mapping with a lease lapses within the hour.
 UPnP has to be on in the router. The web page's **Status** shows the result: the router, its internet side, and each port
 that couldn't be forwarded. When that internet side is a public address, Status also shows it as **Internet address**,
 with **Copy**: that's the address a friend adds in Moonlight.
