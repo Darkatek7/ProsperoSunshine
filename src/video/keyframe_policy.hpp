@@ -16,7 +16,9 @@
 // The rules:
 //
 //  1. One IDR on its way answers every request before it. After the host asked the encoder, requests merge until an IDR
-//     is read. After 250 ms without one (3 frames at 30 fps are 100 ms) the host asks again.
+//     is read. After 250 ms without one (3 frames at 30 fps are 100 ms) the host asks again. A request of any stream on
+//     the channel that came in before an IDR was read but wasn't passed in yet (it came while the IDR was being read, or
+//     a joined stream's thread hadn't looked yet) is passed in before keyframe_sent (video_ps5.cpp), so that IDR answers it.
 //  2. A request that reaches the host within W after the last IDR was read probably left the client before it could have
 //     that IDR ("blind"), and isn't answered at once. W = the IDR's spread (frame_pacing.hpp) + 3/4 of the client's round
 //     trip as ENet has it, at most 250 ms of it (ENet starts at 500 ms before its first measurement); without a round trip

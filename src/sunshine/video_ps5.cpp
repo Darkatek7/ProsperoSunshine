@@ -107,6 +107,10 @@ struct joined_stream {
     stream::session_t *session;
     std::string cert;
     safe::mail_raw_t::event_t<bool> shutdown;
+    // Its keyframe requests. Its own thread passes them to the channel's keyframe policy every 20 ms, and the holder takes
+    // one still there when it reads an IDR, which answers it. Both take them only under captures.mutex.
+    safe::mail_raw_t::event_t<bool> idr;
+    const config_t *config;  // for keyframe_client
     int64_t next_index;
     bool keyframe_seen = false;  // its frames start at an IDR
 };
@@ -329,7 +333,9 @@ void capture(safe::mail_t mail, config_t config, stream::session_t *channel_data
     // gets its picture, or gets a channel of its own (choose_channel). When the stream holding a channel ends, a stream
     // that joined it takes it over.
     const std::string cert = channel_data ? stream::session::client_cert(*channel_data) : std::string{};
-    int64_t next_index = 0;  // per stream, across a takeover of the capture
+    // The frame numbers the client sees, per stream and across a takeover of the capture. They start at 1, as upstream's
+    // do: Moonlight rejects frame 0 (its RtpVideoQueue starts at currentFrameNumber 1), and with it a stream's first IDR.
+    int64_t next_index = 1;
     std::unique_lock lock(captures.mutex);
     if (streams_from(cert)) {
         BOOST_LOG(info) << "PS5 capture: the same device started a new stream, ending its old one"sv;
@@ -363,13 +369,13 @@ void capture(safe::mail_t mail, config_t config, stream::session_t *channel_data
         channel_t &ch = captures.channels[slot];
         bool took_over = false;
         if (pick.kind == prospero::ChannelPick::join) {
-            joined_stream me{channel_data, cert, shutdown_event, next_index};
+            joined_stream me{channel_data, cert, shutdown_event, idr_events, &config, next_index};
             ch.joined.push_back(&me);
             ch.keyframes.force();
-            // That keyframe usually goes out before the client's first video ping, when Sunshine doesn't know where to send
-            // it yet; the client then drops every frame until it asks for one itself, after 2 s. Two more, after 0.25 s and
-            // 1 s, reach a client on the LAN and one that connects slower (measured: the first picture after 0.6 s instead of
-            // 2.2 s with one more at 0.5 s).
+            // The joined stream's frames start at that keyframe. Two more follow, after 0.25 s and 1 s. They date from when
+            // frames were numbered from 0: Moonlight dropped the join's keyframe as frame 0, and the client had a picture
+            // only from a later IDR (measured then: the first picture after 0.6 s instead of 2.2 s with one more at 0.5 s).
+            // They stay until a console round shows the first keyframe is enough; they also cover one lost on the way.
             const auto joined_at = std::chrono::steady_clock::now();
             int late_keyframes = 0;
             BOOST_LOG(info) << "PS5 capture: another device joined the running stream on channel "sv << slot << " ("sv
@@ -562,9 +568,17 @@ void capture(safe::mail_t mail, config_t config, stream::session_t *channel_data
                 // The stream keeps the size it delivers: the client set up its decoder for it (issue 39). The title that
                 // took the capture leaves the output without a mode for up to about 2 s (10.20), and the reopens wait for
                 // it. An output that no longer takes the mode ends the stream, so the client starts anew at what it takes.
+                const auto takeover_waits = [&] {
+                    std::lock_guard lock(captures.mutex);
+                    return !ch.joined.empty();
+                };
                 ps_capture_slot_set_reopening(slot, 1);
                 while (!shutdown_event->peek() && std::chrono::steady_clock::now() - lost_at < 20s) {
                     std::this_thread::sleep_for(250ms);
+                    // The stream ended meanwhile: nobody would read what an open brings, unless a joined stream takes the
+                    // channel over. That one still gets this try: a session that opens is handed to it, while on its own
+                    // it opens the channel anew with a single try.
+                    if (shutdown_event->peek() && !takeover_waits()) break;
                     if (session->start() == 0) {
                         recovered = true;
                         break;
@@ -578,6 +592,15 @@ void capture(safe::mail_t mail, config_t config, stream::session_t *channel_data
                     BOOST_LOG(error) << "PS5 capture: the console's output no longer takes "sv << delivered.width << 'x'
                                      << delivered.height << ", ending the session; the next one starts at what it takes"sv;
                     shutdown_event->raise(true);
+                    lost = true;
+                    break;
+                }
+                if (!recovered && shutdown_event->peek()) {
+                    // The stream ended while the capture was away (the client left, ENDSTREAM, a new stream from the
+                    // same device): nothing failed that anyone would see, so no error. A joined stream that takes the
+                    // channel over opens it itself. A stuck capture is still said, the next stream fails on it as well.
+                    BOOST_LOG(info) << "PS5 capture: the client left during a reopen"sv;
+                    if (ps_capture_stuck()) log_capture_stuck();
                     lost = true;
                     break;
                 }
@@ -601,9 +624,23 @@ void capture(safe::mail_t mail, config_t config, stream::session_t *channel_data
                 continue;
             }
             const auto timestamp = capture_time(desc, frame.read_time, hevc);
+            // A request that came in while this IDR was being read left the client before the IDR, which answers it. Taken
+            // only at the next turn, after keyframe_sent, it would look blind and bring a second IDR blind_hold later (in the
+            // 0.6.6 burst logs 7 of 243 IDRs came 330 to 343 ms after the one before, the client having asked for none since).
+            // The same goes for a request of a joined stream that its thread, which looks every 20 ms, hasn't passed in yet.
+            std::optional<prospero::KeyframePolicy::Client> crossing;
+            if (frame.idr && idr_events->peek()) {
+                idr_events->pop();
+                crossing = keyframe_client(channel_data, config);
+            }
             {
                 std::lock_guard lock(captures.mutex);
-                if (frame.idr) ch.keyframes.keyframe_sent(frame.read_time, wire_bytes(frame.bytes.size()));
+                if (frame.idr) {
+                    if (crossing) ch.keyframes.request(frame.read_time, *crossing);
+                    for (auto *j : ch.joined)
+                        if (j->idr->try_pop()) ch.keyframes.request(frame.read_time, keyframe_client(j->session, *j->config));
+                    ch.keyframes.keyframe_sent(frame.read_time, wire_bytes(frame.bytes.size()));
+                }
                 for (auto *j : ch.joined) {
                     if (!j->keyframe_seen && !frame.idr) continue;
                     j->keyframe_seen = true;

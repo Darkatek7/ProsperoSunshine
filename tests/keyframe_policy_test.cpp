@@ -160,6 +160,55 @@ int main() {
         assert(lan.request(t0 + 5ms, pc) == Outcome::now);
     }
 
+    // A request the capture loop finds next to an IDR it has just read came in while the IDR was being read, so it left the
+    // client before the IDR: video_ps5.cpp passes it in before keyframe_sent, and the IDR answers it.
+    {
+        const auto read_at = t0 + 33ms;
+        KeyframePolicy policy;
+        assert(policy.request(t0, phone) == Outcome::now);
+        assert(policy.poll(t0));
+        assert(policy.request(read_at, phone) == Outcome::merged);
+        policy.keyframe_sent(read_at, phone_idr);
+        assert(!policy.poll(read_at + 300ms) && !policy.poll(read_at + 2s));
+        const auto counts = policy.take_counts();
+        assert(counts.requests == 2 && counts.merged == 1 && counts.asked == 1 && counts.blind == 0);
+        // An IDR nobody asked for (the encoder's own, the first after a reopen) answers it too, also one that falls into
+        // the blind window of the IDR before.
+        KeyframePolicy unasked;
+        assert(unasked.request(read_at, pc) == Outcome::now);
+        unasked.keyframe_sent(read_at, pc_idr);
+        assert(!unasked.poll(read_at) && !unasked.poll(read_at + 300ms));
+        KeyframePolicy blind;
+        blind.keyframe_sent(t0, phone_idr);
+        assert(blind.request(t0 + 10ms, phone) == Outcome::blind);
+        blind.keyframe_sent(t0 + 10ms, phone_idr);
+        assert(!blind.poll(t0 + 10ms + KeyframePolicy::blind_hold) && !blind.poll(t0 + 2s));
+        // Taken after keyframe_sent, as the capture loop used to, the same request looks blind and brings a second IDR
+        // blind_hold later.
+        KeyframePolicy after;
+        assert(after.request(t0, phone) == Outcome::now);
+        assert(after.poll(t0));
+        after.keyframe_sent(read_at, phone_idr);
+        assert(after.request(read_at + 1ms, phone) == Outcome::blind);
+        assert(!after.poll(read_at + 1ms + KeyframePolicy::blind_hold - 1ms));
+        assert(after.poll(read_at + 1ms + KeyframePolicy::blind_hold));
+        // A joined stream's request that its thread (it looks every 20 ms) hadn't passed in when the holder read the IDR:
+        // the holder passes it in, and the IDR answers it as well. Passed in by its thread after the IDR, it looks blind.
+        const KeyframePolicy::Client second{3, 55ms, 3428, 30, true};
+        KeyframePolicy shared;
+        assert(shared.request(t0, phone) == Outcome::now);
+        assert(shared.poll(t0));
+        assert(shared.request(read_at, second) == Outcome::merged);
+        shared.keyframe_sent(read_at, phone_idr);
+        assert(!shared.poll(read_at + 300ms) && !shared.poll(read_at + 2s));
+        KeyframePolicy late;
+        assert(late.request(t0, phone) == Outcome::now);
+        assert(late.poll(t0));
+        late.keyframe_sent(read_at, phone_idr);
+        assert(late.request(read_at + 20ms, second) == Outcome::blind);
+        assert(late.poll(read_at + 20ms + KeyframePolicy::blind_hold));
+    }
+
     // A real request that only looks blind: ENet's round trip stuck at 110 ms on a path of 55 ms (the host measures it
     // only from acknowledgements of its own reliable messages). Every request about a lost IDR then falls into the
     // window. It is answered blind_hold later instead of when the client gives up after 120 frames (4 s at 30 fps).
