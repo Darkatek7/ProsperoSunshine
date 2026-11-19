@@ -29,6 +29,24 @@ int main() {
     assert(!prospero::has_idr(idr, prospero::Codec::hevc));
     assert(prospero::has_sps(hevc_vps, prospero::Codec::hevc));
     assert(!prospero::has_sps(hevc_idr, prospero::Codec::hevc));
+    // The first slice ends the search: an access unit has its parameter sets and SEI in front of the slices and is all IDR or
+    // none of it, so a P frame is not scanned to its end.
+    const uint8_t sps_pps_idr[] = {0, 0, 0, 1, 0x67, 1, 0, 0, 0, 1, 0x68, 2, 0, 0, 0, 1, 0x65, 3};
+    const uint8_t sei_idr[] = {0, 0, 0, 1, 0x06, 1, 0, 0, 0, 1, 0x65, 3};
+    const uint8_t p_then_sps[] = {0, 0, 0, 1, 0x41, 5, 0, 0, 0, 1, 0x67, 1, 0, 0, 0, 1, 0x65, 3};
+    assert(prospero::has_sps(sps_pps_idr) && prospero::has_idr(sps_pps_idr));
+    assert(prospero::has_idr(sei_idr) && !prospero::has_sps(sei_idr));
+    assert(!prospero::has_sps(p_then_sps) && !prospero::has_idr(p_then_sps));
+    // HEVC: VPS 32, SPS 33, PPS 34 and prefix SEI 39 (0x4e) before an IDR_W_RADL slice (19, 0x26).
+    const uint8_t hevc_sets_idr[] = {0, 0, 0, 1, 0x40, 1, 0, 0, 0, 1, 0x42, 1, 0, 0, 0, 1, 0x44, 1,
+                                     0, 0, 0, 1, 0x4e, 1, 0, 0, 0, 1, 0x26, 1, 3};
+    const uint8_t hevc_p_then_idr[] = {0, 0, 0, 1, 0x02, 1, 0, 0, 0, 1, 0x26, 1, 3};
+    const uint8_t hevc_idr_then_vps[] = {0, 0, 0, 1, 0x26, 1, 3, 0, 0, 0, 1, 0x40, 1, 3};
+    assert(prospero::has_idr(hevc_sets_idr, prospero::Codec::hevc) && prospero::has_sps(hevc_sets_idr, prospero::Codec::hevc));
+    assert(!prospero::has_idr(hevc_p_then_idr, prospero::Codec::hevc));
+    // An IDR without its VPS in front: no parameter sets, so CaptureSession puts the stored ones in front of it.
+    assert(prospero::has_idr(hevc_idr_then_vps, prospero::Codec::hevc));
+    assert(!prospero::has_sps(hevc_idr_then_vps, prospero::Codec::hevc));
     const auto now = std::chrono::steady_clock::now();
     auto frame = [&](uint64_t i, bool key, size_t n = 4) {
         return EncodedFrame{i, now, key, std::vector<uint8_t>(n)};
