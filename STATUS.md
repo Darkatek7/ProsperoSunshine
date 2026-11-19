@@ -1,6 +1,6 @@
 # Arbeitsstand
 
-Stand: 13. November 2026, nach Release 0.6.6. Hier steht nur, was live geprüft ist, mit dem Messweg. Was ausgeliefert ist:
+Stand: 19. November 2026, Beta 0.6.7-beta.1. Hier steht nur, was live geprüft ist, mit dem Messweg. Was ausgeliefert ist:
 `CHANGELOG.md`. Plan und Reihenfolge: `ROADMAP.md`. Architektur: `docs/adr/001-sunshine-port.md`.
 
 Die älteren Einträge (bis 4. November 2026) und die ersten Nachweise nach Roadmap stehen unverändert und mit denselben
@@ -92,6 +92,49 @@ Issue 36“) und ein Debug-Build in jedem Release („Debug-Build (PR 29) zusamm
     Store nicht eigens installiert worden.
 
 ## Neuere Nachweise
+
+### Beta 0.6.7-beta.1 auf der Konsole (2026-11-19, 13.00)
+
+Messweg: Testclient unter Linux (`run_smoke.sh`, `--network host`, zweite Identität für zwei Geräte), Mario-64-Demo vorne,
+wo nicht anders genannt. Ausgabe der Konsole 60 Hz (`0x138`). Die Runden 1 bis 3 liefen mit dem Debug-Build aus dem
+Speicher, Runde 4 mit dem installierten normalen Build. Bis Runde 2 war das Stand `b390190a`, ab Runde 3 Stand `a60af88c`
+(ein Keyframe beim Start und beim Beitritt). Vergleiche gegen 0.6.6 am selben Abend, mit demselben Client.
+
+- **Modi** (je 15 bis 30 s): Home-Bildschirm H.264 und HDR 3840x2160 bei 40 Mbit/s, HEVC 2560x1440; Demo H.264, HEVC und
+  HDR 1080p60, H.264 720p30, HEVC 1080p30. Alle ohne fehlende Bilder, Ton vollständig. H.264 4K über 120 s mit Start und Ende
+  von GTA III während des Streams: 7186 Bilder, 0 fehlend, keine verlorene Aufnahme. Alle Öffnungen nach der ersten seit dem
+  Hoststart: `grid=aligned`, Bildalter 23,5 bis 23,7 ms (niedrige Stufe).
+- **Längster Abstand zwischen zwei Bildern:** In sechs Zeilen über der Grenze der Matrix: 1440p HEVC 57–58 ms, 1080p60
+  H.264 43–52 ms, Verlust in Bündeln Median 536 ms (ein Lauf 1000 ms, fünf angeforderte IDRs nacheinander im Bündel
+  verloren). Wo verglichen, lag 0.6.6 gleich oder darüber (1440p 66–67 ms, Bündelverlust 596/561 ms). Die langen Abstände
+  liegen an IDRs.
+- **Zwei Geräte:** Ein beitretendes Gerät beginnt bei `IDR frame #1`, ohne Warten (dreimal; 0.6.6 wartete auf das nächste
+  IDR). Zweiter Kanal (H.264 und HEVC gleichzeitig), `ENDSTREAM` eines Geräts und Übernahme des Kanals durch das
+  beigetretene Gerät: jeweils 0 fehlende Bilder.
+- **Keyframes beim Start** (`a60af88c`, sechs frische Streams): jeder beginnt mit genau einem IDR. Mit `b390190a` kam in
+  jedem Stream ein zweites 1 bis 5 Bilder danach. Beim Beitritt bekommt das erste Gerät ein IDR statt drei.
+- **Doppelte IDRs unter Verlust:** 0 von 245 IDRs ohne Anfrage seit dem vorigen, 0.6.6 1 von 86.
+- **Verlust:** Puffer mit 6x und 3x der Rate bei 3,4 und 20 Mbit/s: 0 fehlend (ein Lauf bei 20 Mbit/s verlor ein Bild, die
+  Wiederholung keines). 1 % Zufallsverlust bei 20 Mbit/s: 0 fehlend, längster Abstand 32 ms.
+- **Wiederverbinden und Starts:** 10 von 10 Wiederverbindungen, 20 von 20 Starts im Wechsel H.264/HEVC. Nach dem Beenden
+  des Clients mitten in der Eingabe war das Pad nach 2,27 s neutral. UDP 1,5 s weg: Stream läuft weiter; 3 s weg: Stream
+  endet mit `Ping Timeout`.
+- **Dauerlauf** (H.264 1080p60, 20 Mbit/s, 30 Minuten): 107.888 Bilder, 0 fehlend, 359.797 Tonpakete, eine Öffnung ohne
+  Verlust. Host-CPU im Mittel 6,31 % (über 7 % nur in den ersten 3,6 Minuten), Speicher 30,5 MB vom ersten bis zum letzten
+  Wert. Leerlauf 0,2 % CPU, 122–134 Wakeups/s. Zwei Abstände von 43 und 47 ms in 30 Minuten (kleine P-Bilder, das nächste
+  kam gleich danach), während die Last auf dem Testrechner auf 4,6 stieg.
+- **Tastendruck bis Bild** (Home-Bildschirm, 30 Drücke): Median 94,2 ms, Ton 10,2 ms nach dem Bild, Drift +0,28 ms/min.
+- **Installiert** (Runde 4, normaler Build `a60af88c`): Host-Datei, Autoload-Kopie und die ELF in der App haben dieselbe
+  Prüfsumme, die App ist neu registriert. H.264, HEVC und HDR 1080p60 sowie H.264 720p30: 0 fehlend, längster Abstand 28
+  bis 43 ms (die über 38 ms an den IDRs, die der Testclient anfordert). Mit Log-Level `debug`: 5800 Tonpakete in 30 s, keine
+  Debug-Zeile im Kernel-Log. 5 von 5 Wiederverbindungen, Beitritt wie oben.
+- **App** (`v01.000.028`, ohne „debug“): „Ready to stream“ ohne Hinweis. Speichern schreibt nur die geänderte Einstellung, eine
+  von außen geänderte (`close_game_on_quit`) bleibt beim nächsten Speichern erhalten. „Restart host“ meldet den Neustart,
+  `host stopped` kommt vor der neuen Versionszeile, der Stream danach läuft. Diagnose: „last open ok“, Abschnitt aus
+  `sunshine.log` mit Zeilen, Adressen maskiert.
+- Nicht ausgelöst: eine verlorene Aufnahme beim Start oder Ende eines Titels (in dieser Nacht blieb die Aufnahme bei jedem
+  Wechsel offen). Der Fall „Client geht während des Wiederöffnens“ ist deshalb nicht live geprüft.
+- Keine `stuck`-Zeile, kein `OpenVideo rc=0xffffffff` in allen vier Runden.
 
 ### Start der Aufnahme gegen den Bildwechsel (2026-11-18 und 19, 13.00, Debug-Builds aus dem Speicher)
 
