@@ -2,6 +2,8 @@
 // Exercise the production client with fake MiniUPnPc I/O; no router or network is contacted.
 #include "../src/net/upnp_client.cpp"
 #include <cassert>
+#include <cstdarg>
+#include <cstdio>
 #include <cstring>
 #include <iostream>
 #include <map>
@@ -23,24 +25,51 @@ static bool drop_add_lost;
 // Every read on slow_url waits slow_delay first (outside the lock), as a router that checks each port slowly.
 static std::string slow_url;
 static std::chrono::milliseconds slow_delay{0};
+// Every read on dead_url fails on the way (counted in dead_reads, not in read_calls), as a router that is gone.
+static std::string dead_url;
+static int dead_reads;
+// A stop requested by the next read (before it answers) or the next fsync, to end a walk or a pass at that point.
+static std::stop_source *stop_on_read, *stop_on_sync;
 static bool dropped(const char *url) {
     if (slow_url == url) std::this_thread::sleep_for(slow_delay);
+    if (stop_on_read) stop_on_read->request_stop();
     std::lock_guard lock(stub_mutex);
+    if (dead_url == url) {
+        ++dead_reads;
+        return true;
+    }
     return ++read_calls == drop_read;
 }
 extern "C" int fsync(int fd) {
     ++fsyncs;
+    if (stop_on_sync) stop_on_sync->request_stop();
     if (fail_sync) { errno = EIO; return -1; }
     return static_cast<int>(::syscall(SYS_fsync, fd));
 }
 static void copy(char *out, const std::string &value) { std::strcpy(out, value.c_str()); }
-UPNPDev *upnpDiscoverDevices(const char *const *, int, const char *, const char *, int, int, unsigned char, int *, int) { return nullptr; }
+// Discoveries sent (each waits 2 s on the console, and a stop can't cut it short); none answers here.
+static int discoveries;
+UPNPDev *upnpDiscoverDevices(const char *const *, int, const char *, const char *, int, int, unsigned char, int *, int) {
+    std::lock_guard lock(stub_mutex);
+    ++discoveries;
+    return nullptr;
+}
 int UPNP_GetIGDFromUrl(const char *, UPNPUrls *, IGDdatas *, char *, int) { return 0; }
 void FreeUPNPUrls(UPNPUrls *) {}
 void freeUPNPDevlist(UPNPDev *) {}
 int UPNP_GetExternalIPAddress(const char *, const char *, char *) { return -1; }
 const char *strupnperror(int) { return "fake error"; }
-extern "C" void ps_diag_log(const char *, ...) {}
+// The last line written to host_diag.log.
+static std::string diag;
+extern "C" void ps_diag_log(const char *format, ...) {
+    char line[256];
+    va_list args;
+    va_start(args, format);
+    std::vsnprintf(line, sizeof line, format, args);
+    va_end(args);
+    std::lock_guard lock(stub_mutex);
+    diag = line;
+}
 int UPNP_GetSpecificPortMappingEntry(const char *url, const char *, const char *port, const char *proto, const char *,
                                    char *client, char *internal, char *desc, char *enabled, char *lease) {
     if (dropped(url)) return -3;
@@ -121,6 +150,7 @@ int main() {
         empty_answer = false;
         read_calls = 0; drop_read = -1; slow_url.clear(); slow_delay = std::chrono::milliseconds(0);
         drop_add = -1; drop_add_lost = false;
+        dead_url.clear(); dead_reads = 0; stop_on_read = stop_on_sync = nullptr; discoveries = 0; diag.clear();
         platf::test_appdata = base;
         std::filesystem::remove(permanent_file());
     };
@@ -171,6 +201,8 @@ int main() {
     assert(adds == 1 && rules.empty() && owned.empty());
     reset(); only_permanent = true; fail_sync = true; map();
     assert(adds == 1 && rules.empty() && owned.empty()); fail_sync = false;
+    // Nor is its temporary file left (named after the process, so no later write would replace it).
+    assert(std::filesystem::is_empty(base));
     // Crash recovery knows the exact description and destination; replacements keep the recovery intent.
     reset(); only_permanent = true; map(); assert(adds == 2 && owned.size() == 1 && owned[0].permanent);
     auto journal = read_permanent(); assert(journal.size() == 1 && !journal[0].description.empty());
@@ -225,11 +257,117 @@ int main() {
     assert(owned.empty() && rules.empty() && deletes == 1 && read_permanent().empty());
     reset(); map(); remove_leftovers({}); assert(rules.empty() && deletes == 1 && read_permanent().empty());
 
+    // A router that is gone is asked once per walk (one read, sent twice): each read on it can wait seconds for the
+    // connection to time out, and a stop of the host waited for every one of its records. Its records stay; a live router's
+    // records in between are still removed. 501 is an answer: the router is asked for each record then.
+    const std::string dead = "http://dead.example/control";
+    std::vector<PermanentMapping> dead_lines, live_lines;
+    for (const auto &m : stream_mappings(47984, 47989, 48010, 47998, 47999, 48000)) {
+        const auto description = std::string(label_prefix) + m.name;
+        dead_lines.push_back({dead, router.service_type, router.lan_address, m.udp, m.port, description});
+        live_lines.push_back({router.control_url, router.service_type, router.lan_address, m.udp, m.port, description});
+    }
+    const auto add_live_rules = [&] {
+        for (const auto &m : live_lines) {
+            const auto number = std::to_string(m.port);
+            const char *proto = m.udp ? "UDP" : "TCP";
+            rules[{m.control_url, number, proto}] = {0, m.client, number, m.description, "1", "3600", number, proto, ""};
+        }
+    };
+    reset(); dead_url = dead; assert(change_permanent(dead_lines, {})); remove_leftovers({});
+    assert(dead_reads == 2 && read_calls == 0 && read_permanent() == dead_lines);
+    reset(); dead_url = dead; add_live_rules();
+    std::vector<PermanentMapping> both;
+    for (std::size_t i = 0; i < dead_lines.size(); ++i) both.insert(both.end(), {dead_lines[i], live_lines[i]});
+    assert(change_permanent(both, {})); remove_leftovers({});
+    assert(dead_reads == 2 && deletes == 6 && rules.empty() && read_permanent() == dead_lines);
+    // At stop (every_time) the router is skipped the same way, with one line.
+    owned.clear();
+    for (const auto &m : dead_lines) owned.push_back({m, false, true});
+    dead_reads = 0; assert(unmap(owned, {}, nullptr, true).size() == 1 && dead_reads == 2 && owned.size() == 6);
+    // host_diag.log counts the records the removal at stop kept, not its lines: 6, though the gone router got one line.
+    // The live router's records in between are removed and not counted.
+    reset(); dead_url = dead; add_live_rules(); assert(change_permanent(both, {}));
+    owned.clear();
+    for (const auto &m : both) owned.push_back({m, false, true});
+    remove_at_stop(owned);
+    {
+        std::lock_guard lock(stub_mutex);
+        assert(diag == "ProsperoSunshine: host UPnP removal done, 6 retained\n" && rules.empty());
+    }
+    assert(read_permanent() == dead_lines);
+    reset(); add_live_rules(); assert(change_permanent(live_lines, {})); lookup_error = 501; remove_leftovers({});
+    assert(read_calls == 6 && deletes == 0 && read_permanent() == live_lines);
+    // A stop ends the walk: a token stopped before it asks nothing, one stopped during the first read lets that record
+    // finish. What the walk didn't get to stays recorded, and stays on the router.
+    reset(); add_live_rules(); assert(change_permanent(live_lines, {}));
+    {
+        std::stop_source source;
+        source.request_stop();
+        remove_leftovers(source.get_token());
+        owned = recover({}, source.get_token());
+    }
+    assert(read_calls == 0 && deletes == 0 && owned.size() == 6 && rules.size() == 6 && read_permanent() == live_lines);
+    {
+        std::stop_source source;
+        stop_on_read = &source;
+        remove_leftovers(source.get_token());
+        stop_on_read = nullptr;
+    }
+    assert(read_calls == 1 && deletes == 1 && rules.size() == 5 &&
+           read_permanent() == std::vector<PermanentMapping>(live_lines.begin() + 1, live_lines.end()));
+    // In run() such a stop goes straight to the removal at stop, without a discovery first; the removal takes what the
+    // walk didn't get to.
+    reset(); add_live_rules(); assert(change_permanent(live_lines, {}));
+    {
+        std::stop_source source;
+        stop_on_read = &source;
+        prospero::upnp::run(source.get_token(), {});
+        stop_on_read = nullptr;
+    }
+    {
+        std::unique_lock lock(removals().mutex);
+        removals().done.wait(lock, [] { return removals().running == 0; });
+    }
+    assert(discoveries == 0 && deletes == 6 && rules.empty() && read_permanent().empty() && status().state == State::off);
+
     // Renewing an owned mapping writes nothing: neither a permanent one nor one with a lease, also when renewed by
     // removing it first.
     reset(); only_permanent = true; map(); assert(owned[0].permanent); fsyncs = 0; map(); map();
     assert(fsyncs == 0 && adds == 2 && read_permanent().size() == 1);
     reset(); map(); fsyncs = 0; map(); rules[key].lease = "100"; map(); assert(fsyncs == 0 && deletes == 1 && adds == 3);
+    // Nor on a router that fails the lookup (401, 501) on every pass: that is no sign the rule was gone.
+    reset(); map(); fsyncs = 0; lookup_error = 501; map(); map(); assert(fsyncs == 0 && adds == 3 && read_permanent().size() == 1);
+    reset(); only_permanent = true; map(); fsyncs = 0; lookup_error = 501; map();
+    assert(fsyncs == 0 && adds == 4 && owned[0].permanent && read_permanent().size() == 1);
+
+    // A rule that was gone and is created again gets its line again: an earlier host's removal at stop can retire the line
+    // while this run starts. A permanent one gets it before the add (the fake router checks that).
+    reset(); map(); journal = read_permanent(); assert(journal.size() == 1);
+    rules.clear(); assert(change_permanent({}, journal) && read_permanent().empty());
+    map(); assert(adds == 2 && rules.size() == 1 && owned.size() == 1 && owned[0].journaled && read_permanent() == journal);
+    reset(); only_permanent = true; map(); journal = read_permanent(); assert(journal.size() == 1);
+    rules.clear(); assert(change_permanent({}, journal) && read_permanent().empty());
+    map(); assert(adds == 4 && rules.size() == 1 && owned.size() == 1 && owned[0].permanent && read_permanent() == journal);
+    // A conflict on that add, or a stop before it, keeps the line the host held (its rule may be there after all); a new
+    // intent is retired on both.
+    rules.clear(); conflict_on_permanent = true; map(); assert(adds == 6 && owned.size() == 1 && read_permanent() == journal);
+    rules.clear(); conflict_on_permanent = false;
+    {
+        std::stop_source source;
+        stop_on_sync = &source;
+        map_ports(router, router.lan_address, ports, source.get_token(), owned);
+        stop_on_sync = nullptr;
+    }
+    assert(adds == 7 && rules.empty() && owned.size() == 1 && read_permanent() == journal);
+    reset(); only_permanent = true;
+    {
+        std::stop_source source;
+        stop_on_sync = &source;
+        map_ports(router, router.lan_address, ports, source.get_token(), owned);
+        stop_on_sync = nullptr;
+    }
+    assert(adds == 1 && rules.empty() && owned.empty() && read_permanent().empty());
 
     // A retained record is logged when its reason changes, not every pass; the removal at stop logs it every time.
     reset(); map(); rules[key].description = "manual replacement";

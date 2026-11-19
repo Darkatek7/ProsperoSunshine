@@ -40,6 +40,11 @@ int main() {
         assert(private_ipv4(p) == std::optional<bool>(false));
     for (const char *p : {"", "1.2.3", "1.2.3.4.5", "256.1.1.1", "a.b.c.d", "1.2.3.4x", "::1"})
         assert(!private_ipv4(p));
+    // On the internet only with a public address: no answer (a failed GetExternalIPAddress) is not one, so the outer
+    // router's mappings are not removed on it.
+    assert(public_ipv4("203.0.113.7") && public_ipv4("8.8.8.8"));
+    assert(!public_ipv4("") && !public_ipv4("192.168.1.1") && !public_ipv4("10.0.0.86") && !public_ipv4("100.64.0.1"));
+    assert(!public_ipv4("1.2.3") && !public_ipv4("::1"));
 
     // Permanent mappings noted in a file: one line each, read back the same, nothing that isn't one word per field.
     const PermanentMapping inner{"http://router.example:5000/ctl/IPConn", "urn:schemas-upnp-org:service:WANIPConnection:1",

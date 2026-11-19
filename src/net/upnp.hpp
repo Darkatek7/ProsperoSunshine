@@ -78,6 +78,11 @@ inline std::optional<bool> private_ipv4(std::string_view text) {
            (a == 169 && b == 254) || (a == 100 && b >= 64 && b <= 127);
 }
 
+// A router's internet side that is a public IPv4 address: nothing in front of it to forward through. False for a private
+// one, and also for no address at all: a failed GetExternalIPAddress leaves the text empty, which says nothing about what
+// is in front.
+inline bool public_ipv4(std::string_view text) { return private_ipv4(text) == std::optional<bool>(false); }
+
 // Whether the host's own mapping must be removed before it is added again. Some routers accept a repeated AddPortMapping
 // but keep the old lease (a TP-Link Archer C5400X does), so the mapping would lapse after an hour for up to one refresh
 // interval. Removed and added again, it gets a full lease. Only near the end, so a stream rarely sees the gap.
