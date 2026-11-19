@@ -317,6 +317,9 @@ int main(int argc, char *argv[]) {
     int switches[PS_EXP_SWITCH_COUNT];
     for (int i = 0; i < PS_EXP_SWITCH_COUNT; ++i) switches[i] = switched_on(ps_exp_switch_at(i)->key);
     ps_capture_set_experimental(switches, (platf::appdata() / "experimental_attempt").c_str());
+    // At 60 Hz output an open waits, if it has to, so that Start returns well before a vsync (capture/start_phase.h);
+    // start_phase = 0 turns that off.
+    ps_capture_set_start_phase(setting("start_phase") != "0");
 
     task_pool.start(1);
     auto shutdown_event = mail::man->event<bool>(mail::shutdown);

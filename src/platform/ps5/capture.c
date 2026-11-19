@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Derived from ps5-mcp/payload/avcap_probe/avcap_probe.c, FW 13.00 research.
 #include "capture.h"
+#include "capture/start_phase.h"
 #include "diag.h"
 #include "encoder_qp.h"
 #include "experimental.h"
@@ -15,6 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <x86intrin.h>
 #include <ps5/kernel.h>
 
 // Two channels can run at once (dual_open_probe, STATUS.md): slot 0 on profile 180, 182 above 1080p, and slot 1 on 175, up
@@ -66,6 +68,7 @@ struct ps_capture {
     int has_memory;
     uint32_t mode[7];  // what mode_snapshot() returned at open
     uint32_t frames;   // read since the open
+    uint32_t output;   // the video out mode OpenVideo took
 };
 
 // Callback ABI currently has no verified instance context, so resource ownership
@@ -561,6 +564,87 @@ static int active_resources(int (*list)(int32_t *), char *out, size_t size, char
     return rc;
 }
 
+// The output's vsync grid from the frames' capture stamps, for when to call Start (capture/start_phase.h). One for the
+// process: both slots capture the same output, and a slot may open on another thread than the ones that read. The host
+// gives the TSC's rate; without it (the probes, the tests) nothing is fitted and no open waits.
+static pthread_mutex_t phase_lock = PTHREAD_MUTEX_INITIALIZER;
+static ps_phase_grid phase_grid;   // under phase_lock
+static double phase_ticks_per_ms;  // under phase_lock
+static _Atomic int start_phase_on = 1;
+
+void ps_capture_set_start_phase(int on) { atomic_store(&start_phase_on, on != 0); }
+
+void ps_capture_set_ticks_per_ms(double ticks_per_ms)
+{
+    pthread_mutex_lock(&phase_lock);
+    phase_ticks_per_ms = ticks_per_ms > 0 ? ticks_per_ms : 0;
+    pthread_mutex_unlock(&phase_lock);
+}
+
+// A frame read on s: the capture stamp at `at` in its descriptor goes into the grid, with the output mode s opened with.
+// A stamp ahead of now is no capture stamp (capture_time in video_ps5.cpp drops those too): it would hold the grid's last
+// stamp past every real one.
+static void phase_feed(const ps_capture *s, const uint8_t *descriptor, size_t at)
+{
+    uint64_t stamp;
+    memcpy(&stamp, descriptor + at, sizeof stamp);
+    if (!stamp || stamp > __rdtsc()) return;
+    pthread_mutex_lock(&phase_lock);
+    ps_phase_update(&phase_grid, stamp, s->output, phase_ticks_per_ms);
+    pthread_mutex_unlock(&phase_lock);
+}
+
+// Right before Start: waits as long as the grid says (ps_phase_wait), asleep for the most of it and on the TSC for the last
+// millisecond, as a sleep may end late. One that ended later still is caught by asking the grid once more. Returns the
+// ticks waited, 0 for none.
+static uint64_t phase_wait(const ps_capture *s)
+{
+    if (!atomic_load(&start_phase_on)) return 0;
+    uint64_t begin = 0, waited = 0;
+    for (int round = 0; round < 2; round++) {
+        pthread_mutex_lock(&phase_lock);
+        const double ticks_per_ms = phase_ticks_per_ms;
+        const uint64_t now = __rdtsc();
+        const uint64_t wait = ps_phase_wait(&phase_grid, now, s->output, ticks_per_ms);
+        pthread_mutex_unlock(&phase_lock);
+        if (!round) begin = now;
+        if (!wait) break;
+        const uint64_t until = now + wait, spin = (uint64_t)ticks_per_ms;
+        if (wait > spin) usleep((unsigned)((double)(wait - spin) * 1000 / ticks_per_ms));
+        while (__rdtsc() < until) _mm_pause();
+        waited = __rdtsc() - begin;
+    }
+    return waited;
+}
+
+// The open's "start phase" line, as the grid saw the moment Start returned. Taken right then: by the time the line is
+// written, the other slot's frames may have moved the grid past that moment.
+typedef struct {
+    enum ps_phase_state state;
+    double to_next_ms;  // before the grid's next vsync; unknown without a grid (none, other mode, not 60 Hz)
+    double waited_ms;
+} phase_note;
+
+static phase_note phase_at(const ps_capture *s, uint64_t returned, uint64_t waited)
+{
+    pthread_mutex_lock(&phase_lock);
+    const double ticks_per_ms = phase_ticks_per_ms;
+    const enum ps_phase_state state = ps_phase_check(&phase_grid, returned, s->output, ticks_per_ms);
+    const int known = state == PS_PHASE_ALIGNED || state == PS_PHASE_OLD;
+    const phase_note note = {state, known ? ps_phase_to_next(&phase_grid, returned) / ticks_per_ms : -1,
+                             waited ? (double)waited / ticks_per_ms : 0};
+    pthread_mutex_unlock(&phase_lock);
+    return note;
+}
+
+static void phase_log(const ps_capture *s, phase_note note)
+{
+    const char *const grid = atomic_load(&start_phase_on) ? ps_phase_state_name(note.state) : "off";
+    if (note.to_next_ms >= 0)
+        SLOG(s->slot, "start phase to_next_vsync=%.2f ms waited=%.2f ms grid=%s\n", note.to_next_ms, note.waited_ms, grid);
+    else SLOG(s->slot, "start phase to_next_vsync=unknown waited=%.2f ms grid=%s\n", note.waited_ms, grid);
+}
+
 // Caller holds open_lock.
 static int open_slot(int slot, ps_capture **out)
 {
@@ -816,17 +900,25 @@ static int open_slot(int slot, ps_capture **out)
     }
     if (rc) goto fail;
     s->opened = 1;
+    s->output = (uint32_t)output;
     if (atomic_load(&open_only)) {
         step = "open only";
         goto fail;
     }
     step = "Start";
+    // The debug build's line goes to disk before the wait: after it, the write would delay Start past the moment aimed at.
     ps_diag_trace("capture%s Start\n", slot ? "2" : "");
+    const uint64_t waited = phase_wait(s);
+    // The wait may let a title take the resource: Start is not called on a revoked one. Like the check after Start, the
+    // fail path closes only, and the reopen loop tries again.
+    if (waited && (!atomic_load(&granted[slot]) || atomic_load(&revoked[slot]))) { error = PS_CAPTURE_REVOKED; goto fail; }
     rc = start(s->handle);
+    const phase_note note = phase_at(s, __rdtsc(), waited);
     SLOG(slot, "Start rc=%#x\n", rc);
     atomic_store(&failure_rc[slot], rc);
     if (rc) { atomic_store(&refused[slot], 1); goto fail; }
     s->started = 1;
+    phase_log(s, note);
     if (!atomic_load(&granted[slot]) || atomic_load(&revoked[slot])) { error = PS_CAPTURE_REVOKED; goto fail; }
     // With the slice fields, a frame must come before the stream counts on them.
     if (atomic_load(&check_first_frame[slot]) || slice_fields) {
@@ -1161,6 +1253,7 @@ int ps_capture_read(ps_capture *s, void *destination, size_t capacity, uint8_t d
     int rc = s->read(s->handle, destination, capacity, descriptor, 1);
     if (rc == AGAIN || rc == 0) return 0;
     if (rc < 0 || (size_t)rc > capacity) { atomic_store(&failure_rc[s->slot], rc); SLOG(s->slot, "ReadVideo rc=%#x\n", rc); return PS_CAPTURE_ERROR; }
+    phase_feed(s, descriptor, 0x48);  // ReadVideo's capture stamp, as video_ps5.cpp's capture_time reads it
     return rc;
 }
 
@@ -1179,6 +1272,7 @@ int ps_capture_read2(ps_capture *s, void *destination, size_t capacity, uint8_t 
         return rc < 0 ? rc : PS_CAPTURE_ERROR;
     }
     if (s->frames < QUICK_LOSS_FRAMES && ++s->frames == QUICK_LOSS_FRAMES) atomic_store(&quick_losses[s->slot], 0);
+    phase_feed(s, descriptor, 0x58);  // ReadVideo2's capture stamp
     return rc;
 }
 

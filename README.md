@@ -121,6 +121,13 @@ is the host. To give PS and Create to everyone, turn on **PS for all players** i
 On a device with [profiles of its own](#profiles-per-device), once you choose the [console menus](#console-menus), the
 controller's profile decides instead of its role.
 
+**Start timed against the refresh:** at 60 Hz output, a capture that starts less than about 4 ms before the console's
+next refresh carries one frame (16.7 ms) more latency for the whole stream. The host learns the refresh timing from the
+frames it reads and, when it has to, waits less than one refresh before it starts a capture. `start_phase = 0` in
+`sunshine.conf` turns that off. Each start logs `capture start phase to_next_vsync=... waited=... grid=...` to
+`host_diag.log`: how long before the next refresh it started, how long it waited, and whether the host could time it
+(`aligned`) or not (`none`, `old`, `other mode`, `not 60 Hz`, `off`).
+
 ## Web page
 
 The host can serve a small web page, so a phone or PC in your network can do what the app does without leaving the game:

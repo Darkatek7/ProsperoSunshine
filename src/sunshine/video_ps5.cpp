@@ -245,7 +245,8 @@ std::vector<running_capture_t> running_captures() {
 }
 
 int probe_encoders() {
-    tsc_per_ns();
+    // capture.c times sceAvcap2Start by the frames' capture stamps, which count in TSC ticks (capture/start_phase.h).
+    ps_capture_set_ticks_per_ms(tsc_per_ns() * 1e6);
     update_offers();
     BOOST_LOG(info) << "PS5: Avcap2 passthrough, "sv
                     << (active_hevc_mode == 3   ? "H.264, HEVC and HEVC HDR, "sv

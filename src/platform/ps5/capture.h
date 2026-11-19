@@ -110,6 +110,12 @@ int ps_capture_size_refused(void);
 int ps_capture_stuck(void);
 // Whether the session was opened with the mode set now for its slot. NULL counts as not current.
 int ps_capture_mode_current(const ps_capture *session);
+// Start timed against the output's vsync at 60 Hz (capture/start_phase.h): on unless sunshine.conf says start_phase = 0.
+// Each open that starts logs a "start phase" line to host_diag.log, also when it is off.
+void ps_capture_set_start_phase(int on);
+// The TSC's ticks per millisecond, which the frames' capture stamps count in. Without it (the probes) no grid is fitted
+// and no open waits.
+void ps_capture_set_ticks_per_ms(double ticks_per_ms);
 
 // Two channels at once, each with its own mode (STATUS.md, dual_open_probe). Slot 0 is the one the calls above set and
 // open: ResourceArbitrator profile 180, 182 above 1080p. Slot 1 is a second channel next to it on profile 175, which grants

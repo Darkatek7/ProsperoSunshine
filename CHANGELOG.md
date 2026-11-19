@@ -8,6 +8,13 @@
   `OpenVideo` returns -1 for every open, the console's recording and Remote Play fail too, and only a console restart
   frees it. The host tried other modes and kept reopening for 20 s, and every new stream did the same. Now it stops at
   the first -1 and `sunshine.log` says to restart the console. Each new stream still tries once.
+- **Lower latency at 60 Hz output.** When the capture started less than about 4 ms before the screen's next refresh, the
+  console added one frame (16.7 ms) to the picture for the whole stream: about a third of the streams measured. The host
+  now learns the refresh timing from the frames it reads and, when a capture could start in or near that window, waits
+  less than one refresh so that it starts well before one. The timing comes from the frames of a running or recent
+  stream: after a stream of a minute and a half or more it holds for half an hour, after a shorter one for about twenty
+  times its length. At 120 Hz or any other output rate nothing changes. `start_phase = 0` in `sunshine.conf` turns it off
+  (README, "Streaming").
 
 ## 0.6.6 (2026-11-13)
 

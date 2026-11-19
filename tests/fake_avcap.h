@@ -110,13 +110,27 @@ static int fake_headers(intptr_t handle, void *nal)
     memcpy((uint8_t *)nal + 0x10, &size, sizeof size);
     return 0;
 }
-static int fake_read(intptr_t handle, void *destination, size_t capacity, void *descriptor, uint32_t count)
+// The capture stamp of the next frame, in its descriptor (ReadVideo's word 0x48, ReadVideo2's 0x58); NULL or 0: none, as
+// the descriptor capture.c hands over has none.
+static uint64_t (*fake_stamp)(void);
+static int fake_read_at(void *destination, size_t capacity, void *descriptor, size_t stamp_at)
 {
-    (void)handle; (void)descriptor; (void)count;
     const int rc = fake_rc("read");
     if (rc) return rc;
     memset(destination, 0, 16 < capacity ? 16 : capacity);
+    const uint64_t stamp = fake_stamp ? fake_stamp() : 0;
+    if (stamp) memcpy((uint8_t *)descriptor + stamp_at, &stamp, sizeof stamp);
     return 16;
+}
+static int fake_read(intptr_t handle, void *destination, size_t capacity, void *descriptor, uint32_t count)
+{
+    (void)handle; (void)count;
+    return fake_read_at(destination, capacity, descriptor, 0x48);
+}
+static int fake_read2(intptr_t handle, void *destination, size_t capacity, void *descriptor, uint32_t count)
+{
+    (void)handle; (void)count;
+    return fake_read_at(destination, capacity, descriptor, 0x58);
 }
 static int fake_reserve(const void *request, void *first, void *second)
 {
@@ -152,7 +166,7 @@ intptr_t kernel_dynlib_dlsym(pid_t pid, uint32_t handle, const char *symbol)
         {"sceAvcap2Close", (intptr_t)fake_handle},
         {"sceAvcap2GetNonVclNalUnitStream", (intptr_t)fake_headers},
         {"sceAvcap2ReadVideo", (intptr_t)fake_read},
-        {"sceAvcap2ReadVideo2", (intptr_t)fake_read},
+        {"sceAvcap2ReadVideo2", (intptr_t)fake_read2},
     };
     for (size_t i = 0; i < sizeof table / sizeof table[0]; i++)
         if (!strcmp(table[i].name, symbol)) return table[i].address;
