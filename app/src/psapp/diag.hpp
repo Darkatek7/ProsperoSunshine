@@ -69,6 +69,7 @@ struct HostLog
     int failed_error = 0;          // PS_CAPTURE_*
     std::string failed_rc;         // the last raw Avcap2 code, as hex text; "0" when none
     std::string last_step;         // the last capture line of an attempt without an outcome
+    int h264_slices = 0;           // the last open's H.264 slices per frame, when more than Windows' hardware decoders take; else 0
     bool stopped = false;          // the last line says the host ended on its own
     std::string switches;          // the switches this host uses; empty when none is set
     std::string switches_set;      // what sunshine.conf had when it started, also where they don't count

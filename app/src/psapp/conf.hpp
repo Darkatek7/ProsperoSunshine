@@ -7,6 +7,7 @@
 
 #include "app/psapp/icon_id.hpp"
 
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -70,6 +71,17 @@ class Config;
 // The option's value in the file, as the app shows and saves it. close_game_on_quit, upnp and pair_over_internet go through
 // Sunshine's own reading of a boolean, so a hand-written `enabled` (Sunshine's own word for upnp) counts as on; the app writes 1.
 std::optional<std::string> option_value(const Config &config, const OptionSpec &spec);
+
+// The options' values as the settings page holds them.
+using Values = std::map<std::string, std::optional<std::string>>; // key -> value, nullopt: default
+
+// The keys whose value in `edits` differs from `base`, the file's values the edits started from (a key `base` lacks counts
+// as unset). Save writes only these, so a setting changed meanwhile elsewhere (on the web page, or a file the app could
+// not read yet on a title without /data) is not put back to what the page last read.
+Values changed_values(const Values &edits, const Values &base);
+// The page's values once the file was read again and holds `fresh`: the file's values, with what was changed on the page
+// since `base` on top.
+Values rebased(const Values &edits, const Values &base, const Values &fresh);
 
 class Config
 {

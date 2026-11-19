@@ -14,6 +14,10 @@ namespace psapp::io
 // lists, while the host runs. Then copy_file and same_content don't reach them, and send_file never does.
 bool sandboxed();
 bool read_text(const std::string &path, std::string *out, std::size_t max_bytes = 1u << 20);
+// The file's last `max_bytes` at most, from the first whole line on (all of a smaller file), without reading the rest: for
+// a log that grows for as long as the host runs. This title's own view only, never through the host. In io_tail.cpp, which
+// the app's PC tests build (io.cpp needs the console's headers).
+bool read_tail(const std::string &path, std::string *out, std::size_t max_bytes);
 // Writes path.tmp, then renames it over path. Returns an error text, empty on success.
 std::string write_text(const std::string &path, const std::string &data);
 // Copies src to dst through dst.tmp and a rename. Returns an error text, empty on success.

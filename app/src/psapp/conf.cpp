@@ -45,7 +45,7 @@ const std::vector<OptionSpec> &option_specs()
         std::vector<OptionSpec> list = {
         {G::host, I::tag, "sunshine_name", "Host name", "The name Moonlight shows.", OptionKind::text,
          "network name", {}, 0, 0, 1, 0},
-        {G::host, I::log, "min_log_level", "Log level", "Detail in sunshine.log and the kernel log.", OptionKind::choice,
+        {G::host, I::log, "min_log_level", "Log level", "Detail in sunshine.log; the kernel log stays at Info.", OptionKind::choice,
          kDebugBuild ? "Debug" : "Info",
          {{"verbose", "Verbose"},
           {"debug", "Debug"},
@@ -183,6 +183,27 @@ std::optional<std::string> option_value(const Config &config, const OptionSpec &
         value = on ? "1" : "0";
     }
     return value;
+}
+
+Values changed_values(const Values &edits, const Values &base)
+{
+    Values changed;
+    for (const auto &[key, value] : edits)
+    {
+        const auto it = base.find(key);
+        const std::optional<std::string> before = it == base.end() ? std::nullopt : it->second;
+        if (value != before)
+            changed.emplace(key, value);
+    }
+    return changed;
+}
+
+Values rebased(const Values &edits, const Values &base, const Values &fresh)
+{
+    Values values = fresh;
+    for (auto &[key, value] : changed_values(edits, base))
+        values[key] = std::move(value);
+    return values;
 }
 
 Config Config::parse(std::string_view text)

@@ -103,7 +103,7 @@ Screen::Screen(Host &host, const hui::ui::Fonts &fonts)
 
 bool Screen::dirty() const
 {
-    return edits_loaded_ && edits_ != snap_.config;
+    return edits_loaded_ && edits_ != loaded_;
 }
 
 std::string Screen::value_text(int index) const
@@ -252,8 +252,16 @@ void Screen::update(const hui::InputFrame &input, float dt, hui::ui::Feedback &f
     }
     if (!edits_loaded_ && snap_.files_read && snap_.busy.empty())
     {
-        edits_ = snap_.config;
+        edits_ = loaded_ = snap_.config;
         edits_loaded_ = true;
+    }
+    // The file was read again and changed: after Start on a title without /data (read through the host only now), or after
+    // the web page saved and something here read the file. The settings not edited here take the file's values; the edits
+    // stay, and Save still writes only those. A failed read (without /data while the host is down) changes nothing.
+    if (edits_loaded_ && snap_.busy.empty() && snap_.config_read && snap_.config != loaded_)
+    {
+        edits_ = rebased(edits_, loaded_, snap_.config);
+        loaded_ = snap_.config;
     }
     // Cards come and go before the paired devices (pairing requests, the streams card): a focus on them stays there.
     if (home_card_ == seen_devices_index_)
@@ -555,7 +563,7 @@ void Screen::run(Action action, hui::ui::Feedback &feedback)
 {
     if (action == Action::revert)
     {
-        edits_ = snap_.config;
+        edits_ = loaded_; // the file as last read: snap_.config may be from a failed read
         feedback.play(hui::audio::Cue::back);
         return;
     }
@@ -598,7 +606,8 @@ void Screen::run(Action action, hui::ui::Feedback &feedback)
         break;
     case Action::save:
     case Action::save_restart:
-        host_.save_config(edits_, action == Action::save_restart);
+        // Only what was changed here: the page's other values may be older than the file (changed_values).
+        host_.save_config(changed_values(edits_, loaded_), action == Action::save_restart);
         reload_edits_ = true;
         break;
     case Action::revert:
@@ -1762,8 +1771,8 @@ void Screen::draw_settings(hui::gfx::DrawList &list, std::uint32_t glass) const
         const bool toggle = spec.kind == OptionKind::toggle;
         const bool inert = switch_not_needed(i);
         const auto edited = edits_.find(spec.key);
-        const auto saved = snap_.config.find(spec.key);
-        const bool changed = edits_loaded_ && edited != edits_.end() && saved != snap_.config.end() &&
+        const auto saved = loaded_.find(spec.key);
+        const bool changed = edits_loaded_ && edited != edits_.end() && saved != loaded_.end() &&
                              edited->second != saved->second;
         const bool is_default = edited == edits_.end() || !edited->second;
         const bool on = toggle && !is_default && *edited->second == "1";

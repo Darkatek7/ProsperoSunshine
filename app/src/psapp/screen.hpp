@@ -168,6 +168,7 @@ class Screen
     const hui::ui::Fonts &fonts_;
     Snapshot snap_;
     Values edits_;
+    Values loaded_; // the file's values the edits started from: Save writes what differs from them (changed_values)
     bool edits_loaded_ = false;
     bool reload_edits_ = false; // the next outcome replaces the edits with the files
     std::uint64_t seen_message_ = 0;

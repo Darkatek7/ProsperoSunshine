@@ -52,7 +52,7 @@ and how the last request went.
 | Start host / Stop host | Start sends the host ELF to the ELF loader (`127.0.0.1:9021`) and waits until the host answers. Stop sends `QUIT` and waits until it is gone. |
 | Restart host | Stop, then start: the way new settings take effect. |
 | Start at boot | The switch for the Payload Manager's autoload (below). A line under it warns when the Payload Manager's own autoload is off (with a running host, which can read `pldmgr_config.txt`; a title may not). |
-| Notice | One line above the pairing part when there is something to know about this console: the firmware is untested, the last capture attempt failed, and why (HDR on, capture in use, firmware not supported, the step that failed), or an Experimental switch failed or started and the Diagnostics report is wanted. It comes from the firmware and the host's `host_diag.log`. |
+| Notice | One line above the pairing part when there is something to know about this console: the firmware is untested, the last capture attempt failed, and why (HDR on, capture in use, firmware not supported, the console's capture stuck so that only a console restart helps, the step that failed), H.264 comes in more slices than Moonlight's hardware decoders on Windows take, or an Experimental switch failed or started and the Diagnostics report is wanted. It comes from the firmware and the host's `host_diag.log`. |
 | Pairing | A card per Moonlight client waiting to pair, with its name and address; a new request takes the focus and chimes. Cross opens the PIN keyboard: type the four digits Moonlight shows and press Done (R2 or Options). Square on a card denies the request (`CANCELPIN`), and Moonlight hears that the operator cancelled it. The app waits until Moonlight has finished pairing and says whether it worked. Beside it, the paired devices (from `sunshine_state.json`). |
 | Streaming now | While someone streams, a card with the first two devices (from the host's `STREAMS`): name, codec and HDR, resolution and frame rate, bitrate, controllers and how long it has been streaming; "joined" marks a device that gets another device's picture. It takes the second pairing card's place, or the empty pairing card's. Cross opens the list of all streams with their addresses; Cross on one asks "End the stream of ...?", and a second Cross ends that device's stream (`ENDSTREAM`). The game and the other streams go on, and the device can connect again. |
 
@@ -70,8 +70,9 @@ starts is ignored until it is let go, so it cannot act on the focused Stop host.
 list for choices, a stepper for numbers (left and right one step, up and down ten, L1 and R1 a
 hundred; Square the default), the keyboard for the host name (empty: the default). Square on a tile
 puts it back to the host's default (the key is then removed from the file). A tile says DEFAULT or
-UNSAVED; the bar under the tiles explains the focused one. **Save** writes the file; the host reads
-it only when it starts, so use **Save and restart host** (or Restart host later) to apply it.
+UNSAVED; the bar under the tiles explains the focused one. **Save** writes the settings changed on the page and leaves the
+rest of the file as it is, so a setting changed meanwhile on the web page stays. The host reads the file only when it
+starts, so use **Save and restart host** (or Restart host later) to apply it.
 **Revert changes** goes back to what the file holds.
 
 | Setting | `sunshine.conf` key | Values | Without the key |

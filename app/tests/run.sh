@@ -13,7 +13,7 @@ ln -s "$repo/app/src/psapp" "$work/include/app/psapp"
 cxx=$(command -v clang++-18 || command -v clang++ || command -v g++)
 sources=("$repo/app/tests/psapp_test.cpp" "$repo/app/tests/settings_layout_test.cpp" "$repo/app/src/psapp/conf.cpp"
     "$repo/app/src/psapp/autoload.cpp" "$repo/app/src/psapp/diag.cpp" "$repo/app/src/psapp/web.cpp"
-    "$repo/app/src/psapp/settings_layout.cpp")
+    "$repo/app/src/psapp/settings_layout.cpp" "$repo/app/src/psapp/io_tail.cpp")
 for flavor in normal debug; do
     defines=()
     [ "$flavor" = normal ] || defines=(-DPROSPERO_DEBUG=1)
