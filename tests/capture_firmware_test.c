@@ -171,6 +171,70 @@ static void check_failure_lines(void)
     assert(fails_at_open() == 0 && strstr(fake_log, "capture open ok\n"));
 }
 
+static int count(const char *text)
+{
+    int n = 0;
+    for (const char *at = strstr(fake_log, text); at; at = strstr(at + 1, text)) n++;
+    return n;
+}
+
+static const char *read2_missing(uint32_t firmware)
+{
+    static char line[128];
+    snprintf(line, sizeof line, "capture no sceAvcap2ReadVideo2 on firmware %#x: HEVC frames can't be read here\n", firmware);
+    return line;
+}
+
+// A firmware without ReadVideo2 opens HEVC and reads nothing: each open says why once, and the HEVC switch's trial still
+// fails at the first frame, so the switch goes off.
+static void check_missing_read2(void)
+{
+    int switches[PS_EXP_SWITCH_COUNT] = {0};
+    fake_missing = "sceAvcap2ReadVideo2";
+
+    // Verified HEVC, so no first frame at the open: the reads after it give one line per open, not one per read.
+    fake_firmware = 0x13000040u;
+    ps_capture_set_experimental(switches, NULL);
+    ps_capture_set_codec(1);
+    ps_capture_set_ten_bit(0);
+    ps_capture_set_video_mode(4, 1);
+    ps_capture_set_opening_bitrate(20000000, 22000000);
+    const char *expected = read2_missing(fake_firmware);
+    fake_log[0] = 0;
+    for (int open = 1; open <= 2; open++) {
+        ps_capture *session = NULL;
+        assert(ps_capture_open(&session) == 0);
+        uint8_t buffer[64], descriptor[0x88];
+        for (int i = 0; i < 3; i++) assert(ps_capture_read2(session, buffer, sizeof buffer, descriptor) == PS_CAPTURE_ERROR);
+        assert(count(expected) == open);
+        ps_capture_close(session);
+    }
+
+    // 8.60 with the HEVC switch on (issue 57): each variant tried fails at the first frame, then HEVC is off.
+    fake_firmware = 0x08600004u;
+    switches[PS_EXP_HEVC] = 1;
+    ps_capture_set_experimental(switches, NULL);
+    assert(ps_capture_hevc_allowed());
+    ps_capture_set_codec(1);
+    ps_capture_set_ten_bit(0);
+    ps_capture_set_video_mode(4, 1);
+    ps_capture_set_opening_bitrate(20000000, 22000000);
+    expected = read2_missing(fake_firmware);
+    fake_log[0] = 0;
+    ps_capture *session = NULL;
+    assert(ps_capture_open_or_fall_back(&session) == PS_CAPTURE_ERROR && !session);
+    assert(count(expected) >= 1 && count(expected) == count("capture open start "));
+    assert(count("capture open failed step=first frame ") == count(expected));
+    assert(strstr(fake_log, "experimental result=failed ") && strstr(fake_log, " step=first frame\n"));
+    assert(strstr(fake_log, "experimental disabled feature=hevc\n") && !ps_capture_hevc_allowed());
+
+    fake_missing = "";
+    switches[PS_EXP_HEVC] = 0;
+    ps_capture_set_experimental(switches, NULL);
+    ps_capture_set_codec(0);
+    fake_firmware = 0x13000040u;
+}
+
 int main(void)
 {
     for (size_t i = 0; i < sizeof rows / sizeof rows[0]; i++) check_row(&rows[i]);
@@ -188,7 +252,9 @@ int main(void)
     }
     if (failures) return 1;
     check_failure_lines();
-    printf("PASS: capture records per firmware (%zu versions, the boundaries between records) and the lines of a failed open\n",
+    check_missing_read2();
+    printf("PASS: capture records per firmware (%zu versions, the boundaries between records), the lines of a failed open and of "
+           "a missing ReadVideo2\n",
            sizeof rows / sizeof rows[0]);
     return 0;
 }

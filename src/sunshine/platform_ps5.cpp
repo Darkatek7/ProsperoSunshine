@@ -295,7 +295,8 @@ class avcap_mic final : public mic_t {
 public:
     static std::unique_ptr<mic_t> open(int channels, std::uint32_t sample_rate, std::uint32_t frame_size, bool surround) {
         int rc = 0;
-        auto shared = prospero::SharedCapture::acquire(rc);
+        // Not on a stuck console (issue 56): the video's open for this stream tries once, audio waits for its session.
+        auto shared = prospero::SharedCapture::acquire(rc, 0, false);
         if (!shared) BOOST_LOG(warning) << "PS5 audio: capture session unavailable: "sv << rc << ", retrying"sv;
         auto mic = std::unique_ptr<avcap_mic>(new avcap_mic(std::move(shared), channels, sample_rate, frame_size));
         {

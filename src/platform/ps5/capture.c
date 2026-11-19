@@ -69,6 +69,7 @@ struct ps_capture {
     uint32_t mode[7];  // what mode_snapshot() returned at open
     uint32_t frames;   // read since the open
     uint32_t output;   // the video out mode OpenVideo took
+    _Atomic int read2_missing_logged;  // ps_capture_read2 said that this firmware has no ReadVideo2
 };
 
 // Callback ABI currently has no verified instance context, so resource ownership
@@ -1259,7 +1260,14 @@ int ps_capture_read(ps_capture *s, void *destination, size_t capacity, uint8_t d
 
 int ps_capture_read2(ps_capture *s, void *destination, size_t capacity, uint8_t descriptor[0x88])
 {
-    if (!s || !destination || !capacity || !descriptor || !s->started || !s->read2) return PS_CAPTURE_ERROR;
+    if (!s || !destination || !capacity || !descriptor || !s->started) return PS_CAPTURE_ERROR;
+    if (!s->read2) {
+        // A firmware without it opens HEVC all the same, and nothing else in the log would say why no frame comes
+        // (issue 57). Once per open; the failure stays where it was, at the first frame, so an HEVC trial still counts it.
+        if (!atomic_exchange(&s->read2_missing_logged, 1))
+            SLOG(s->slot, "no sceAvcap2ReadVideo2 on firmware %#x: HEVC frames can't be read here\n", kernel_get_fw_version());
+        return PS_CAPTURE_ERROR;
+    }
     if (!atomic_load(&granted[s->slot]) || atomic_load(&revoked[s->slot])) return PS_CAPTURE_REVOKED;
     memset(descriptor, 0, 0x88);
     u64(descriptor, 0, 0x88);

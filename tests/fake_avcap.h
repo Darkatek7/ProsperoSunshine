@@ -8,7 +8,8 @@
 static uint32_t fake_firmware = 0x13000040u;
 static uint8_t fake_record[0x2e8];  // what the last OpenVideo got
 static int fake_opens;
-// Result of a step: "OpenVideo", "Start" or "read" (0 = go on; for "read" a frame, AGAIN = none yet). Default all 0.
+// Result of a step: "OpenVideo", "Start", "headers" or "read" (0 = go on; for "read" a frame, AGAIN = none yet).
+// Default all 0.
 static int (*fake_decide)(const char *step, const uint8_t *record);
 static char fake_log[1 << 16];
 
@@ -106,6 +107,8 @@ static int fake_handle(intptr_t handle) { (void)handle; return 0; }
 static int fake_headers(intptr_t handle, void *nal)
 {
     (void)handle;
+    const int rc = fake_rc("headers");
+    if (rc) return rc;
     const uint64_t size = 4;
     memcpy((uint8_t *)nal + 0x10, &size, sizeof size);
     return 0;

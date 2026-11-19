@@ -13,7 +13,11 @@ public:
         return rc;
     }
     int headers(void *destination, size_t capacity) override {
-        return shared_->with_session([&](ps_capture *s) { return ps_capture_headers(s, destination, capacity); });
+        const int rc = shared_->with_session([&](ps_capture *s) { return ps_capture_headers(s, destination, capacity); });
+        // The stream can't start without them, and audio may hold the session on: the next open() reopens it, as after a
+        // failed read, instead of handing out the same session again.
+        if (rc <= 0) shared_->mark_failed();
+        return rc;
     }
     int read(void *destination, size_t capacity, uint8_t descriptor[0x88]) override {
         const int rc = shared_->with_session([&](ps_capture *s) {

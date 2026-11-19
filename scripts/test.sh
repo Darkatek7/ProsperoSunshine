@@ -13,11 +13,14 @@ run_test() {
     "$root/out/$name"
 }
 # capture.c itself, with the SDK and the console's libraries replaced by tests/fake_avcap.h.
+capture_cc() {
+    clang-18 -std=gnu17 -Wall -Wextra -Werror -O1 -g -UNDEBUG -fsanitize=address,undefined -I "$root/src" -I "$root/tests" \
+        -I "$root/tests/stubs" "$@"
+}
 run_capture_test() {
     local name=$1
     shift
-    clang-18 -std=gnu17 -Wall -Wextra -Werror -O1 -g -UNDEBUG -fsanitize=address,undefined -I "$root/src" -I "$root/tests" \
-        -I "$root/tests/stubs" "$root/tests/$name.c" "$@" -o "$root/out/$name"
+    capture_cc "$root/tests/$name.c" "$@" -o "$root/out/$name"
     "$root/out/$name"
 }
 run_capture_test capture_records_test "-DGOLDEN=\"$root/tests/capture_records.golden\""
@@ -31,6 +34,10 @@ run_capture_test diag_test -DPROSPERO_DEBUG=1
 run_test experimental_test
 run_test video_test
 run_test capture_session_test "$root/src/capture/capture_session.cpp"
+# SharedCapture and the PS5 backend (C++) over capture.c: the fakes are C, so tests/shared_capture_fake.c is built alone.
+capture_cc -c "$root/tests/shared_capture_fake.c" -o "$root/out/shared_capture_fake.o"
+run_test shared_capture_test "$root/out/shared_capture_fake.o" "$root/src/platform/ps5/shared_capture.cpp" \
+    "$root/src/platform/ps5/capture_backend.cpp" "$root/src/capture/capture_session.cpp" -pthread
 run_test gamepad_map_test
 run_test pad_roles_test
 run_test pad_touch_test
