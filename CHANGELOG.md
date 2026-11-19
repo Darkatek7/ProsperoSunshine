@@ -7,7 +7,9 @@
 - **A stuck capture is said plainly and no longer retried** (issue 56). Rarely, the console's own capture path gets stuck:
   `OpenVideo` returns -1 for every open, the console's recording and Remote Play fail too, and only a console restart
   frees it. The host tried other modes and kept reopening for 20 s, and every new stream did the same. Now it stops at
-  the first -1 and `sunshine.log` says to restart the console. Each new stream still tries once.
+  the first -1 and `sunshine.log` says to restart the console. Each new stream still tries once: the sound no longer
+  opens a second capture of its own. The app's home screen says to restart the console too (also for a 0.6.6 host), and
+  Diagnostics adds that only a console restart frees the capture.
 - **Lower latency at 60 Hz output.** When the capture started less than about 4 ms before the screen's next refresh, the
   console added one frame (16.7 ms) to the picture for the whole stream: about a third of the streams measured. The host
   now learns the refresh timing from the frames it reads and, when a capture could start in or near that window, waits
@@ -15,6 +17,33 @@
   stream: after a stream of a minute and a half or more it holds for half an hour, after a shorter one for about twenty
   times its length. At 120 Hz or any other output rate nothing changes. `start_phase = 0` in `sunshine.conf` turns it off
   (README, "Streaming").
+- **UPnP takes only its own rules** (issue 59, PR 60 by EnriqueWood). A rule the host renews or removes must be one it
+  recorded when it added it, and the router must still show it with the same destination, port and description; a
+  failed or unclear answer changes nothing. Leased mappings are recorded too, so after a crash or rest mode the next
+  start renews them. A router that drops a request now and then is asked again, and at stop each router is cleaned up on
+  its own, so a slow one no longer uses up the 3 seconds of the other.
+- **The kernel log stays at info in the normal build too.** With Log level Debug or Verbose, debug lines went to the
+  kernel log as well, about 5 ms each; on 10.20 that slowed the sound. They still go to `sunshine.log`.
+- **The app's home screen explains a white picture on Windows** (issue 57): when H.264 comes in more slices than
+  Moonlight's hardware decoders on Windows take (34 on firmware below 11), it says to set Video decoder to Force software
+  decoding. A firmware without `sceAvcap2ReadVideo2` (8.60 looks like one) says so in `host_diag.log` when HEVC fails.
+
+### Fixed
+
+- **A device that joins a running stream gets its first keyframe.** Frames were numbered from 0, and Moonlight drops frame
+  0: a joining device waited for the next keyframe (about 0.35 s), and every stream lost its first frame.
+- **No second keyframe for one request.** A keyframe request that arrived while the capture was reading the keyframe it
+  had asked for counted as a new one, and about one keyframe in 35 under loss was sent twice.
+- **The app's Save writes only the settings changed on the page.** It wrote every setting it had read, so a setting
+  changed meanwhile on the web page, or the file on a title without `/data` before the host ran, was put back.
+- **The app's Restart host waits for the old host's UPnP cleanup** when UPnP is on, so the new host doesn't map ports the
+  old one is still removing. The app's diagnostic report shows the end of `sunshine.log` however large it is (a log over
+  4 MiB gave "no file").
+- **UPnP:** a rule created again after a restart gets its record again; the leftover cleanup at start ends at a stop and
+  skips a router that doesn't answer (with UPnP off it could hold up a stop); a failed answer for the router's internet
+  address no longer removes the forwarding on the router in front.
+- When the client leaves while the capture reopens (a game starting or closing), the host ends quietly instead of logging
+  an error.
 
 ## 0.6.6 (2026-11-13)
 
