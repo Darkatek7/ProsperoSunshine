@@ -93,6 +93,29 @@ Issue 36“) und ein Debug-Build in jedem Release („Debug-Build (PR 29) zusamm
 
 ## Neuere Nachweise
 
+### Start der Aufnahme gegen den Bildwechsel (2026-11-18 und 19, 13.00, Debug-Builds aus dem Speicher)
+
+Messweg: Testhosts aus dem Speicher, Testclient unter Linux (`--network host`), Mario-64-Demo vorne, Ausgabe der Konsole in
+allen Öffnungen 60 Hz (`video out mode 0x138`). Gemessen wurde das Alter jedes Bildes beim Lesen: Zeitstempel im
+Avcap2-Deskriptor (0x48 bei H.264, 0x58 bei HEVC, TSC) bis zum Lesen, im Debug-Log als `Frame processing latency` und beim
+Client als `hostLatency` der IDR-Bilder.
+- **Ohne Abstimmung** (Testbuild mit zufälliger Wartezeit 0–50 ms vor `sceAvcap2Start`, Bildzeilen als CSV, 21 Öffnungen):
+  Das Alter steht pro Öffnung fest (Streuung p5–p95 ±0,8 ms, Drift höchstens 0,32 ms über einen Stream) und liegt bei der
+  Demo auf zwei Stufen: 60 fps 23,45–23,62 ms oder 40,07–40,29 ms, 30 fps 40,31 oder 56,92 ms; Home-Bildschirm
+  18,04–18,09 ms. Welche Stufe, entscheidet allein der Zeitpunkt, zu dem `start()` zurückkommt: weniger als etwa 3,6–4,2 ms
+  vor dem nächsten Bildwechsel gibt die hohe Stufe (6 von 17 Öffnungen mit der Demo, H.264 und HEVC, 60 und 30 fps,
+  Trennung ohne Ausnahme). Die Bildwechsel sind die Zeitstempel der Bilder: Abstand 16,683585 ms, Phase über 16 Minuten und
+  alle Öffnungen auf 0,04 ms gleich. Der Host hält nichts zurück (Lesepausen unter 2 ms in 20 von 21 Öffnungen nie; das
+  Konsolenwort 0x50 bei H.264 bzw. 0x60 bei HEVC ist das Alter minus 0,55–0,64 ms).
+- **Mit Abstimmung** (`start_phase`, Stand `abf3c97` als Debug-Build `ec4b9b7p`, 22 Öffnungen): 0 in der hohen Stufe. Nach
+  einer Wartezeit kam `start()` 9,97–10,03 ms vor dem Bildwechsel zurück (Hostschätzung, `capture start phase` in
+  `host_diag.log`); Stufen 23,57–23,68 ms bei 60 fps und 40,2 ms bei 30 fps, Home-Bildschirm 17,5–18,4 ms, alles ohne
+  fehlende Bilder. Zweiter Kanal (H.264 und HEVC gleichzeitig): `capture2 start phase … grid=aligned`, beide niedrige Stufe.
+  Mit `start_phase = 0`: `grid=off`, keine Wartezeit. Öffnen dauerte 65–126 ms (vorher 73–132 ms).
+- Nicht geprüft: 120-Hz-Ausgabe (dort lagen frühere Stufen 8,34 ms auseinander, die Regel ist unbekannt; der Host wartet dort
+  nicht), 10.20, der erste Stream nach einem Hoststart (noch kein Takt bekannt, also weiter etwa ein Drittel in der hohen
+  Stufe), ob die eingesparten 16,7 ms beim Tastendruck bis zum Bild ankommen (Messung mit dem Kontrollzentrum zu ungenau).
+
 ### Release 0.6.6 auf der Konsole (2026-11-13, 13.00)
 
 Testclient (`run_smoke.sh`, Linux, `--network host`), Mario-64-Demo vorne, je 30 s 1080p60. Dazu lief bei jedem H.264-Lauf
