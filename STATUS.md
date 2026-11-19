@@ -132,6 +132,11 @@ Speicher, Runde 4 mit dem installierten normalen Build. Bis Runde 2 war das Stan
   von außen geänderte (`close_game_on_quit`) bleibt beim nächsten Speichern erhalten. „Restart host“ meldet den Neustart,
   `host stopped` kommt vor der neuen Versionszeile, der Stream danach läuft. Diagnose: „last open ok“, Abschnitt aus
   `sunshine.log` mit Zeilen, Adressen maskiert.
+- **Release-Dateien der CI** (Tag `v0.6.7-beta.1`, `656742e3`, mit `SHA256SUMS` geprüft): Debug aus dem Speicher mit
+  Selbsttest `problems=0` und H.264 30 s (1795 Bilder, 0 fehlend); dann normal installiert (Host-Datei, Autoload-Kopie und
+  die ELF in der App mit derselben Prüfsumme, App-Ordner gleich dem Zip, mit den Lizenztexten). H.264 und HEVC 1080p60 je
+  30 s und 10 s mit der App vorne: 0 fehlend, Ton vollständig. Die Ausgabe stand dabei auf 120 Hz (`0x140`), also
+  `grid=not 60 Hz`, ohne Wartezeit.
 - Nicht ausgelöst: eine verlorene Aufnahme beim Start oder Ende eines Titels (in dieser Nacht blieb die Aufnahme bei jedem
   Wechsel offen). Der Fall „Client geht während des Wiederöffnens“ ist deshalb nicht live geprüft.
 - Keine `stuck`-Zeile, kein `OpenVideo rc=0xffffffff` in allen vier Runden.
