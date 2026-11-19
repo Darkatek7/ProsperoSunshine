@@ -400,6 +400,73 @@ int main() {
         assert(!policy.poll(now + 40ms) && !policy.poll(now + KeyframePolicy::blind_hold));
     }
 
+    // A capture that just opened: its first frame is an IDR, so the client's request at the stream's start waits for it
+    // and no second IDR follows. Without one the encoder is asked after encoder_patience, or at once when the first frame
+    // read isn't one.
+    {
+        KeyframePolicy policy;
+        policy.expect_opening_keyframe(t0);
+        assert(policy.request(t0 + 1ms, pc) == Outcome::merged);
+        assert(!policy.poll(t0 + 1ms) && !policy.poll(t0 + 15ms));
+        policy.frame_read(true);
+        policy.keyframe_sent(t0 + 16ms, pc_idr);
+        assert(!policy.poll(t0 + 17ms) && !policy.poll(t0 + 2s));
+        // A loss after it is answered as usual.
+        assert(policy.request(t0 + 3s, pc) == Outcome::now);
+        assert(policy.poll(t0 + 3s));
+
+        KeyframePolicy silent;
+        silent.expect_opening_keyframe(t0);
+        assert(!silent.poll(t0 + KeyframePolicy::encoder_patience - 1ms));
+        assert(silent.poll(t0 + KeyframePolicy::encoder_patience));
+        assert(!silent.poll(t0 + KeyframePolicy::encoder_patience + 1ms));
+        // The IDR asked for answers the expectation: a first frame that isn't one asks no second.
+        silent.frame_read(false);
+        assert(!silent.poll(t0 + KeyframePolicy::encoder_patience + 17ms));
+
+        KeyframePolicy later_frame;
+        later_frame.expect_opening_keyframe(t0);
+        assert(later_frame.request(t0 + 1ms, pc) == Outcome::merged);
+        later_frame.frame_read(false);
+        assert(later_frame.poll(t0 + 17ms));
+        assert(!later_frame.poll(t0 + 18ms));
+        // Only the first frame after the open counts: the ones before the asked IDR change nothing.
+        later_frame.frame_read(false);
+        assert(!later_frame.poll(t0 + 34ms));
+        later_frame.frame_read(true);
+        later_frame.keyframe_sent(t0 + 50ms, pc_idr);
+        assert(!later_frame.poll(t0 + 51ms) && !later_frame.poll(t0 + 2s));
+
+        // Frames of a running capture ask nothing.
+        KeyframePolicy running;
+        running.keyframe_sent(t0, pc_idr);
+        for (int i = 1; i < 60; ++i) running.frame_read(false);
+        assert(!running.poll(t0 + 1s));
+
+        // A reopen while requests wait (one at once, one held as blind): the reopen's IDR answers both.
+        KeyframePolicy reopen;
+        reopen.keyframe_sent(t0, phone_idr);
+        assert(reopen.request(t0 + 10ms, phone) == Outcome::blind);
+        assert(reopen.request(t0 + 11ms, pc) == Outcome::now);
+        reopen.expect_opening_keyframe(t0 + 3s);
+        assert(!reopen.poll(t0 + 3s) && !reopen.poll(t0 + 3s + 30ms));
+        reopen.frame_read(true);
+        reopen.keyframe_sent(t0 + 3s + 33ms, pc_idr);
+        assert(!reopen.poll(t0 + 3s + 34ms) && !reopen.poll(t0 + 5s));
+
+        // A device that joins while the opening IDR is awaited starts at it.
+        KeyframePolicy join;
+        join.expect_opening_keyframe(t0);
+        join.force();
+        assert(join.request(t0 + 2ms, phone) == Outcome::merged);
+        assert(!join.poll(t0 + 5ms));
+        join.keyframe_sent(t0 + 16ms, pc_idr);
+        assert(!join.poll(t0 + 17ms) && !join.poll(t0 + 2s));
+        // keyframe_sent ends the expectation too: a later frame asks nothing.
+        join.frame_read(false);
+        assert(!join.poll(t0 + 3s));
+    }
+
     // A device that leaves while its request waits: nobody else waits, so no IDR is asked for it.
     {
         KeyframePolicy policy;

@@ -504,6 +504,9 @@ int ps_capture_close(ps_capture *s)
 static const char *_Atomic failure_step[PS_CAPTURE_SLOTS] = {"", ""};
 static _Atomic int failure_rc[PS_CAPTURE_SLOTS], reached_encoder[PS_CAPTURE_SLOTS];
 static _Atomic int check_first_frame[PS_CAPTURE_SLOTS];
+// The last open of the slot that worked read the encoder's first frame itself (first_frame()): the stream doesn't get
+// that IDR and has to ask for one.
+static _Atomic int opening_frame_read[PS_CAPTURE_SLOTS];
 
 // Slot 0, where ps_capture_open opens.
 int ps_capture_last_failure(const char **step)
@@ -517,8 +520,8 @@ int ps_capture_last_failure(const char **step)
 #define PS_FIRST_FRAME_MS 3000
 #endif
 
-// Headers and a frame, as the stream will read them. The frame is lost, which costs nothing: the stream asks for an IDR
-// when it starts. Returns 0 or the reader's error.
+// Headers and a frame, as the stream will read them. The frame, the opening IDR, is lost, which costs little: the open
+// says so (ps_capture_slot_opening_frame_read), and the stream asks for an IDR at once. Returns 0 or the reader's error.
 static int first_frame(ps_capture *s, const char **step)
 {
     enum { capacity = 4 * 1024 * 1024 };
@@ -922,11 +925,13 @@ static int open_slot(int slot, ps_capture **out)
     phase_log(s, note);
     if (!atomic_load(&granted[slot]) || atomic_load(&revoked[slot])) { error = PS_CAPTURE_REVOKED; goto fail; }
     // With the slice fields, a frame must come before the stream counts on them.
-    if (atomic_load(&check_first_frame[slot]) || slice_fields) {
+    const int read_first = atomic_load(&check_first_frame[slot]) || slice_fields;
+    if (read_first) {
         rc = first_frame(s, &step);
         if (rc == PS_CAPTURE_REVOKED) { error = PS_CAPTURE_REVOKED; goto fail; }
         if (rc) { atomic_store(&refused[slot], 1); goto fail; }
     }
+    atomic_store(&opening_frame_read[slot], read_first);
     *out = s;
     SLOG(slot, "open ok\n");
     return 0;
@@ -1207,6 +1212,7 @@ void ps_capture_slot_set_reopening(int slot, int on)
 void ps_capture_set_reopening(int on) { ps_capture_slot_set_reopening(0, on); }
 
 int ps_capture_slot_size_refused(int slot) { return valid_slot(slot) && atomic_load(&size_refused[slot]); }
+int ps_capture_slot_opening_frame_read(int slot) { return valid_slot(slot) && atomic_load(&opening_frame_read[slot]); }
 
 int ps_capture_size_refused(void) { return ps_capture_slot_size_refused(0); }
 

@@ -134,6 +134,9 @@ uint32_t ps_capture_slot_video_resolution(int slot);
 int ps_capture_slot_fall_back_mode(int slot);
 void ps_capture_slot_set_reopening(int slot, int on);
 int ps_capture_slot_size_refused(int slot);
+// The slot's last good open read the encoder's first frame, its IDR, itself (H.264 below 11.00, an unproven experimental
+// open): the stream won't read it and asks for one at once.
+int ps_capture_slot_opening_frame_read(int slot);
 int ps_capture_slot_open(int slot, ps_capture **out);
 int ps_capture_slot_open_or_fall_back(int slot, ps_capture **out);
 // Annex-B parameter sets, for HEVC in the order VPS, SPS, PPS; returns bytes written or a negative error.

@@ -95,8 +95,9 @@ Mit dem alten Abstand von einer Sekunde, gemessen über die Zeitstempel am Clien
 (Byte je Bild) mit dem Vierfachen beseitigte die Lücken im selben Spike, auch bei 5 Mbit/s, ebenso `cfg+0xd4 = 51` bei 15, nicht
 bei 5 Mbit/s.
 
-Der Host setzt deshalb `cfg+0x94` auf zehn Sekunden (`fps * 10`), für beide Codecs, und fordert zu Beginn des Streams ein IDR an, weil
-der Tonkanal den Kanal schon früher geöffnet haben kann. Clients fordern nach Verlust ohnehin selbst eines an.
+Der Host setzt deshalb `cfg+0x94` auf zehn Sekunden (`fps * 10`), für beide Codecs, und wartet zu Beginn des Streams auf das IDR, mit dem
+jede Aufnahme beginnt. Ein IDR fordert er an, wenn das Öffnen dieses Bild selbst gelesen hat (H.264 unter 11.00), wenn das erste
+gelesene Bild keines ist (der Tonkanal kann den Kanal schon früher geöffnet haben) oder wenn nach 250 ms keines kam. Clients fordern nach Verlust ohnehin selbst eines an.
 
 `cfg+0x10c` ist ein Budget: PlayBridge (öffentlich, 13.60, H.264) beschreibt, dass ein Bild, das N Budgets kostet, N−1 Bilder auslässt, und setzt 1 MiB. Bei HEVC auf 13.00 startet das
 nicht in jedem Modus. Gemessen je Modus mit 5 und 50 Mbit/s, ohne Unterschied zwischen den Bitraten, 0x20000 bis 0x100000:

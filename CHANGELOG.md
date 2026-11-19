@@ -32,6 +32,11 @@
 
 - **A device that joins a running stream gets its first keyframe.** Frames were numbered from 0, and Moonlight drops frame
   0: a joining device waited for the next keyframe (about 0.35 s), and every stream lost its first frame.
+- **One keyframe at a stream's start and at a join.** A stream started with two: the host asked the encoder for one
+  although a capture that opens sends one first. It still asks where the open reads that frame itself (H.264 below 11.00,
+  an experimental mode's first open). A device that joins brought three keyframes to the channel, now one; each one more
+  was a larger frame for every device there. After a game starts or closes, the host now asks for a keyframe at once
+  where the reopened capture's own one doesn't reach the stream (H.264 below 11.00).
 - **No second keyframe for one request.** A keyframe request that arrived while the capture was reading the keyframe it
   had asked for counted as a new one, and about one keyframe in 35 under loss was sent twice.
 - **The app's Save writes only the settings changed on the page.** It wrote every setting it had read, so a setting

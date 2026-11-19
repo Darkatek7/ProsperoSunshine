@@ -38,7 +38,9 @@
 //     with a loss every 0.4 s, of Wi-Fi with delay spikes and ENet's value stuck at 40 or 80 ms, and of issue 37's path,
 //     IDRs per minute stayed within 15 % of dropping blind requests (a third fewer where every IDR failed), while a real
 //     request that rule 2 took for blind waited up to 367 ms instead of up to 4.1 s.
-//  3. A device that joins a running channel needs an IDR to start: forced, only rule 1 applies.
+//  3. A device that joins a running channel needs an IDR to start: forced, only rule 1 applies. A capture that just opened
+//     sends one first (unless the open read it itself), and the requests until it is read merge with it
+//     (expect_opening_keyframe).
 //  4. When asking the encoder fails, the request is dropped as before: the encoder's own IDR follows within 10 s.
 //
 // What isn't here: a hold-off for a client whose IDRs keep failing. One was built (after two failed IDRs in a row the
@@ -130,12 +132,31 @@ public:
     // A stream needs an IDR to start.
     void force() { forced_ = true; }
 
+    // A capture that just opened (a stream's start, a reopen) sends an IDR as its first frame, unless the open read that
+    // frame itself (then force() instead): the requests until it is read, the client's own at the stream's start among
+    // them, merge with it as with one the encoder was asked for (rule 1). The encoder is asked if none was read within
+    // encoder_patience, or at once when the first frame read isn't one (frame_read): a channel the sound had opened
+    // before may hand over a later frame first. It stays with the channel, so a stream that takes it over goes on with it.
+    void expect_opening_keyframe(time_point now) {
+        forced_ = true;
+        asked_at_ = now;
+        opening_ = true;
+    }
+
+    // Every frame the capture reads, before keyframe_sent for an IDR.
+    void frame_read(bool idr) {
+        if (!std::exchange(opening_, false) || idr) return;
+        forced_ = true;
+        asked_at_.reset();
+    }
+
     // Whether to ask the encoder for an IDR now. Once it says so, it waits for the IDR (keyframe_sent) or encoder_patience.
     bool poll(time_point now) {
         if (!wanted_ && !forced_) return false;
         if (asked_at_ && now - *asked_at_ < encoder_patience) return false;
         if (!forced_ && now < *wanted_) return false;
         asked_at_ = now;
+        opening_ = false;  // the IDR asked for answers whatever the first frame is
         ++counts_.asked;
         return true;
     }
@@ -155,6 +176,7 @@ public:
         keyframe_bytes_ = wire_bytes;
         wanted_.reset();
         forced_ = false;
+        opening_ = false;
         asked_at_.reset();
         for (auto &[id, state] : clients_) {
             if (!state.waiting) continue;
@@ -195,6 +217,7 @@ private:
     std::optional<time_point> wanted_;  // when the waiting requests may be answered
     std::optional<time_point> asked_at_;
     bool forced_ = false;
+    bool opening_ = false;  // expect_opening_keyframe, and no frame read since
     std::map<std::uintptr_t, State> clients_;
     Counts counts_{};
 };

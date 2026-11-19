@@ -372,12 +372,12 @@ void capture(safe::mail_t mail, config_t config, stream::session_t *channel_data
             joined_stream me{channel_data, cert, shutdown_event, idr_events, &config, next_index};
             ch.joined.push_back(&me);
             ch.keyframes.force();
-            // The joined stream's frames start at that keyframe. Two more follow, after 0.25 s and 1 s. They date from when
-            // frames were numbered from 0: Moonlight dropped the join's keyframe as frame 0, and the client had a picture
-            // only from a later IDR (measured then: the first picture after 0.6 s instead of 2.2 s with one more at 0.5 s).
-            // They stay until a console round shows the first keyframe is enough; they also cover one lost on the way.
-            const auto joined_at = std::chrono::steady_clock::now();
-            int late_keyframes = 0;
+            // The joined stream's frames start at that keyframe, and the client shows it: frames are numbered from 1 (in
+            // the console round of 2026-11-19 every joining client started at IDR frame #1, without waiting). Two more
+            // keyframes used to follow, after 0.25 s and 1 s, from when Moonlight dropped the join's keyframe as frame 0;
+            // each was a larger frame for every device on the channel. One lost on the way brings a request like any loss;
+            // only while none has come at all (the encoder refused the request) is it forced again, every 0.5 s.
+            auto forced_at = std::chrono::steady_clock::now();
             BOOST_LOG(info) << "PS5 capture: another device joined the running stream on channel "sv << slot << " ("sv
                             << ch.joined.size() + 1 << " streams there)"sv;
             if (ch.delivered.height != wanted.height)
@@ -386,8 +386,8 @@ void capture(safe::mail_t mail, config_t config, stream::session_t *channel_data
             while (!shutdown_event->peek() && ch.streaming) {
                 announce_mode(ch.delivered);
                 const auto now = std::chrono::steady_clock::now();
-                if (late_keyframes < 2 && now - joined_at >= (late_keyframes ? 1000ms : 250ms)) {
-                    ++late_keyframes;
+                if (!me.keyframe_seen && now - forced_at >= 500ms) {
+                    forced_at = now;
                     ch.keyframes.force();
                 }
                 if (idr_events->peek()) {
@@ -450,6 +450,11 @@ void capture(safe::mail_t mail, config_t config, stream::session_t *channel_data
         std::unique_ptr<prospero::CaptureSession> session;
         if (took_over) session = std::move(ch.parked);
         const bool handed_over = session != nullptr;
+        // After an open or reopen, under captures.mutex: its IDR is on its way, unless the open read it itself.
+        const auto opened = [&] {
+            if (ps_capture_slot_opening_frame_read(slot)) ch.keyframes.force();
+            else ch.keyframes.expect_opening_keyframe(std::chrono::steady_clock::now());
+        };
         // A channel that opens anew starts its keyframe policy anew; one taken over keeps what it learnt about the
         // streams on it.
         if (!handed_over) ch.keyframes = {};
@@ -527,9 +532,13 @@ void capture(safe::mail_t mail, config_t config, stream::session_t *channel_data
                                 << " kB of a frame at once, the rest at "sv << pacing.pace_percent
                                 << "% of the stream's rate (internet_burst_kb, internet_pace_percent)"sv;
             }
-            // The audio thread may have opened the channel earlier, and the next periodic IDR can be ten seconds away.
+            // A capture that opens sends an IDR first, and the client's request at the stream's start waits for it (asking
+            // the encoder as well brought a second IDR a few frames later). Where the open read that frame itself (H.264
+            // below 11.00) the encoder is asked at once. Where the audio thread had opened the channel earlier, the first
+            // frame read may be a later one, and the encoder is asked when it isn't an IDR: the next periodic IDR can be
+            // ten seconds away.
             std::lock_guard lock(captures.mutex);
-            ch.keyframes.force();
+            opened();
         }
         prospero::EncodedFrame frame;
         prospero::CaptureSession::Descriptor desc{};
@@ -561,7 +570,7 @@ void capture(safe::mail_t mail, config_t config, stream::session_t *channel_data
             if (status == prospero::CaptureStatus::timeout) continue;
             if (status != prospero::CaptureStatus::frame) {
                 // Starting or closing a game takes the capture resource away for a moment; reopen
-                // instead of ending the stream. The first frame after a reopen is an IDR.
+                // instead of ending the stream. The reopened capture sends an IDR first (opened(), below).
                 BOOST_LOG(warning) << "PS5 capture lost ("sv << static_cast<int>(status) << "), reopening"sv;
                 const auto lost_at = std::chrono::steady_clock::now();
                 bool recovered = false, size_refused = false;
@@ -621,6 +630,10 @@ void capture(safe::mail_t mail, config_t config, stream::session_t *channel_data
                                        << (coarser == 1 ? " step"sv : " steps"sv) << " coarser for this stream"sv;
                 }
                 check_fallback();
+                {
+                    std::lock_guard lock(captures.mutex);
+                    opened();
+                }
                 continue;
             }
             const auto timestamp = capture_time(desc, frame.read_time, hevc);
@@ -635,6 +648,7 @@ void capture(safe::mail_t mail, config_t config, stream::session_t *channel_data
             }
             {
                 std::lock_guard lock(captures.mutex);
+                ch.keyframes.frame_read(frame.idr);
                 if (frame.idr) {
                     if (crossing) ch.keyframes.request(frame.read_time, *crossing);
                     for (auto *j : ch.joined)
