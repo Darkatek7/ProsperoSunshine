@@ -17,6 +17,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     const auto priv = private_ipv4(a);
     const int same = shared_prefix(a, a);
     FUZZ_CHECK(priv.has_value() == (same == 32));
+    FUZZ_CHECK(public_ipv4(a) == (priv.has_value() && !*priv));
     const int bits = shared_prefix(a, b);
     FUZZ_CHECK(bits >= -1 && bits <= 32);
     FUZZ_CHECK(bits == shared_prefix(b, a));

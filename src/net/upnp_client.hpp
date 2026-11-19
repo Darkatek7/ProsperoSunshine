@@ -16,7 +16,8 @@ void run(std::stop_token stop, std::vector<Mapping> mappings);
 Status status();
 
 // With UPnP off: removes what an earlier run noted in upnp_permanent.txt and left on the router. Only full current identity
-// matches are removed; a replaced or uncertain rule keeps its record for the next start.
+// matches are removed; a replaced or uncertain rule keeps its record for the next start, and so do the records of a router
+// that doesn't answer and those the walk didn't get to before `stop`.
 void remove_leftovers(std::stop_token stop);
 
 }  // namespace prospero::upnp
