@@ -4,12 +4,13 @@
 // slot 1 is a second video channel next to it, for a device that wants another mode.
 //
 // The system can take the capture resource away (starting a game does). A user that sees a read
-// fail marks the session failed; the next acquire() then closes and reopens it in place, and the
+// or the headers fail marks the session failed; the next acquire() then closes and reopens it in place, and the
 // generation counter tells the other users that their channels belong to the old session.
 #pragma once
 #include "platform/ps5/capture.h"
 #include <atomic>
 #include <memory>
+#include <mutex>
 #include <shared_mutex>
 
 namespace prospero {
@@ -19,7 +20,9 @@ public:
     // Returns the open session, opening or reopening it if needed; on failure null and rc holds
     // the error. Audio usually gets here first, so a session whose mode differs from what was set
     // since (codec, bitrate, frame rate) is reopened; audio follows through generation().
-    static std::shared_ptr<SharedCapture> acquire(int &rc, int slot = 0);
+    // open_when_stuck false (audio): while the last OpenVideo returned -1 (ps_capture_stuck, issue 56), a session that
+    // would have to be opened or reopened is not, and the result is null; only video tries once more for a new stream.
+    static std::shared_ptr<SharedCapture> acquire(int &rc, int slot = 0, bool open_when_stuck = true);
     // The open session if there is one, without opening it or waiting for an open in progress; else null.
     static std::shared_ptr<SharedCapture> attach(int slot = 0);
     ~SharedCapture();

@@ -13,15 +13,29 @@ bool valid(int slot) { return slot >= 0 && slot < PS_CAPTURE_SLOTS; }
 int open_session(int slot, ps_capture **session) { return ps_capture_slot_open_or_fall_back(slot, session); }
 }
 
-std::shared_ptr<SharedCapture> SharedCapture::acquire(int &rc, int slot) {
+std::shared_ptr<SharedCapture> SharedCapture::acquire(int &rc, int slot, bool open_when_stuck) {
     rc = PS_CAPTURE_ERROR;
     if (!valid(slot)) return nullptr;
     std::lock_guard lock(registry[slot]);
+    // On a stuck console every OpenVideo returns -1 until it restarts (issue 56). Audio's open would only add a second -1
+    // to each connect: it waits for a session the video opened (avcap_mic::silence attaches to it). Read under the slot's
+    // lock, so an open the video just made there has set the flag.
+    const bool may_open = open_when_stuck || !ps_capture_stuck();
     rc = 0;
     if (auto existing = current[slot].lock()) {
         std::unique_lock session_lock(existing->mutex_);
-        if ((existing->failed_ || !ps_capture_mode_current(existing->session_)) && (rc = existing->reopen())) return nullptr;
+        if (existing->failed_ || !ps_capture_mode_current(existing->session_)) {
+            if (!may_open) {
+                rc = PS_CAPTURE_ERROR;
+                return nullptr;
+            }
+            if ((rc = existing->reopen())) return nullptr;
+        }
         return existing;
+    }
+    if (!may_open) {
+        rc = PS_CAPTURE_ERROR;
+        return nullptr;
     }
     ps_capture *session = nullptr;
     rc = open_session(slot, &session);
