@@ -5,12 +5,16 @@
 #include "app/psapp/conf.hpp"
 #include "app/psapp/diag.hpp"
 #include "app/psapp/experimental_list.h"
+#include "app/psapp/io.hpp"
 #include "app/psapp/web.hpp"
 
 #include <cstdio>
+#include <cstdlib>
 #include <string>
+#include <unistd.h>
 
 #include "check.hpp"
+#include "inter_metrics.hpp"
 
 // settings_layout_test.cpp
 void settings_layout_tests();
@@ -106,6 +110,53 @@ static void conf_tests()
     CHECK(std::string_view(find_option("ping_timeout")->unit) == "ms");
     // Other options stay as they are in the file.
     CHECK(option_value(Config::parse("experimental_hevc = on\n"), *find_option("experimental_hevc")) == std::optional<std::string>("on"));
+
+    // Save writes only what was changed on the page (changed_values), applied the way Host::do_save applies it.
+    const auto apply = [](const std::string &text, const Values &values) {
+        Config config = Config::parse(text);
+        for (const auto &[key, value] : values)
+            config.set(key, value);
+        return config.text();
+    };
+    const Values base = {{"port", "47990"}, {"close_game_on_quit", "1"}, {"min_log_level", std::nullopt}};
+    Values edits = base;
+    edits["min_log_level"] = "debug";
+    Values changed = changed_values(edits, base);
+    CHECK(changed.size() == 1);
+    CHECK(changed.count("min_log_level") == 1 && changed["min_log_level"] == std::optional<std::string>("debug"));
+    CHECK(apply("port = 47990\nclose_game_on_quit = 1\n", changed) ==
+          "port = 47990\nclose_game_on_quit = 1\nmin_log_level = debug\n");
+    // The page read nothing yet (a title without /data before the host ran) or read the file before the web page changed it:
+    // the values it holds are older than the file, and Save leaves the file's other lines alone. Before, it wrote the whole
+    // page and removed them.
+    const Values unread = {{"port", std::nullopt}, {"close_game_on_quit", std::nullopt}, {"min_log_level", std::nullopt}};
+    edits = unread;
+    edits["min_log_level"] = "debug";
+    CHECK(apply("port = 47990\nclose_game_on_quit = 1\n", changed_values(edits, unread)) ==
+          "port = 47990\nclose_game_on_quit = 1\nmin_log_level = debug\n");
+    CHECK(apply("port = 47990\nclose_game_on_quit = 1\n", edits) == "min_log_level = debug\n");
+    // A setting put back to its default is a change: its line goes.
+    edits = base;
+    edits["close_game_on_quit"] = std::nullopt;
+    changed = changed_values(edits, base);
+    CHECK(changed.size() == 1 && changed.count("close_game_on_quit") == 1 && !changed["close_game_on_quit"]);
+    CHECK(apply("port = 47990\nclose_game_on_quit = 1\n", changed) == "port = 47990\n");
+    // Changed and changed back: nothing to write. A key the base lacks counts as unset.
+    CHECK(changed_values(base, base).empty());
+    CHECK(changed_values({{"upnp", std::nullopt}}, {}).empty());
+    CHECK(changed_values({{"upnp", "1"}}, {}).size() == 1);
+
+    // The file read again under the page (rebased): the values not edited follow the file, the edits stay on top.
+    edits = unread;
+    edits["min_log_level"] = "debug";
+    const Values fresh = base;
+    const Values shown = rebased(edits, unread, fresh);
+    CHECK(shown == Values({{"port", "47990"}, {"close_game_on_quit", "1"}, {"min_log_level", "debug"}}));
+    CHECK(changed_values(shown, fresh) == Values({{"min_log_level", "debug"}}));
+    // Without edits the page shows the file as it is now.
+    CHECK(rebased(unread, unread, fresh) == fresh);
+    // An edit the file now agrees with is no change any more.
+    CHECK(changed_values(rebased(edits, unread, edits), edits).empty());
 }
 
 static void autoload_tests()
@@ -596,6 +647,74 @@ static void diag_tests()
     CHECK(log.failed_step == "resource list");
     CHECK(diag::notice(0x13000040, log, true).text.find("Something else") == 0);
 
+    // OpenVideo -1: the console's capture is stuck, and only a console restart frees it (issue 56). The stream's open logs
+    // the stuck line after the failure; the debug build's self-check and a 0.6.6 host don't, and the notice is the same.
+    const std::string stuck_open = "[  4100] ProsperoSunshine: capture open start codec=0 resource=180\n"
+                                   "[  4180] ProsperoSunshine: capture OpenVideo rc=0xffffffff\n"
+                                   "[  4181] ProsperoSunshine: capture open failed step=OpenVideo error=-1 rc=0xffffffff\n";
+    const std::string stuck_line =
+        "[  4182] ProsperoSunshine: capture stuck: OpenVideo returned -1, only a console restart frees the capture (issue 56)\n";
+    const std::string stuck_text = "The console's video capture is stuck (OpenVideo -1). Restart the console; restarting the host won't help.";
+    for (const std::string &text : {stuck_open + stuck_line, stuck_open})
+    {
+        log = diag::parse_host_log("ProsperoSunshine: host version=0.6.7 commit=0829d1e0 firmware=0x10200006 known=1\n" + text);
+        CHECK(log.capture == diag::Capture::failed);
+        note = diag::notice(log.firmware, log, true);
+        CHECK(note.bad);
+        CHECK(note.text == stuck_text);
+        CHECK(diag::capture_summary(log) == "last open failed at OpenVideo (error -1, rc 0xffffffff): the console's capture is "
+                                            "stuck, only a console restart frees it (issue 56)");
+    }
+    CHECK(psapp_test::text_width(psapp_test::kInterSemiBold, stuck_text, 22.0f) <= 1728.0f); // one line on the home page
+    // A later open that works ends it.
+    log = diag::parse_host_log(stuck_open + stuck_line + "ProsperoSunshine: capture open start codec=0 resource=180\n"
+                                                        "ProsperoSunshine: capture open ok\n");
+    CHECK(diag::notice(0x13000040, log, true).text.empty());
+    CHECK(diag::capture_summary(log) == "last open ok");
+    // Another code at OpenVideo is no stuck capture.
+    log = diag::parse_host_log("capture open start codec=0\ncapture open failed step=OpenVideo error=-1 rc=0x81950008\n");
+    CHECK(diag::notice(0x13000040, log, true).text == "Capture failed at OpenVideo on Firmware 13.00. See Diagnostics.");
+    CHECK(diag::capture_summary(log).find("stuck") == std::string::npos);
+    // Nor is -1 at another step.
+    log = diag::parse_host_log("capture open start codec=0\ncapture open failed step=Start error=-1 rc=0xffffffff\n");
+    CHECK(diag::notice(0x13000040, log, true).text == "Capture failed at Start on Firmware 13.00. See Diagnostics.");
+
+    // H.264 in more slices than Moonlight's hardware decoders take on Windows (issue 57, 8.60; 10.x the same): a white or
+    // black picture there, and the stream otherwise runs.
+    const std::string sliced = "[  9000] ProsperoSunshine: capture open start codec=0 resource=180\n"
+                               "[  9100] ProsperoSunshine: capture OpenVideo rc=0\n"
+                               "[  9120] ProsperoSunshine: capture Start rc=0\n"
+                               "[  9150] ProsperoSunshine: capture first frame rc=0x2b1c0 after 30 ms\n"
+                               "[  9151] ProsperoSunshine: capture first frame has 34 slices, more than hardware decoders on Windows take\n"
+                               "[  9152] ProsperoSunshine: capture open ok\n";
+    log = diag::parse_host_log("ProsperoSunshine: host version=0.6.6 commit=6da55c0e firmware=0x8600004 known=0\n" + sliced);
+    CHECK(log.h264_slices == 34);
+    CHECK(log.capture == diag::Capture::ok);
+    note = diag::notice(log.firmware, log, true);
+    CHECK(!note.bad);
+    CHECK(note.text == "H.264 here comes in 34 slices per frame: Moonlight on Windows needs Settings > Video decoder > "
+                       "Force software decoding.");
+    CHECK(psapp_test::text_width(psapp_test::kInterSemiBold, note.text, 22.0f) <= 1728.0f); // one line on the home page
+    CHECK(diag::capture_summary(log) == "last open ok");
+    // Still opening after that line: it is the attempt's last step, as before.
+    log = diag::parse_host_log(sliced.substr(0, sliced.rfind("[  9152]")));
+    CHECK(log.capture == diag::Capture::opening);
+    CHECK(log.last_step == "first frame has 34 slices, more than hardware decoders on Windows take");
+    // A later open without the line (HEVC, or H.264 in few slices) has no such notice; 8.60 is untested again.
+    log = diag::parse_host_log("ProsperoSunshine: host version=0.6.6 commit=6da55c0e firmware=0x8600004 known=0\n" + sliced +
+                               "ProsperoSunshine: capture open start codec=1 resource=180\n"
+                               "ProsperoSunshine: capture open ok\n");
+    CHECK(log.h264_slices == 0);
+    CHECK(diag::notice(log.firmware, log, true).text.find("Firmware 8.60 is untested") == 0);
+    // 13.00 sends one slice, and its line says nothing more.
+    log = diag::parse_host_log("capture open start codec=0 resource=180\ncapture first frame has 1 slices\ncapture open ok\n");
+    CHECK(log.h264_slices == 0);
+    CHECK(diag::notice(0x13000040, log, true).text.empty());
+    // A failed open still says where it failed.
+    log = diag::parse_host_log(sliced.substr(0, sliced.rfind("[  9152]")) +
+                               "[  9153] ProsperoSunshine: capture open failed step=first frame error=-1 rc=0\n");
+    CHECK(diag::notice(0x8600004, log, true).text == "Capture failed at first frame on Firmware 8.60. See Diagnostics.");
+
     // The refusal of an unknown firmware.
     log = diag::parse_host_log("ProsperoSunshine: ra refusing firmware 0x9000000: ResourceArbitrator calls not resolved\n");
     CHECK(log.refused);
@@ -775,6 +894,51 @@ static void web_tests()
     CHECK(!odd.ok && !odd.reason.empty());
 }
 
+// The report's sunshine.log (io::read_tail): a file larger than the limit gives its last lines, from a line's start.
+static void tail_tests()
+{
+    char path[] = "/tmp/psapp_tail_XXXXXX";
+    const int fd = ::mkstemp(path);
+    REQUIRE(fd >= 0);
+    ::close(fd);
+    const auto write = [&path](const std::string &text) {
+        std::FILE *file = std::fopen(path, "wb");
+        const bool ok = file != nullptr && std::fwrite(text.data(), 1, text.size(), file) == text.size();
+        if (file != nullptr)
+            std::fclose(file);
+        return ok;
+    };
+    // 5 MiB of lines of different lengths, as a long run of the host leaves it.
+    std::string log;
+    for (int i = 0; log.size() < (5u << 20); ++i)
+        log += "line " + std::to_string(i) + " " + std::string(static_cast<std::size_t>(i % 97), 'x') + "\n";
+    REQUIRE(write(log));
+    constexpr std::size_t limit = 512u << 10;
+    std::string tail;
+    CHECK(io::read_tail(path, &tail, limit));
+    CHECK(tail.size() <= limit && tail.size() > limit - 120);
+    CHECK(tail.rfind("line ", 0) == 0);
+    CHECK(log.compare(log.size() - tail.size(), tail.size(), tail) == 0); // the file's end
+    CHECK(log[log.size() - tail.size() - 1] == '\n');                    // and a line's start
+    // The cut on a line's start keeps that line; inside one, or on its newline, drops the rest of it.
+    REQUIRE(write("a\nbb\nccc\n"));
+    CHECK(io::read_tail(path, &tail, 100) && tail == "a\nbb\nccc\n");
+    CHECK(io::read_tail(path, &tail, 9) && tail == "a\nbb\nccc\n");
+    CHECK(io::read_tail(path, &tail, 8) && tail == "bb\nccc\n");
+    CHECK(io::read_tail(path, &tail, 7) && tail == "bb\nccc\n");
+    CHECK(io::read_tail(path, &tail, 6) && tail == "ccc\n");
+    CHECK(io::read_tail(path, &tail, 5) && tail == "ccc\n");
+    CHECK(io::read_tail(path, &tail, 4) && tail == "ccc\n");
+    CHECK(io::read_tail(path, &tail, 3) && tail.empty());
+    // A last line without its newline comes too.
+    REQUIRE(write("a\nbb\nccc"));
+    CHECK(io::read_tail(path, &tail, 5) && tail == "ccc");
+    REQUIRE(write(""));
+    CHECK(io::read_tail(path, &tail, 5) && tail.empty());
+    ::unlink(path);
+    CHECK(!io::read_tail(path, &tail, 5));
+}
+
 // With --svg <file>, also writes the settings page's layout as an SVG picture.
 int main(int argc, char **argv)
 {
@@ -782,6 +946,7 @@ int main(int argc, char **argv)
     autoload_tests();
     diag_tests();
     web_tests();
+    tail_tests();
     settings_layout_tests();
     if (argc == 3 && std::string(argv[1]) == "--svg" && !write_settings_svg(argv[2]))
     {

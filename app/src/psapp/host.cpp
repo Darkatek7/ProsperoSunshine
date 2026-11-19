@@ -108,6 +108,29 @@ void sleep_ms(int ms)
     hui::sys::sleep_us(static_cast<std::uint32_t>(ms) * 1000u);
 }
 
+// The report's line for a file it has no lines of: why, as far as this title can tell. Without /data the host sends a file
+// only whole and up to `host_limit`, so one that is there may still not come.
+std::string unread(const char *path, std::size_t host_limit)
+{
+    const std::string error = io::open_error(path);
+    if (!error.empty())
+        return "  no file: " + error + "\n";
+    if (!io::sandboxed())
+        return "  not read: reading failed\n";
+    const long long size = io::file_size(path);
+    if (size > static_cast<long long>(host_limit))
+        return "  not read: " + std::to_string(size) + " bytes, more than the " + std::to_string(host_limit >> 20) +
+               " MiB the host sends\n";
+    return "  not read: the host did not send it\n";
+}
+
+// UPnP in sunshine.conf's text, read as the host reads it: on, the host removes its router mappings when it stops.
+bool upnp_enabled(const std::string &conf_text)
+{
+    const OptionSpec *spec = find_option("upnp");
+    return spec != nullptr && option_value(Config::parse(conf_text), *spec) == "1";
+}
+
 } // namespace
 
 Host::Host() = default;
@@ -384,11 +407,18 @@ void Host::read_files()
     Values values;
     std::string error;
     std::string text;
-    if (io::read_text(kConfPath, &text))
+    errno = 0;
+    const bool have_config = io::read_text(kConfPath, &text);
+    // A missing file holds only defaults. Any other failure says nothing about the file (without /data: the host is down),
+    // and the settings page keeps what it read before (Snapshot::config_read).
+    const bool config_read = have_config || errno == ENOENT;
+    if (have_config)
     {
         const Config config = Config::parse(text);
         for (const OptionSpec &spec : option_specs())
             values[spec.key] = option_value(config, spec);
+        if (upnp_enabled(text))
+            host_upnp_ = true;
     }
     else
     {
@@ -436,6 +466,7 @@ void Host::read_files()
     std::lock_guard<std::mutex> lock(mutex_);
     state_.files_read = true;
     state_.config = values;
+    state_.config_read = config_read;
     state_.config_error = error;
     state_.autoload = autoload_on;
     state_.manager_autoload = manager_on;
@@ -612,6 +643,8 @@ std::string Host::launch()
     const char *elf = !io::sandboxed() && io::exists(kHostElf) ? kHostElf : kBundledElf;
     if (!io::exists(elf))
         return std::string("no host at ") + kHostElf + " (" + io::describe_path(kHostElf) + ")";
+    // A new host: what it reads now counts, and the read_files after this launch sees the same file.
+    host_upnp_ = false;
     hui::sys::log("[PSAPP] sending %s to the ELF loader", elf);
     const std::string error = io::send_file(kLoaderPort, elf);
     if (!error.empty())
@@ -623,6 +656,10 @@ std::string Host::launch()
 
 std::string Host::quit_and_wait()
 {
+    // Also the file as it is now, for a host started elsewhere with UPnP on. Without /data the file would come through the
+    // host, which may not answer: the reads before (host_upnp_) have to do.
+    std::string text;
+    const bool upnp_on = host_upnp_ || (!io::sandboxed() && io::read_text(kConfPath, &text) && upnp_enabled(text));
     const io::Exchange reply = io::exchange(kControlPort, "QUIT\n", any_line, 3000);
     if (reply.connect_refused)
         return {}; // not running
@@ -631,8 +668,10 @@ std::string Host::quit_and_wait()
     if (!wait_control(false, 20000))
         return "the host did not stop within 20 s";
     // The control socket closes first; give the rest of the host a moment to let go of its ports
-    // and the capture service.
-    sleep_ms(2000);
+    // and the capture service. With UPnP on, the host removes its router mappings last and waits up to 3 s for that
+    // (removal_budget in src/net/upnp_client.cpp): a new host started meanwhile maps the same ports, which the old one may
+    // then remove, and both write upnp_permanent.txt.
+    sleep_ms(2000 + (upnp_on ? 3000 : 0));
     return {};
 }
 
@@ -847,6 +886,9 @@ void Host::do_save(const Job &job)
         return;
     }
     Config config = Config::parse(text);
+    // The running host may have UPnP on from the file as it was before this save: a restart after a save that turns it off,
+    // now or later with Restart host, still waits for that host's removal.
+    host_upnp_ = host_upnp_ || upnp_enabled(text);
     for (const auto &[key, value] : job.values)
     {
         const OptionSpec *spec = find_option(key);
@@ -955,7 +997,11 @@ std::string Host::build_report()
     std::string host_file, older_host_file, log_file;
     const bool have_host_file = io::read_text(kHostDiagPath, &host_file);
     const bool have_older_host_file = io::read_text(kHostDiagOlderPath, &older_host_file);
-    const bool have_log_file = io::read_text(kHostLogPath, &log_file, 4u << 20);
+    // sunshine.log only rotates when the host starts, and a long or detailed run outgrows any limit: its tail, unless this
+    // title has no /data and the host sends the file whole (up to 4 MiB, src/control/file_bridge.cpp).
+    constexpr std::size_t kLogTail = 512u << 10, kLogThroughHost = 4u << 20;
+    const bool have_log_file = io::sandboxed() ? io::read_text(kHostLogPath, &log_file, kLogThroughHost)
+                                               : io::read_tail(kHostLogPath, &log_file, kLogTail);
     const diag::HostLog host_log = diag::parse_host_log(host_file);
 
     std::string out = "ProsperoSunshine diagnostics\n\n";
@@ -1035,7 +1081,7 @@ std::string Host::build_report()
         out += scrubber.tail(older_host_file, 60);
     }
     out += "\nsunshine.log, last lines:\n";
-    out += have_log_file ? scrubber.tail(log_file, 80) : "  no file: " + io::open_error(kHostLogPath) + "\n";
+    out += have_log_file ? scrubber.tail(log_file, 80) : unread(kHostLogPath, kLogThroughHost);
     // The lines above hold no one's name, but a line added there later might hold an address: they get the same pass.
     return scrubber.apply(out, false);
 }

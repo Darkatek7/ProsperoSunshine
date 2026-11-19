@@ -48,8 +48,6 @@ struct Pairing
     std::string address;
 };
 
-using Values = std::map<std::string, std::optional<std::string>>; // key -> value, nullopt: default
-
 struct Snapshot
 {
     // The host, from the last poll.
@@ -74,6 +72,7 @@ struct Snapshot
     // Files.
     bool files_read = false;
     Values config;            // the keys of option_specs()
+    bool config_read = false; // config is the file's (no file: all defaults); false after a failed read (no /data, no host)
     std::string config_error; // reading failed (a missing file is fine)
     bool autoload = false;           // local/prospero-sunshine is in autoload.txt
     bool manager_autoload = false;   // AUTOLOAD_ENABLED=1 in pldmgr_config.txt (true when unreadable)
@@ -169,7 +168,12 @@ class Host
     void poll();
     bool wait_control(bool open, int timeout_ms);
     std::string launch();
+    // QUIT, then the wait until the host has let go: longer when it may have UPnP on (host_upnp_), since it removes its
+    // router mappings last.
     std::string quit_and_wait();
+    // sunshine.conf had UPnP on at a read since the running host started (for a host that ran before the app: since the app
+    // started), or before a save: that host removes its router mappings when it stops. Worker thread only.
+    bool host_upnp_ = false;
     std::string sync_slot();
 
     void do_pin(const Job &job);

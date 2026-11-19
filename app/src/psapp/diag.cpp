@@ -20,6 +20,8 @@ namespace
 // The file's capture lines come from src/platform/ps5/capture.c; PS_CAPTURE_* from capture.h.
 constexpr int kBusy = -2;
 constexpr int kVr = -4;
+// The most slices per frame Moonlight's hardware decoders take on Windows: PS_DECODER_MAX_SLICES in src/video/nal_slices.h.
+constexpr int kDecoderSlices = 32;
 constexpr const char *kPrefix = "ProsperoSunshine: ";
 
 std::string field(const std::string &line, const std::string &name)
@@ -185,6 +187,14 @@ void add_once(std::vector<std::string> &list, const std::string &item)
         list.push_back(item);
 }
 
+// OpenVideo answered -1 (CAPTURE_STUCK in capture.c, issue 56): the console's own capture path is stuck, and only a console
+// restart frees it. Read from the failed step and its code, not from the host's "capture stuck:" line, which neither the
+// debug build's self-check (it opens the capture directly) nor a 0.6.6 host writes.
+bool capture_stuck(const HostLog &log)
+{
+    return log.capture == Capture::failed && log.failed_step == "OpenVideo" && log.failed_rc == "0xffffffff";
+}
+
 } // namespace
 
 std::string firmware_text(std::uint32_t firmware)
@@ -236,6 +246,10 @@ HostLog parse_host_log(const std::string &text)
         if (starts_with(line, kPrefix))
             line.erase(0, std::strlen(kPrefix));
         last_line = line;
+        // H.264 in more slices than the hardware decoders take (capture.c's first frame check; 34 at 1080p below firmware 11,
+        // issue 57). The line also stays the attempt's last step below.
+        if (starts_with(line, "capture first frame has ") && line.find("more than hardware decoders") != std::string::npos)
+            log.h264_slices = std::atoi(line.c_str() + std::strlen("capture first frame has "));
         if (starts_with(line, "host version="))
         {
             log.version = field(line, "version");
@@ -284,6 +298,7 @@ HostLog parse_host_log(const std::string &text)
             log.capture = Capture::opening;
             log.last_step.clear();
             log.running = {};
+            log.h264_slices = 0; // a later open in HEVC, or in H.264 that fits, has no such line
         }
         else if (starts_with(line, "capture open ok"))
         {
@@ -349,10 +364,18 @@ Notice notice(std::uint32_t firmware, const HostLog &log, bool host_running)
             return {"The stream cannot run while PS VR is in use.", true};
         if (log.failed_error == kBusy)
             return {"Something else is using the console's capture. Close it, or restart the console.", true};
+        if (capture_stuck(log))
+            return {"The console's video capture is stuck (OpenVideo -1). Restart the console; restarting the host won't help.", true};
         return {"Capture failed at " + log.failed_step + " on " + name + ". See Diagnostics.", true};
     }
     if (log.capture == Capture::opening && !host_running)
         return {"The host went down while starting capture on " + name + ". See Diagnostics.", true};
+    // The stream runs, but Moonlight on Windows shows a white or black picture with hardware decoding (issue 57). No advice
+    // to use HEVC: it failed at its first frame on 8.60. The home page shows one line, about 150 characters.
+    if (log.capture == Capture::ok && log.h264_slices > kDecoderSlices)
+        return {"H.264 here comes in " + std::to_string(log.h264_slices) +
+                    " slices per frame: Moonlight on Windows needs Settings > Video decoder > Force software decoding.",
+                false};
     std::vector<std::string> worked;
     for (const Attempt &attempt : log.attempts)
     {
@@ -391,6 +414,8 @@ std::string capture_summary(const HostLog &log)
     if (log.capture == Capture::unknown)
         return out + "not tried since the host started";
     out += "last open failed at " + log.failed_step + " (error " + std::to_string(log.failed_error) + ", rc " + log.failed_rc + ")";
+    if (capture_stuck(log))
+        out += ": the console's capture is stuck, only a console restart frees it (issue 56)";
     if (!log.running.outcome.empty())
     {
         const RunningWait &wait = log.running;

@@ -543,7 +543,8 @@ reporting a problem, not for daily use:
 What the debug build adds:
 
 - **Log level `debug`** in `sunshine.log` unless `min_log_level` in `sunshine.conf` says otherwise. The kernel log stays at
-  `info`: each line there is written right away, about 5 ms each, and debug lines there slowed the sound down.
+  `info` in both builds, whatever `min_log_level` says: each line there is written right away, about 5 ms each, and debug
+  lines there slowed the sound down.
 - **A `->` line before each call that can hang** in `host_diag.log`, on disk before the call is made: Avcap2 (OpenVideo,
   Start, SetVideoBitrate, OpenAudio, Stop and Close), the ResourceArbitrator, binding each port, and stopping the services
   (`QUIT`, `RELISTEN`). If the host hangs, the last `->` line names the call it stopped at.
@@ -606,10 +607,12 @@ expect it to fail.
    whether it worked or not. Add your Moonlight client and what you saw on the screen. The report has no addresses, device names
    or ids in it.
 
-**H.264 on firmware 10.x:** 10.x cuts every 1080p H.264 frame into 34 slices, and Moonlight on Windows then shows a white or
-black picture with hardware decoding. The slice fields that 0.3.1 sets don't change that on 10.20 (measured by a contributor),
-so use HEVC on 10.x, or software decoding for H.264. If you are on another 10.x version and stream H.264, the app's
-**Diagnostics** page shows `first frame has N slices` (it is in `host_diag.log`, not in `sunshine.log`); the number helps.
+**H.264 on firmware below 11 (8.x to 10.x):** these versions cut every 1080p H.264 frame into 34 slices, and Moonlight on
+Windows then shows a white or black picture with hardware decoding. The slice fields that 0.3.1 sets don't change that on 10.20
+(measured by a contributor), so set Moonlight's **Video decoder** to **Force software decoding** for H.264, or use HEVC on
+10.x. HEVC failed at its first frame on 8.60 (issue 57). The app's home screen says so when a stream's frames come in more
+slices than the hardware decoders take, and its **Diagnostics** page shows `first frame has N slices` (it is in
+`host_diag.log`, not in `sunshine.log`); on another version below 11, the number helps.
 
 **Surround:** turn on **Surround** under Experimental, set Moonlight to 5.1 or 7.1 and play a game with surround sound for a
 minute. `sunshine.log` gets a line `12-channel levels` every 30 seconds; post a few of them with what you heard from which

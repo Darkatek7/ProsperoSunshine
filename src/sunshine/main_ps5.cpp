@@ -280,10 +280,11 @@ int main(int argc, char *argv[]) {
         }
         return lines;
     });
-    // From here on the kernel log follows min_log_level from sunshine.conf like the file log, but in the debug build not
-    // below info: each line goes to the kernel log synchronously, 5.2 ms each, and debug lines there slowed the audio to
-    // 0.4x (docs/firmware-porting.md). The debug lines are in sunshine.log and the remote log.
-    const int klog_level = kDebugBuild ? std::max(config::sunshine.min_log_level, 2) : config::sunshine.min_log_level;
+    // From here on the kernel log follows min_log_level from sunshine.conf like the file log, but never below info, in
+    // both builds: each line goes to the kernel log synchronously, about 5 ms each (5.2 ms on 10.20), and debug lines there
+    // slowed the audio to 0.4x (docs/firmware-porting.md). The app offers Debug and Verbose in the normal build too. The
+    // debug lines are in sunshine.log (and in the debug build's remote log).
+    const int klog_level = std::max(config::sunshine.min_log_level, 2);
     klog->set_filter(boost::log::expressions::attr<int>("Severity") >= klog_level);
     auto log_guard = logging::init(config::sunshine.min_log_level, config::sunshine.log_file);
     if (!log_guard) ps_diag_log("ProsperoSunshine: host logging failed to initialize\n");
