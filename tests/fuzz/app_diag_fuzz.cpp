@@ -29,21 +29,31 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     // The report is meant to be posted: a name given to the scrub, the addresses and long hex runs are gone from it.
     {
         const std::string name = in.ConsumeRandomLengthString(12);
-        const std::string scrubbed = diag::scrub(log + " " + name, {name, "ab"});
-        if (name.size() >= 3 && name.find("<") == std::string::npos && log.find('<') == std::string::npos && name.find('\0') == std::string::npos && name.find('\1') == std::string::npos) {
-            // The name is hidden whatever its case, except where the scrub's own tags (<lan-1>, <name-1>, ...) happen to spell it.
-            std::string lower, wanted = name;
-            bool in_tag = false;
-            for (const char c : scrubbed) {
-                if (c == '<') in_tag = true;
-                if (!in_tag) lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-                if (c == '>' && in_tag) {
-                    in_tag = false;
-                    lower += '\1';  // a tag is a gap: what stands on both sides of it is not one word
+        std::string upper = name, wanted = name;
+        for (char &c : upper) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        for (char &c : wanted) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        const std::string scrubbed = diag::scrub(log + " " + upper, {name, "ab"});
+        if (name.size() >= 3 && name.find('<') == std::string::npos && name.find('\0') == std::string::npos && name.find('\1') == std::string::npos) {
+            // The text in lower case without the scrub's own tags (<lan-1>, <name-1>, ...), which may happen to spell the name.
+            const auto visible = [](const std::string &text) {
+                std::string lower;
+                bool in_tag = false;
+                for (const char c : text) {
+                    if (c == '<') in_tag = true;
+                    if (!in_tag) lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                    if (c == '>' && in_tag) {
+                        in_tag = false;
+                        lower += '\1';  // a tag is a gap: what stands on both sides of it is not one word
+                    }
                 }
-            }
-            for (char &c : wanted) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-            FUZZ_CHECK(lower.find(wanted) == std::string::npos);
+                return lower;
+            };
+            // A name standing as a word is hidden whatever its case; a copy glued to an ASCII letter or digit stays
+            // (Scrubber::apply). So only the planted copy counts, which follows a space and ends the text: a copy in the fuzzed
+            // log may be glued to a word, and without_long_hex may turn such a neighbour into an <id-N>. A match that runs
+            // from the log into the planted copy leaves a tag before the rest of it, which is shorter than the name.
+            FUZZ_CHECK(!visible(scrubbed).ends_with(wanted));
+            FUZZ_CHECK(visible(diag::scrub(" " + upper + " ", {name, "ab"})).find(wanted) == std::string::npos);
         }
         FUZZ_CHECK(diag::scrub("host 192.168.1.77 and " + std::string(40, 'a'), {}).find("192.168.1.77") == std::string::npos);
     }

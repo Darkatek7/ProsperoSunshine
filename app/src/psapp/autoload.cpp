@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "app/psapp/autoload.hpp"
 
+#include <string>
 #include <vector>
 
 namespace psapp::autoload
@@ -91,6 +92,60 @@ std::string slot_meta(std::string_view filename, std::string_view installed_at)
     out += installed_at;
     out += "\",\n  \"origin\": \"web_upload\",\n  \"origin_detail\": \"ProsperoSunshine app\"\n}\n";
     return out;
+}
+
+BootStart boot_start(const std::string *list, bool missing, std::string_view host_answer)
+{
+    if (list != nullptr)
+        return contains(*list, kSlotKey) ? BootStart::on : BootStart::off;
+    // No list: nothing starts at boot, and turning it on makes one.
+    if (missing)
+        return BootStart::off;
+    if (host_answer.substr(0, 3) != "OK ")
+        return BootStart::unknown;
+    // " list=" with its value up to the next space.
+    const std::size_t at = host_answer.find(" list=");
+    if (at == std::string_view::npos)
+        return BootStart::unknown;
+    const std::string_view value = host_answer.substr(at + 6, host_answer.find(' ', at + 6) - (at + 6));
+    return value == "1" ? BootStart::on : value == "0" ? BootStart::off : BootStart::unknown;
+}
+
+// The chip sits in a row with the port, LAN encryption and the paired devices, left of the sun: app/tests/psapp_test.cpp checks
+// that the longest row still ends before the sun's rays.
+const char *boot_chip(BootStart state)
+{
+    switch (state)
+    {
+    case BootStart::on:
+        return "Starts at boot";
+    case BootStart::off:
+        return "Manual start";
+    case BootStart::unknown:
+        break;
+    }
+    return "Boot start unknown";
+}
+
+const char *boot_unknown_hint(bool host_running)
+{
+    return host_running ? "The running host did not say whether it starts at boot. Reload (Triangle) asks again."
+                        : "Start the host to see whether it starts at boot: only the host may read the Payload Manager's list.";
+}
+
+std::string slot_copy_note(BootStart state, long long host_size, long long slot_size, std::optional<bool> same_bytes)
+{
+    if (state == BootStart::off || host_size < 0 || slot_size < 0)
+        return {};
+    std::string out = state == BootStart::on ? "Start at boot runs another host build: " : "If Start at boot is on, it runs another host build: ";
+    if (slot_size != host_size)
+        out += "the slot's copy has " + std::to_string(slot_size) + " bytes, the data folder's " + std::to_string(host_size) + ".";
+    else if (same_bytes == false)
+        out += "the slot's copy has other bytes than the data folder's (both " + std::to_string(host_size) + ").";
+    else
+        return {};
+    // prepare_files and read_files in host.cpp.
+    return out + " The app updates the slot when it starts, or through the running host where it may not read autoload.txt.";
 }
 
 } // namespace psapp::autoload

@@ -48,10 +48,10 @@ and how the last request went.
 
 | Part | What it does |
 | --- | --- |
-| Hero | Host stopped, ready to stream, streaming (which app, and which client when the host reports it), or session paused (the host still has "PS5 Screen" open for a client that left; only hosts that report `client=` tell this apart), polled every two seconds through the host's control socket. The sun turns while the host runs and sends out rings while it streams. The chips under it: the port, LAN encryption, whether the host starts at boot, how many devices are paired. The console's IP address is in the top bar. |
+| Hero | Host stopped, ready to stream, streaming (which app, and which client when the host reports it), or session paused (the host still has "PS5 Screen" open for a client that left; only hosts that report `client=` tell this apart), polled every two seconds through the host's control socket. The sun turns while the host runs and sends out rings while it streams. The chips under it: the port, LAN encryption, whether the host starts at boot ("Boot start unknown" while only a host could tell and none answered, below), how many devices are paired. The console's IP address is in the top bar. |
 | Start host / Stop host | Start sends the host ELF to the ELF loader (`127.0.0.1:9021`) and waits until the host answers. Stop sends `QUIT` and waits until it is gone. |
 | Restart host | Stop, then start: the way new settings take effect. |
-| Start at boot | The switch for the Payload Manager's autoload (below). A line under it warns when the Payload Manager's own autoload is off (with a running host, which can read `pldmgr_config.txt`; a title may not). |
+| Start at boot | The switch for the Payload Manager's autoload (below). A line under it warns when the Payload Manager's own autoload is off (with a running host, which can read `pldmgr_config.txt`; a title may not). Where the app may not read `autoload.txt` and no host answers, the switch shows neither on nor off, and the line says that starting the host shows it; Cross then asks for it on, which needs the host. |
 | Notice | One line above the pairing part when there is something to know about this console: the firmware is untested, the last capture attempt failed, and why (HDR on, capture in use, firmware not supported, the console's capture stuck so that only a console restart helps, the step that failed), H.264 comes in more slices than Moonlight's hardware decoders on Windows take, or an Experimental switch failed or started and the Diagnostics report is wanted. It comes from the firmware and the host's `host_diag.log`. |
 | Pairing | A card per Moonlight client waiting to pair, with its name and address; a new request takes the focus and chimes. Cross opens the PIN keyboard: type the four digits Moonlight shows and press Done (R2 or Options). Square on a card denies the request (`CANCELPIN`), and Moonlight hears that the operator cancelled it. The app waits until Moonlight has finished pairing and says whether it worked. Beside it, the paired devices (from `sunshine_state.json`). |
 | Streaming now | While someone streams, a card with the first two devices (from the host's `STREAMS`): name, codec and HDR, resolution and frame rate, bitrate, controllers and how long it has been streaming; "joined" marks a device that gets another device's picture. It takes the second pairing card's place, or the empty pairing card's. Cross opens the list of all streams with their addresses; Cross on one asks "End the stream of ...?", and a second Cross ends that device's stream (`ENDSTREAM`). The game and the other streams go on, and the device can connect again. |
@@ -119,7 +119,9 @@ function that fails is off until the host restarts. The notice on Home then says
 **Diagnostics** collects a report when the page opens, and again on Cross. It says which app, host (with its build's commit) and
 firmware run, how the last capture attempt ended (if the system didn't hand over the capture resource: no answer, refused or taken
 away, how long the host waited, and what else was active; if the firmware is refused outright, that no switch changes this), which ports
-answer, how each file the app and host need looks from the title, which settings differ from the defaults, which Experimental switches
+answer, whether the host starts at boot (on, off or unknown), how each file the app and host need looks from the title (and, when the
+Payload Manager's slot holds another host build than the data folder, that Start at boot runs that one), which settings differ from
+the defaults, which Experimental switches
 are set, each function's result and code, how each try went (codec, mode, frame rate, bitrate, variant, the step that failed and its
 code), the host's `host_diag.log` and the end of
 `sunshine.log`. Addresses, device names, the console's name and long ids are taken out, so it can go into a
@@ -153,12 +155,17 @@ Turning **Start at boot** on:
    the list loads before it (kstuff, the ELF loader, ...).
 
 Turning it off removes that line and leaves everything else in the list as it was. The slot stays, so
-the host can still be started from the Payload Manager's own page. When the app installs a new host,
-it updates the slot's copy too. Each file is written as `<name>.tmp` and renamed over the old one.
+the host can still be started from the Payload Manager's own page. Each file is written as `<name>.tmp` and renamed over the old
+one. The slot's copy of the host follows the data folder's when the app starts, as long as the app can read `autoload.txt`.
+Where it can't (below), the running host updates the slot when the app asks it: when the app starts or starts the host, on
+Triangle, and when a host comes up while the app shows Start at boot as unknown. Until then Start at boot runs the older host, and the Diagnostics report
+says so.
 
 Files the Payload Manager saves itself are for its own user only (mode 0600), and a title runs as another
 one: `autoload.txt` can then not be read from the app, the way `pldmgr_config.txt` never can. The running host
-may, so the app then asks it (`AUTOLOAD`). With the host stopped, the app says to start it first.
+may, so the app then asks it (`AUTOLOAD`). With the host stopped, the app doesn't know whether the host starts at boot: the
+chip says "Boot start unknown", the line under the switch says to start the host, and turning it on asks to start the host
+first. A missing `autoload.txt` means off.
 
 ## The host's control socket
 
@@ -241,7 +248,7 @@ docker run --rm -v "${PWD}:/repo" prosperosunshine-app:2 bash app/tests/run.sh
 | `src/psapp/icons.*` | Line icons and the sun, from the kit's shapes. |
 | `src/psapp/host.*` | The worker thread: polls the control socket, starts and stops the host, saves the settings, switches autoload. The screen reads a snapshot of its state every frame and never waits. |
 | `src/psapp/conf.*` | `sunshine.conf`: the offered options, their checks, line-preserving edits. |
-| `src/psapp/autoload.*` | The Payload Manager's `autoload.txt` and slot. |
+| `src/psapp/autoload.*` | The Payload Manager's `autoload.txt` and slot, and whether the host starts at boot as far as the app can tell (on, off, unknown). |
 | `src/psapp/io.*` | Files and loopback sockets. |
 | `sce_sys/` | `param.json`, the icon and the background picture. |
 | `tools/make-backgrounds.sh` | The background picture to `pic0.dds` and `pic1.dds`. |

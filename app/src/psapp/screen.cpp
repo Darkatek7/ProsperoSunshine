@@ -602,7 +602,8 @@ void Screen::run(Action action, hui::ui::Feedback &feedback)
         host_.restart_host();
         break;
     case Action::autoload:
-        host_.set_autoload(!snap_.autoload);
+        // Unknown counts as off: a press asks for it on, and without a host to read the list the message says to start one.
+        host_.set_autoload(snap_.boot_start != autoload::BootStart::on);
         break;
     case Action::save:
     case Action::save_restart:
@@ -1525,7 +1526,7 @@ void Screen::draw_home(hui::gfx::DrawList &list, std::uint32_t glass) const
     chip(Icon::plug, "Port " + saved("port", "47989"), false);
     const std::string lan = saved("lan_encryption_mode", "0");
     chip(Icon::lock, lan == "0" ? "LAN unencrypted" : lan == "1" ? "LAN encrypted when supported" : "LAN encrypted", lan != "0");
-    chip(Icon::boot, snap_.autoload ? "Starts at boot" : "Manual start", snap_.autoload);
+    chip(Icon::boot, autoload::boot_chip(snap_.boot_start), snap_.boot_start == autoload::BootStart::on);
     const std::size_t paired = diag::paired_names(snap_.running && snap_.devices_known, snap_.devices, snap_.paired).size();
     chip(Icon::monitor, std::to_string(paired) + (paired == 1 ? " paired device" : " paired devices"), false);
     list.pop_transform();
@@ -1544,11 +1545,14 @@ void Screen::draw_home(hui::gfx::DrawList &list, std::uint32_t glass) const
         const Rect r = action_rect(2);
         draw_button(list, glass, r, static_cast<int>(Icon::boot), "Start at boot", false, action_amount_[2], enabled);
         const Rect track{r.x + r.w - 104.0f, r.cy() - 19.0f, 76.0f, 38.0f};
-        list.rounded_rect(track, 19.0f, snap_.autoload ? kAccent : Color::rgb(0x3a4363));
-        if (snap_.autoload)
+        const bool boot_on = snap_.boot_start == autoload::BootStart::on;
+        const bool boot_unknown = snap_.boot_start == autoload::BootStart::unknown;
+        list.rounded_rect(track, 19.0f, boot_on ? kAccent : Color::rgb(0x3a4363));
+        if (boot_on)
             list.glow(track, 19.0f, 12.0f, kAccent.with_alpha(0.35f));
-        const float knob = snap_.autoload ? track.x + track.w - 19.0f : track.x + 19.0f;
-        list.circle(knob, track.cy(), 15.0f, Color::rgb(0xffffff));
+        // Unknown: the knob in the middle, dimmed, neither on nor off.
+        const float knob = boot_on ? track.x + track.w - 19.0f : boot_unknown ? track.x + track.w / 2.0f : track.x + 19.0f;
+        list.circle(knob, track.cy(), 15.0f, Color::rgb(0xffffff, boot_unknown ? 0.45f : 1.0f));
     }
     // What the firmware or the last capture attempt means for streaming, above the boot hint; first the control socket's
     // development switch while it is on.
@@ -1557,7 +1561,13 @@ void Screen::draw_home(hui::gfx::DrawList &list, std::uint32_t glass) const
         hui::ui::text(list, fonts_.semibold, shorten(fonts_.semibold, notice.text, 22.0f, 1728.0f), 96.0f, 660.0f, 22.0f,
                       notice.bad ? kBad : kAccent);
     const float boot_hint_y = notice.text.empty() ? 660.0f : 690.0f;
-    if (snap_.autoload && snap_.manager_present && !snap_.manager_autoload)
+    // Unknown says so, and nothing that assumes on or off; before the first read there is nothing to say yet.
+    if (snap_.boot_start == autoload::BootStart::unknown)
+    {
+        if (snap_.files_read)
+            hui::ui::text(list, fonts_.regular, autoload::boot_unknown_hint(running), action_rect(2).x, boot_hint_y, 20.0f, kFaint);
+    }
+    else if (snap_.boot_start == autoload::BootStart::on && snap_.manager_present && !snap_.manager_autoload)
         hui::ui::text(list, fonts_.regular, "The Payload Manager's own autoload is off, so nothing starts at boot.",
                       action_rect(2).x, boot_hint_y, 20.0f, kAccent);
     else if (!snap_.manager_present)

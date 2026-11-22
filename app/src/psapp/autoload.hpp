@@ -9,6 +9,7 @@
 // as a whole by the manager, so the edits below never add one.
 #pragma once
 
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -35,5 +36,29 @@ bool manager_autoload_enabled(std::string_view config);
 
 // The slot's meta.json (schema 2, a local slot) for an ELF file name and an ISO-8601 time.
 std::string slot_meta(std::string_view filename, std::string_view installed_at);
+
+// Whether the host starts at boot, as far as the app can tell. The manager may keep autoload.txt to itself (mode 0600), and a
+// title without /data reads nothing there: then only a running host (root) can say, and with none the app doesn't know.
+enum class BootStart
+{
+    off,
+    on,
+    unknown,
+};
+
+// From what this title read of autoload.txt (`list` null when it could not, `missing` when that was because there is none) and
+// the running host's answer to AUTOLOAD ("OK list=<0|1> manager=<0|1> slot=<0|1>", src/control/autoload_host.hpp; empty when
+// it wasn't asked or didn't answer). The file as read wins; the host's answer only stands in for a file this title can't read.
+BootStart boot_start(const std::string *list, bool missing, std::string_view host_answer);
+
+// The home page's chip for it, and the line under the Start at boot switch while it is unknown (`host_running`: a host runs
+// but did not say, an older one or one busy with a pairing).
+const char *boot_chip(BootStart state);
+const char *boot_unknown_hint(bool host_running);
+
+// The report's line on the slot's copy of the host ELF when Start at boot may run it and it is another build than the data
+// folder's; empty otherwise. Sizes are -1 for a missing file; `same_bytes` is empty when the bytes could not be compared (a
+// title without /data, or a file it may not read), and then only the sizes count.
+std::string slot_copy_note(BootStart state, long long host_size, long long slot_size, std::optional<bool> same_bytes);
 
 } // namespace psapp::autoload

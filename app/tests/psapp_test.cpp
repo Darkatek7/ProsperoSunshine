@@ -159,6 +159,61 @@ static void conf_tests()
     CHECK(changed_values(rebased(edits, unread, edits), edits).empty());
 }
 
+// Whether the host starts at boot: on, off, or unknown where only a host may read the list and none answered.
+static void boot_start_tests()
+{
+    using autoload::BootStart;
+    const std::string listed = "repo/elfldr@e8cce5d1\nlocal/prospero-sunshine\n", other = "repo/elfldr@e8cce5d1\n";
+    // The list as this title read it wins over the host's answer.
+    CHECK(autoload::boot_start(&listed, false, "") == BootStart::on);
+    CHECK(autoload::boot_start(&other, false, "") == BootStart::off);
+    CHECK(autoload::boot_start(&other, false, "OK list=1 manager=1 slot=1") == BootStart::off);
+    // No list at all: nothing starts at boot.
+    CHECK(autoload::boot_start(nullptr, true, "") == BootStart::off);
+    // Not readable here (the manager's own file at mode 0600, or no /data and no host): the running host says, or nobody knows.
+    CHECK(autoload::boot_start(nullptr, false, "") == BootStart::unknown);
+    CHECK(autoload::boot_start(nullptr, false, "OK list=1 manager=1 slot=0") == BootStart::on);
+    CHECK(autoload::boot_start(nullptr, false, "OK list=0 manager=1 slot=0") == BootStart::off);
+    CHECK(autoload::boot_start(nullptr, false, "ERR unknown command") == BootStart::unknown);
+    CHECK(autoload::boot_start(nullptr, false, "OK manager=1") == BootStart::unknown);
+    CHECK(autoload::boot_start(nullptr, false, "OK list=") == BootStart::unknown);
+    CHECK(autoload::boot_start(nullptr, false, "OK list=1") == BootStart::on);
+
+    // The chip says unknown, not "Manual start"; the line under the switch says what shows it.
+    CHECK(std::string(autoload::boot_chip(BootStart::on)) == "Starts at boot");
+    CHECK(std::string(autoload::boot_chip(BootStart::off)) == "Manual start");
+    CHECK(std::string(autoload::boot_chip(BootStart::unknown)) == "Boot start unknown");
+    CHECK(std::string(autoload::boot_unknown_hint(false)).find("Start the host to see") == 0);
+    CHECK(std::string(autoload::boot_unknown_hint(true)).find("Reload") != std::string::npos);
+    // The chips' row on the home page (screen.cpp draw_home: from x 96, each chip its text at 22 px SemiBold plus 74, 14 apart)
+    // with the longest of each: it has to end before the sun's rays, which reach no further left than x 1316 (the emblem at
+    // 1500, its rays 1.64 times its radius of 112).
+    for (const BootStart state : {BootStart::on, BootStart::off, BootStart::unknown})
+    {
+        float right = 96.0f - 14.0f;
+        for (const char *chip : {"Port 47989", "LAN encrypted when supported", autoload::boot_chip(state), "10 paired devices"})
+            right += 14.0f + psapp_test::text_width(psapp_test::kInterSemiBold, chip, 22.0f) + 74.0f;
+        CHECK(right < 1316.0f);
+    }
+    // The hints are drawn under the switch, from x 772, without a cut: they have to fit before the page's right edge at 1824.
+    for (const bool running : {false, true})
+        CHECK(772.0f + psapp_test::text_width(psapp_test::kInterRegular, autoload::boot_unknown_hint(running), 20.0f) < 1824.0f);
+
+    // The report's line when the slot holds another host build than the data folder's.
+    const std::string differs = autoload::slot_copy_note(BootStart::on, 14897592, 14856488, std::nullopt);
+    CHECK(differs.find("Start at boot runs another host build: the slot's copy has 14856488 bytes, the data folder's 14897592.") == 0);
+    CHECK(differs.find("through the running host") != std::string::npos);
+    CHECK(autoload::slot_copy_note(BootStart::unknown, 14897592, 14856488, std::nullopt).find("If Start at boot is on, it runs") == 0);
+    CHECK(autoload::slot_copy_note(BootStart::on, 100, 100, false).find("other bytes than the data folder's (both 100)") !=
+          std::string::npos);
+    // The same build, bytes not compared, no slot, no host in the data folder, or nothing starts at boot: no line.
+    CHECK(autoload::slot_copy_note(BootStart::on, 100, 100, true).empty());
+    CHECK(autoload::slot_copy_note(BootStart::on, 100, 100, std::nullopt).empty());
+    CHECK(autoload::slot_copy_note(BootStart::on, 100, -1, std::nullopt).empty());
+    CHECK(autoload::slot_copy_note(BootStart::unknown, -1, 100, std::nullopt).empty());
+    CHECK(autoload::slot_copy_note(BootStart::off, 14897592, 14856488, false).empty());
+}
+
 static void autoload_tests()
 {
     // The list on the test console (2026-10-29), without a trailing newline after the last entry.
@@ -185,6 +240,8 @@ static void autoload_tests()
     const std::string meta = autoload::slot_meta("prospero_sunshine.elf", "2026-10-29T00:00:00+0000");
     CHECK(meta.find("\"kind\": \"local\"") != std::string::npos);
     CHECK(meta.find("\"filename\": \"prospero_sunshine.elf\"") != std::string::npos);
+
+    boot_start_tests();
 }
 
 // The build's commit, and how the wait for the resource ended.
@@ -582,6 +639,30 @@ static void scrubber_tests()
         // Lines of dashes and short hex stay.
         CHECK(scrubber.apply("----------------------------------------") == "----------------------------------------");
         CHECK(scrubber.apply("commit=8fa42cd5 rc=0xe034") == "commit=8fa42cd5 rc=0xe034");
+    }
+    {
+        // A name goes as a whole word only, in any case: a name like a common word leaves the longer words that hold it alone.
+        // Punctuation, '_', '-', quotes and bytes from 0x80 up are boundaries.
+        diag::Scrubber scrubber;
+        scrubber.add_name("Lamp");
+        CHECK(scrubber.apply("lamps=on by Lamp and LAMP's pad, Lamp_2") == "lamps=on by <name-1> and <name-1>'s pad, <name-1>_2");
+        CHECK(scrubber.apply("clamp lamp2 2lamp xLAMP") == "clamp lamp2 2lamp xLAMP");
+        CHECK(scrubber.apply("Lamp") == "<name-1>");
+        CHECK(scrubber.apply("\"lamp\" (Lamp) -Lamp- [lamp]:lamp/lamp.") ==
+              "\"<name-1>\" (<name-1>) -<name-1>- [<name-1>]:<name-1>/<name-1>.");
+        CHECK(scrubber.apply("\xC3\xA9Lamp\xC3\xA9 lamp\nlamp") == "\xC3\xA9<name-1>\xC3\xA9 <name-1>\n<name-1>");
+        // The other rules are the same as before: an address glued to a name's word still goes, and so do ids and titles.
+        CHECK(scrubber.apply("Lamp 192.168.1.9 lamps 192.168.1.9x PPSA99310") == "<name-1> <lan-1> lamps <lan-1>x <title>");
+        CHECK(scrubber.apply("lamp 0123456789abcdef0123") == "<name-1> <id-1>");
+        // A shorter name inside a longer one that is not a whole word there still counts where it is one.
+        scrubber.add_name("Lamp Room");
+        CHECK(scrubber.apply("Lamp Rooms and Lamp Room") == "<name-1> Rooms and <name-2>");
+        // Where a name begins or ends with something other than a letter or digit, that side needs no boundary.
+        scrubber.add_name("(Desk)");
+        CHECK(scrubber.apply("x(desk)y") == "x<name-3>y");
+        // Case is folded for ASCII only; a name that ends in a byte of UTF-8 has no boundary there.
+        scrubber.add_name("Zo\xC3\xAB");
+        CHECK(scrubber.apply("Zo\xC3\xAB's and zo\xC3\xAB and zo\xC3\xABs, xzo\xC3\xAB") == "<name-4>'s and <name-4> and <name-4>s, xzo\xC3\xAB");
     }
 }
 

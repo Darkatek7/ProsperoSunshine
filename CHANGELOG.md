@@ -18,6 +18,14 @@
   while the output has no mode or within 3 s of the loss. Such a failed reopen counted against the switches: a 4K stream
   at 63 Mbit/s went on at 50 Mbit/s, and a switch still on trial could step its variant or turn off. A new stream counts
   such a failure as before, so a title started together with it still gets a second open at the stream's size.
+- **The app shows Start at boot as unknown when it can't tell** (issue 62). Where the Payload Manager keeps
+  `autoload.txt` readable only by root, only a running host can read it; with the host stopped the home screen showed
+  "Manual start". Now it says "Boot start unknown" and the line under the switch says to start the host. A host that
+  comes up is asked at once. Diagnostics says whether the host starts at boot (on, off or unknown) and when the Payload
+  Manager's slot holds another host build than the data folder, the one Start at boot then runs.
+- **Diagnostics hides a device's name only as a whole word.** A paired device named like a common word also replaced
+  that word inside longer ones, and each tag made the line longer. A name next to punctuation, `_` or an accented letter
+  is still hidden. This also applies to the web page's report and its masked log download.
 
 ## 0.6.7-beta.1 (2026-11-19, pre-release)
 

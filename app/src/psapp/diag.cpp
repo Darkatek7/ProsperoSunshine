@@ -48,6 +48,12 @@ bool is_hex(char c)
     return is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
 }
 
+// An ASCII letter or digit: what a name hidden by the Scrubber must not be glued to. Not '_', '-' or a byte of UTF-8.
+bool is_word(char c)
+{
+    return is_digit(c) || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+}
+
 // The first four hex digits of a uuid, in lower case: what ties its tag to the tag of the device's name.
 std::string uuid_tag(const std::string &uuid)
 {
@@ -744,6 +750,9 @@ std::string Scrubber::apply(const std::string &whole, bool names)
     if (names && !names_.empty())
     {
         // One pass over the text, ignoring case (a host name is often written in lower case), so that no tag is searched again.
+        // A name counts as a whole word only: where it begins with an ASCII letter or digit, the byte before it must not be one,
+        // and where it ends with one, the byte after it. A device called "Lamp" leaves "lamps=" and "clamp" alone, and still goes
+        // in "Lamp's pad", "Lamp_2" or next to a letter with an accent (bytes from 0x80 up count as a boundary).
         const auto lower = [](char c) { return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c; };
         std::size_t i = 0;
         while (i < text.size())
@@ -757,7 +766,9 @@ std::string Scrubber::apply(const std::string &whole, bool names)
                 std::size_t k = 1;
                 while (k < name.size() && lower(text[i + k]) == lower(name[k]))
                     ++k;
-                if (k == name.size())
+                const std::size_t end = i + name.size();
+                if (k == name.size() && !(is_word(name.front()) && i > 0 && is_word(text[i - 1])) &&
+                    !(is_word(name.back()) && end < text.size() && is_word(text[end])))
                 {
                     out += known.second;
                     i += name.size();

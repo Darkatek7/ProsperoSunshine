@@ -10,6 +10,7 @@
 // The screen reads a Snapshot each frame and queues requests; results come back as a message.
 #pragma once
 
+#include "app/psapp/autoload.hpp"
 #include "app/psapp/conf.hpp"
 #include "app/psapp/diag.hpp"
 
@@ -74,7 +75,9 @@ struct Snapshot
     Values config;            // the keys of option_specs()
     bool config_read = false; // config is the file's (no file: all defaults); false after a failed read (no /data, no host)
     std::string config_error; // reading failed (a missing file is fine)
-    bool autoload = false;           // local/prospero-sunshine is in autoload.txt
+    // local/prospero-sunshine is in autoload.txt; unknown until the files are read, and while only a host could read the list
+    // and none answered.
+    autoload::BootStart boot_start = autoload::BootStart::unknown;
     bool manager_autoload = false;   // AUTOLOAD_ENABLED=1 in pldmgr_config.txt (true when unreadable)
     bool manager_present = false;    // /data/pldmgr exists
     long long host_elf_size = -1;    // /data/prosperosunshine/prospero_sunshine.elf
@@ -163,6 +166,7 @@ class Host
     void prepare_through_host();
     bool same_as_bundled();
     bool bridged_ = false; // no /data here: a host answered, so its files were read. Worker thread only.
+    bool host_seen_ = false; // the last poll found a host. Worker thread only.
     void read_files();
     std::string build_report();
     void poll();

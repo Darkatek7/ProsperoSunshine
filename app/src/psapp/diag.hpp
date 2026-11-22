@@ -169,8 +169,8 @@ std::string duration_text(long long seconds);
 // What the report hides, so that it fits a public issue (app/src/psapp/mask.hpp has the stand-ins and why): addresses of every kind
 // (<lan-1>, <tailscale-1>, <link-1>, <public-1>, and <mac-1>; the same address has the same tag in the whole report), host names
 // of URLs and Host headers, the names of the paired devices and the console (<device-3fa2> from the first characters of the
-// device's uuid, <console-name>, <name-N>), client ids and uuids (<id-N>, <uuid-3fa2>), and game titles (<title>). Other text
-// stays: the report is for finding a bug.
+// device's uuid, <console-name>, <name-N>; in any case, as whole words, so that a name like a common word leaves longer words
+// alone), client ids and uuids (<id-N>, <uuid-3fa2>), and game titles (<title>). Other text stays: the report is for finding a bug.
 // One Scrubber per report, for all of its sections.
 class Scrubber
 {

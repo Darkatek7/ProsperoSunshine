@@ -433,26 +433,30 @@ void Host::read_files()
         paired = paired_names(state);
     const std::string address = io::local_ipv4();
     std::string list, manager;
+    errno = 0;
     const bool have_list = io::read_text(autoload::kListPath, &list);
+    // Only "no such file" says there is no list. Any other failure says nothing about it: the manager keeps the file to itself
+    // (mode 0600), or without /data the host is down.
+    const bool list_missing = !have_list && errno == ENOENT;
     const bool have_manager = io::read_text(autoload::kConfigPath, &manager);
     if (!have_manager && io::exists(autoload::kConfigPath))
         hui::sys::log("[PSAPP] cannot read %s (errno %d)", autoload::kConfigPath, errno);
-    bool autoload_on = have_list && autoload::contains(list, autoload::kSlotKey);
+    std::string host_answer;
     // The manager may keep its config unreadable for a title; then nothing is known and no warning
     // is shown, unless the host (root) can tell.
     bool manager_on = !have_manager || autoload::manager_autoload_enabled(manager);
-    if ((!have_list && io::exists(autoload::kListPath)) || (!have_manager && io::exists(autoload::kConfigPath)))
+    if ((!have_list && !list_missing) || (!have_manager && io::exists(autoload::kConfigPath)))
     {
         const io::Exchange reply = io::exchange(kControlPort, "AUTOLOAD\n", any_line, 3000);
         if (!reply.lines.empty() && reply.lines.front().rfind("OK ", 0) == 0)
         {
             const std::string &line = reply.lines.front();
+            host_answer = line;
             manager_on = status_field(line, "manager") == "1";
             if (!have_list)
             {
-                autoload_on = status_field(line, "list") == "1";
                 // prepare_files cannot keep this slot current: the host takes over.
-                if (autoload_on && status_field(line, "slot") != "1")
+                if (status_field(line, "list") == "1" && status_field(line, "slot") != "1")
                 {
                     const io::Exchange sync = io::exchange(kControlPort, "AUTOLOAD ON\n", any_line, 20000);
                     hui::sys::log("[PSAPP] autoload slot updated by the host: %s",
@@ -461,6 +465,10 @@ void Host::read_files()
             }
         }
     }
+    const autoload::BootStart boot_start = autoload::boot_start(have_list ? &list : nullptr, list_missing, host_answer);
+    if (boot_start == autoload::BootStart::unknown)
+        hui::sys::log("[PSAPP] start at boot unknown: autoload.txt not readable here (%s), no answer from a host",
+                      io::open_error(autoload::kListPath).c_str());
     const bool manager_present = io::exists("/data/pldmgr") || (io::sandboxed() && !io::port_open(kControlPort));
     const long long host_elf_size = io::file_size(kHostElf);
     std::lock_guard<std::mutex> lock(mutex_);
@@ -468,7 +476,7 @@ void Host::read_files()
     state_.config = values;
     state_.config_read = config_read;
     state_.config_error = error;
-    state_.autoload = autoload_on;
+    state_.boot_start = boot_start;
     state_.manager_autoload = manager_on;
     // Without /data and without the host nothing is known; do_autoload says what to do.
     state_.manager_present = manager_present;
@@ -548,6 +556,19 @@ void Host::poll()
             bridged_ = false;
         }
     }
+    // A host that comes up while the autoload list is unknown (one started from elsewhere, or at boot) is asked once: the home
+    // page says starting the host shows it.
+    if (running && !host_seen_)
+    {
+        bool unknown = false;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            unknown = state_.files_read && state_.boot_start == autoload::BootStart::unknown;
+        }
+        if (unknown)
+            read_files();
+    }
+    host_seen_ = running;
     // The host's breadcrumbs: small, and the file is there after a crash too.
     std::string host_file;
     io::read_text(kHostDiagPath, &host_file);
@@ -1031,11 +1052,26 @@ std::string Host::build_report()
                      : snap.web_enabled   ? "on"
                      : snap.web_user.empty() ? "off, no login"
                                              : "off, login kept");
+    line("Start at boot", snap.boot_start == autoload::BootStart::on    ? "on"
+                          : snap.boot_start == autoload::BootStart::off ? "off"
+                                                                        : "unknown (autoload.txt is not readable here, and no host answered)");
 
     out += "\nPaths (this title's view, uid " + std::to_string(::getuid()) + "):\n";
     for (const char *path : {kDataDir, kConfPath, kHostElf, kHostDiagPath, kHostLogPath, "/data/pldmgr", autoload::kListPath,
                              autoload::kConfigPath, autoload::kSlotDir, autoload::kSlotElf})
         out += std::string("  ") + path + ": " + io::describe_path(path) + "\n";
+    {
+        // The slot keeps its own copy of the host, which only the app's start or a running host bring up to date: after an update
+        // with the host stopped, Start at boot still runs the older build. The bytes only where this title reads both itself.
+        const long long slot_size = io::file_size(autoload::kSlotElf);
+        std::optional<bool> same_bytes;
+        if (!io::sandboxed() && slot_size >= 0 && slot_size == snap.host_elf_size && io::open_error(kHostElf).empty() &&
+            io::open_error(autoload::kSlotElf).empty())
+            same_bytes = io::same_content(kHostElf, autoload::kSlotElf);
+        const std::string note = autoload::slot_copy_note(snap.boot_start, snap.host_elf_size, slot_size, same_bytes);
+        if (!note.empty())
+            out += "  " + note + "\n";
+    }
 
     out += "\nSettings changed from the defaults:\n";
     bool any = false;
