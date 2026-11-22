@@ -1,6 +1,6 @@
 # Arbeitsstand
 
-Stand: 19. November 2026, Beta 0.6.7-beta.1. Hier steht nur, was live geprüft ist, mit dem Messweg. Was ausgeliefert ist:
+Stand: 22. November 2026, Beta 0.6.7-beta.1 und die Fixes zu Issue 62 (noch nicht veröffentlicht). Hier steht nur, was live geprüft ist, mit dem Messweg. Was ausgeliefert ist:
 `CHANGELOG.md`. Plan und Reihenfolge: `ROADMAP.md`. Architektur: `docs/adr/001-sunshine-port.md`.
 
 Die älteren Einträge (bis 4. November 2026) und die ersten Nachweise nach Roadmap stehen unverändert und mit denselben
@@ -92,6 +92,42 @@ Issue 36“) und ein Debug-Build in jedem Release („Debug-Build (PR 29) zusamm
     Store nicht eigens installiert worden.
 
 ## Neuere Nachweise
+
+### Fixes zu Issue 62 auf der Konsole (2026-11-22, 13.00, Builds `i62fix02`, nicht veröffentlicht)
+
+Messweg: Testclient unter Linux (`run_smoke.sh`, `--network host`). Erst der Debug-Build aus dem Speicher, dann der normale
+Build und die App installiert, am Ende wieder die CI-Dateien von 0.6.7-beta.1. Dazu die Logs eines Streams des Besitzers vom
+selben Tag mit 0.6.7-beta.1.
+
+- **Debug-Build:** Selbsttest `problems=0`. H.264 und HEVC 1080p60 mit der Demo je 30 s: 1796 und 1793 Bilder, 0 fehlend,
+  Ton vollständig. HEVC 10 Bit HDR 3840x2160 mit GTA III vorne: 0 fehlend, das erste Bild kam aber erst nach 1,34 s (1722
+  Bilder in 30 s).
+- **Titelwechsel bei 60 Hz:** HDR 3840x2160 über 180 s mit dreimal Start und Ende von GTA III, H.264 2560x1440 über 80 s mit
+  zweimal: 10763 und 4791 Bilder, 0 fehlend, Rate unverändert (62988 und 30988 kbit/s). Die Aufnahme blieb bei jedem Wechsel
+  offen, das Wiederöffnen und die Schonfrist von 3 s liefen also nicht. Dass eine Ablehnung bei unverändertem Modus innerhalb
+  von 3 s vergeht (Issue 62), ist weiter nicht gemessen.
+- **Ausgabe auf 120 Hz:** Die Mario-64-Demo stellt die Ausgabe auf 120 Hz (`0x140`). Startete sie während eines 4K-Streams,
+  öffnete der Host einmal bei `0x138` neu (nach 1927 ms) und verlor die Aufnahme gleich wieder. Danach lehnte der
+  ResourceArbitrator 4K schon bei `RUNNING` ab, nach 1910 ms Warten. Der Stream endete 7,0 s nach dem ersten Verlust mit
+  `output refuses resolution 6 now`. Die Fehlerzeile nennt 120 Hz dabei nicht, weil der Host den Modus in dieser Öffnung
+  nicht mehr las. Ein neuer 4K-Stream mit der Demo vorne bekam 1080p (Ablehnung bei `RUNNING` ohne Warten), mit 120 Hz in
+  der Warnung, 1790 Bilder, 0 fehlend. Im Stream des Besitzers (RetroArch, `0x140`, 0.6.7-beta.1) lehnte dagegen `OpenVideo`
+  4K bei der Wiederöffnung ab, fünf Wiederholungen lang `0x81950008`, und der nächste Stream bekam 4K schon bei `RUNNING`
+  nicht. Den Fall bei `OpenVideo` beendet `can't hold resolution` jetzt ohne Schonfrist; auf der Konsole lief dieser Zweig
+  noch nicht.
+- **„120 Hz Output“ auf Off** (Settings > Screen and Video > Video Output, danach zurück auf Automatic): Die Demo läuft dann
+  bei `0x138`. Ein 4K-Stream öffnete beim Start der Demo nach 1951 ms in 3840x2160 neu und lief weiter (3452 Bilder, 0
+  fehlend). Ein neuer 4K-Stream mit der Demo vorne bekam 4K.
+- **Installiert** (normaler Build): H.264 1080p60 30 s, 1795 Bilder, 0 fehlend. Bei HEVC 1080p60 wechselte die Ausgabe mitten
+  im Stream, weil die Konsole gerade benutzt wurde: Wiederöffnung bei 1080p über zwei Öffnungen ohne Modus nach 3475 ms, 0
+  fehlend.
+- **App** (`v01.000.028`): Auf dieser Konsole darf die App `autoload.txt` lesen (`0666`), der Zustand „unbekannt“ kann hier
+  also nicht erscheinen. Der Chip zeigt mit laufendem und gestopptem Host „Starts at boot“. Der Start der App gleicht die
+  Autoload-Kopie selbst an. Mit absichtlich älterer Kopie zeigt die Diagnose die neue Zeile („Start at boot runs another host
+  build“, 14897592 gegen 14898176 Byte). Ein gekoppeltes Gerät heißt „switch“: „Experimental switches“ bleibt jetzt lesbar,
+  Adressen, UUIDs und Gerätenamen sind maskiert. „Start host“ in der App startet den Host, danach gleicht die Kopie dem
+  installierten Host.
+- Keine `stuck`-Zeile, kein `OpenVideo rc=0xffffffff`.
 
 ### Beta 0.6.7-beta.1 auf der Konsole (2026-11-19, 13.00)
 
