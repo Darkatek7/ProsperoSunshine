@@ -845,7 +845,10 @@ static void poll_pad_output(std::stop_token stop, input_raw_t *input) {
                     failed[nr] = true;
                     continue;
                 }
-                const auto motors = input->motor_choice[nr].choose({output.motors[0], output.motors[1]}, rumble, now_ms);
+                // The channel is the console's, one for all players: only the host's pad feels it, so a guest doesn't feel the host's
+                // shots. A game's classic rumble is each pad's own, as before.
+                const auto from_channel = input->roles.is_host(nr) ? rumble : std::array<uint8_t, 2>{0, 0};
+                const auto motors = input->motor_choice[nr].choose({output.motors[0], output.motors[1]}, from_channel, now_ms);
                 set_motors(*input, nr, motors[0], motors[1]);
                 set_color(*input, nr, output.color[0], output.color[1], output.color[2]);
                 prospero::TriggerBlock triggers;
@@ -915,10 +918,10 @@ static void poll_haptics(std::stop_token stop, input_raw_t *input) {
     };
 
     while (!stop.stop_requested()) {
-        bool pad = false;
+        bool pad = false;  // the host's: only its pad gets the rumble (poll_pad_output)
         {
             std::lock_guard lock(input->mutex);
-            for (const auto *candidate : input->pads) pad = pad || candidate;
+            for (int nr = 0; nr < MAX_GAMEPADS; ++nr) pad = pad || (input->pads[nr] && input->roles.is_host(nr));
         }
         std::error_code ec;
         // A stopping host lets go of the channel first, while its session is whole, and doesn't keep that session open for later.
