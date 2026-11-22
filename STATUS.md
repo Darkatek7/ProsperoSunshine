@@ -1,6 +1,6 @@
 # Arbeitsstand
 
-Stand: 22. November 2026, Beta 0.6.7-beta.1, die Fixes zu Issue 62 und „Follow the output's size“ (noch nicht veröffentlicht). Hier steht nur, was live geprüft ist, mit dem Messweg. Was ausgeliefert ist:
+Stand: 22. November 2026, Beta 0.6.7-beta.2, dazu die Debug-Zeile zum Frame-Descriptor (noch nicht veröffentlicht). Hier steht nur, was live geprüft ist, mit dem Messweg. Was ausgeliefert ist:
 `CHANGELOG.md`. Plan und Reihenfolge: `ROADMAP.md`. Architektur: `docs/adr/001-sunshine-port.md`.
 
 Die älteren Einträge (bis 4. November 2026) und die ersten Nachweise nach Roadmap stehen unverändert und mit denselben
@@ -122,6 +122,29 @@ installiert). `haptic03` ist `haptic02` mit dem Pegel, der je Paket fällt. Einz
 - **Nebenbefund:** Solange das virtuelle Pad eines Testwerkzeugs (RemoteEye) an der Konsole hing, fragte sie bei jedem Streamstart
   „Who's using this controller?“ für das Pad des Hosts, und das Spiel bekam bis zur Antwort keine Eingabe. Ohne dieses Pad ordnete
   sie das Pad des Hosts ohne Frage dem Nutzer zu.
+
+### Beta 0.6.7-beta.2 auf der Konsole, CI-Dateien (2026-11-22, 13.00)
+
+Messweg: `PPSA47989.zip` und das Tarball aus der Release (`SHA256SUMS` geprüft), App nach `/data/homebrew/` kopiert und bei
+ShadowMountPlus neu registriert, in der App „Restart host“; Testclient unter Linux (`run_smoke.sh`, `--network host`), je 30 s.
+- Kernel-Log `host version=0.6.7-beta.2 commit=a1f00d90`. Host-Datei, Kopie im Autoload-Slot und ELF der App haben dieselbe
+  SHA256 (`72e3b1ac…`), die App zieht den Slot selbst nach. Die App zeigt `v01.000.029`, ohne „debug“.
+- H.264 1080p60 und HEVC 1080p60 mit der Mario-64-Demo vorne (Ausgabe 120 Hz, `0x140`): 1797 und 1795 Bilder, HEVC 3840x2160
+  bei 60 fps auf dem Home-Bildschirm (`0x13c`, 62988 kbit/s): 1783 Bilder. Jeweils 0 fehlend, 59,94 fps, decodiert, keine
+  Fehler im Log.
+
+### Debug-Zeile zum Frame-Descriptor (2026-11-22, 13.00, Debug-Build `b1346e6d` mit `descriptor_clock.hpp` aus dem Speicher, nicht veröffentlicht)
+
+Messweg: Testclient unter Linux, je 60 s H.264 1080p60 und HEVC 1080p60 auf dem Home-Bildschirm, HEVC 1080p60 mit der Demo vorne
+(Ausgabe 120 Hz), 30 s HEVC 3840x2160; die Zeilen `descriptor over 300 frames` des Hosts. Alle Streams 0 fehlende Bilder.
+- Der 240-kHz-Takt liegt bei H.264 an `0x08`/`0x10`, bei HEVC an `0x18`/`0x20` und steigt je Bild um genau 4004, auch bei 4K
+  und bei 120 Hz Ausgabe. Der TSC-Stempel liegt an `0x48` bzw. `0x58`. Der Descriptor von `ReadVideo2` ist ein Kopf aus zwei
+  Wörtern vor dem von `ReadVideo` (`docs/avcap2-descriptor.md`).
+- Kein Zeitstempel fiel auf die Lesezeit zurück. Gelesen wurde 9,8 bis 23,4 ms auseinander, die weitergegebenen
+  Zeitstempel lagen 16,43 bis 16,95 ms auseinander, im Mittel 16,68 ms (59,94 fps, wie beim Testclient).
+- Je Öffnen genau ein Zeilenpaar, kein Absturz, kein Einbruch der Bildrate. Die Wiederholung nach 5 Minuten kam in einem
+  Stream über 330 s (2026-11-23, H.264 1080p60, Home-Bildschirm, 0 fehlend): das zweite Paar 305 s nach dem ersten, mit
+  Schritten von 4004 wie im ersten.
 
 ### Der Ausgabegröße folgen (2026-11-22, 13.00, Debug-Builds `follow01` bis `follow03` aus dem Speicher, nicht veröffentlicht)
 
