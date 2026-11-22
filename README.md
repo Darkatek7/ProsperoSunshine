@@ -38,6 +38,9 @@ reverse-engineering notes: `docs/` (German).
 - A homebrew environment with an **ELF loader** (for example one listening on port 9021). The app also needs
   [ShadowMountPlus](https://github.com/drakmor/ShadowMountPlus), which registers titles from `/data/homebrew/`.
 - No PS VR session while streaming.
+- **PS4:** not supported by this host. [thejswaggart's fork](https://github.com/thejswaggart/ProsperoSunshine) is a
+  separate, experimental PS4 port with its own releases and issues. It patches the PS4's kernel and isn't tested or
+  supported here, so please report PS4 problems there.
 - A wired or good wireless LAN, and a Moonlight client in the same network.
 
 ## Install
