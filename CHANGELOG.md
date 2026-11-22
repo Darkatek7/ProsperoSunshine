@@ -4,19 +4,25 @@
 
 ### Added
 
-- **Trigger knock:** `trigger_knock_strength` in `sunshine.conf` (0 to 100, 100 unless set) turns down trigger effect
-  `0x26`, the knock Uncharted sends at full strength when firing. A client writes it to a DualSense as it is, a hard knock.
-  The host picks up a change within seconds, in a running stream too. Thanks to @IlushaKAI (#30).
-- **Vibration of PS5 games, as rumble (experimental, off by default):** PS5 games send their vibration through a haptic
-  channel and leave the classic motors alone, so clients got nothing. `haptic_mode = rumble` in `sunshine.conf` reads that
-  channel during a stream and passes its level on as the two motor values, a rough match for a DualSense on the console.
-  `haptic_strength` (0 to 200, 100 unless set) sets the strength. A game with rumble of its own keeps it. Measured on 9.60.
-  Thanks to @IlushaKAI (#30).
+- **Trigger knock** (issue 30, PR 34 by IlushaKAI): `trigger_knock_strength` in `sunshine.conf` (0 to 100, 100 unless set)
+  turns down trigger effect `0x26`, the knock Uncharted sends at full strength when firing. A client writes it to a
+  DualSense as it is, a hard knock. The strength of each zone is scaled and rounded, and 0 turns the knock off. The host
+  picks up a change within seconds, in a running stream too.
+- **Vibration of PS5 games, as rumble** (experimental, off by default; issue 30, PR 35 by IlushaKAI): PS5 games send their
+  vibration through a haptic channel and leave the classic motors alone, so clients got nothing. `haptic_mode = rumble` in
+  `sunshine.conf` reads that channel during a stream and passes its level on as the two motor values, a rough match for a
+  DualSense on the console. `haptic_strength` (0 to 200, 100 unless set) sets the strength. A game with rumble of its own
+  keeps it. The channel is one for the whole console, so only the host's controller gets this rumble. Measured on 9.60 and
+  13.00 (Teardown vibrates). If the host stops while the channel is open, or a call into it faults, it leaves
+  `haptic_blocked` in `/data/prosperosunshine/` and keeps the channel closed until that file is deleted.
+- `trigger_knock_strength` and `haptic_strength` count only as a whole number in their range. Anything else, such as `off`
+  or `70%`, counts as 100, and `sunshine.log` names the key; before, a typo read as 0 and turned the effect off.
 
 ### Changed
 
-- **Stopping the host:** the control socket now closes after the streams and their capture session, so "Restart host" and
-  `host_restart.elf` don't start a new host while the old one still holds capture.
+- **Stopping the host** (from PR 35 by IlushaKAI): the control socket now closes after the streams and their capture
+  session, so "Restart host" and `host_restart.elf` don't start a new host while the old one still holds capture. This holds
+  with `haptic_mode` off too. `host_restart.elf` and the firmware probe wait up to 20 s for it and then 2 s more.
 
 ## 0.6.7-beta.2 (2026-11-22, pre-release)
 

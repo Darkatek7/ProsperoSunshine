@@ -511,8 +511,9 @@ address.
   or burnt; that's the screenshot, not the stream.
 - The pad's touchpad and motion sensors are measured with the test client only, not yet with a real Moonlight client or in a game
   that uses them. Motion has no orientation, because Moonlight sends none.
-- Rumble is the classic two-motor kind only. Games that drive the DualSense's haptics send nothing to your controller.
-  Whether your device vibrates also depends on the Moonlight client.
+- Moonlight knows only the classic two-motor rumble. Games that drive the DualSense's haptics instead send nothing to your
+  controller, unless `haptic_mode = rumble` turns those haptics into a rough two-motor rumble (see below). Whether your device
+  vibrates also depends on the Moonlight client.
 - Rest mode is young. The host starts its services again after waking, which worked in two tests on the home screen, with no
   game open and no stream running. With a game open and a stream running, the console and the game came back in one test, but the
   host stayed unreachable until it was restarted. In an earlier test without this, the console hung after waking and had to be
@@ -521,12 +522,15 @@ address.
   working with R3VALATiON's Artemis fork on Android and a DualSense over Bluetooth. Only Teardown has been tested. If a stream
   ends during an effect, the trigger stays stiff until you connect again, because Moonlight doesn't reset it.
   If a game's knock on firing is too hard, `trigger_knock_strength` in `sunshine.conf` turns it down (0 to 100, 100 unless
-  set, read within seconds while the host runs).
+  set, 0 for no knock; read within seconds while the host runs).
 - PS5 games send their vibration through a haptic channel and leave the classic motors alone, so a client gets none.
   `haptic_mode = rumble` in `sunshine.conf` (off unless set) passes the channel's level on as rumble during a stream, a rough
   match for a DualSense on the console; `haptic_strength` (0 to 200, 100 unless set) sets the strength. Both are read within
-  seconds while the host runs. A game with rumble of its own keeps it. Measured on 9.60 only. With Artemis on Android, a
-  DualSense over Bluetooth vibrates only with the client's rumble emulation on.
+  seconds while the host runs. A game with rumble of its own keeps it. The channel is one for the whole console, so only the
+  host's controller gets this rumble, not a second player's. Measured on 9.60 and 13.00. With Artemis on Android, a DualSense
+  over Bluetooth vibrates only with the client's rumble emulation on. If the host stops while the channel is open, or a call
+  into it crashes, the host leaves `haptic_blocked` in `/data/prosperosunshine/` and keeps the channel closed from then on;
+  delete that file to let it try again.
 - Moonlight can't wake the console. It wakes a host with a Wake-on-LAN packet, and the PS5 ignores those: it only wakes for
   Remote Play's own wake message. The host can't help either, because the console stops it in rest mode. To wake the console
   from your phone, use a Remote Play client that can wake it, such as chiaki-ng, then start Moonlight.
