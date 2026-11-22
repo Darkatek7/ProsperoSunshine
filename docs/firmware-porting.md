@@ -27,7 +27,7 @@ Außer für 10.20 nicht selbst gemessen. Der Block bei `0xb8` wächst mit der Fi
 | --- | --- | --- | --- | --- |
 | 8.40 | vermutlich kürzer als 13.00 | nicht genannt | −`0x20`, ungetestet | Bericht in Issue 23 (Host 0.2.4): mit dem Datensatz von 13.00 lehnt `OpenVideo` mit `0x81950008` ab, obwohl Ressource 180 aktiv ist, wie 10.40 vor dem Datensatz von 10.x (Issue 2). Seitdem bekommt alles unter 10 den von 9.60, der nächsten gemessenen Firmware; 9.60 antwortet auf den von 13.00 allerdings mit `0x81950001`, 8.40 kann also abweichen |
 | 9.60 | `0x2c0` | `0xc0` | −`0x20`, ohne die inneren Köpfe und Rate-Felder von 13.00 | `firmware_probe.elf` auf einer PS5 (nicht Pro), 2026-11-06, Host 0.3.4 (`0x9600004`, `known=0`): von −`0x40` bis +`0x20` öffnet nur `0x2c0`; `0x2c8`, `0x2d0`, `0x2e0` und `0x2e8` lehnt der Validator mit `0x81950001` ab. H.264 und HEVC 8 und 10 Bit (nur `cfg+0x24`) liefern Bilder von 360p bis 1440p; 2160p scheitert mit `0x81950008` bei `video out mode` `0x34` (kein 4K-Bit). Der QP sitzt in `cfg+0xac`/`+0xb0` (`ps_qp_offset`); `cfg+0xc4`/`+0xc8` ändern hier nichts. 34 Slices bei H.264 1080p, 17 bei HEVC. Validator schützt `0x80`, `0x168`, `0x1d8`, `0x2a8`. ResourceArbitrator per NID an denselben Offsets wie 10.20. Gestreamt mit H.264 1080p60 und Ton (`STATUS.md`, „Firmware-Sonde auf 9.60“) |
-| 10.20 (Pro) | `0x2c8` | `0xc8` | −`0x18`, außerdem ohne die inneren Köpfe und Rate-Felder von 13.00 | Bericht in Issue 2 (Host 0.1.4 mit diesem Datensatz, danach 0.1.6 mit `record_shift`): `OpenVideo` und `Start` liefern 0, Moonlight streamt auf Android und iOS. H.264 hat 34 Slices je Bild, FFmpeg nimmt mit D3D11VA höchstens 32, also braucht Moonlight unter Windows dafür Software-Decoding; HEVC (nur `cfg+0x24 = 1`, auch 10 Bit) hat 17 und läuft dort mit Hardware-Decoding, gemessen mit Moonlight unter Windows (`docs/status-archive.md`, „HEVC auf Firmware 10.20“; `docs/re/hevc.md`). Der Ton mit etwa 0,4-facher Geschwindigkeit lag nicht an 10.x, sondern an `min_log_level = debug`: Jede Zeile geht synchron ins Kernel-Log, gemessen 5,2 ms je Zeile. Die Slice-Felder für H.264 (seit 0.3.1 gesetzt: `cfg+0x40 = 1`, `+0x44 = 4`, `+0x48 = 1`) nimmt 10.20 an, schneidet aber weiter 34 Slices (Host 0.3.1, PS5 Pro, `first frame has 34 slices`). Offen: Rate (der Encoder bleibt bei seiner Standardrate); welches Feld auf 10.x die Slice-Zahl setzt |
+| 10.20 (Pro) | `0x2c8` | `0xc8` | −`0x18`, außerdem ohne die inneren Köpfe und Rate-Felder von 13.00 | Bericht in Issue 2 (Host 0.1.4 mit diesem Datensatz, danach 0.1.6 mit `record_shift`): `OpenVideo` und `Start` liefern 0, Moonlight streamt auf Android und iOS. H.264 hat 34 Slices je Bild, FFmpeg nimmt mit D3D11VA höchstens 32, also braucht Moonlight unter Windows dafür Software-Decoding; HEVC (nur `cfg+0x24 = 1`, auch 10 Bit) hat 17 und läuft dort mit Hardware-Decoding, gemessen mit Moonlight unter Windows (`docs/status-archive.md`, „HEVC auf Firmware 10.20“; `docs/re/hevc.md`). Der Ton mit etwa 0,4-facher Geschwindigkeit lag nicht an 10.x, sondern an `min_log_level = debug`: Jede Zeile geht synchron ins Kernel-Log, gemessen 5,2 ms je Zeile. Die Slice-Felder für H.264 (seit 0.3.1 gesetzt: `cfg+0x40 = 1`, `+0x44 = 4`, `+0x48 = 1`) nimmt 10.20 an, schneidet aber weiter 34 Slices (Host 0.3.1, PS5 Pro, `first frame has 34 slices`). Offen: Rate (der Encoder bleibt bei seiner Standardrate; Kandidat für das Feld unter „Hinweise aus anderen Projekten“); welches Feld auf 10.x die Slice-Zahl setzt |
 | 10.40 | `0x2c8` | `0xc8` | −`0x18`, wie 10.20 | `firmware_probe.elf` auf einer PS5 (nicht Pro), 2026-11-05: von −`0x40` bis +`0x20` öffnet nur `0x2c8`, der Baukasten der Sonde ergibt `configure()`; H.264, HEVC 8 und 10 Bit (nur `cfg+0x24`), PCM und Opus mit dem Datensatz des Hosts; QP in `cfg+0xc4`/`+0xc8`; dieselben vom Validator geschützten Wörter; alle zwölf Modi von 360p bis 2160p liefern Bilder; 34 Slices bei H.264 1080p, 17 bei HEVC; ResourceArbitrator per NID an denselben Offsets wie 10.20 (`STATUS.md`, „Firmware-Sonde auf 10.20 und 10.40“). Derselbe Mitwirkende streamte dort mit Moonlight über das Internet (Tailscale): H.264 lief rund zwei Stunden ohne Abbruch, HEVC HDR blieb nach einer Weile hängen, Ursache offen; laut Issue 2 streamt HEVC 8 und 10 Bit für einen anderen Nutzer ohne Probleme |
 | 12.40 | `0x2e0` | nicht genannt | nicht genannt | Log in PBS-Public-Issues-Tracker, Issue 1. Dazu ein Diagnosebericht in Issue 62 (Host 0.6.6, `0x12400009`): mit dem Datensatz von 13.00 liefert `OpenVideo` 0 für H.264 1080p und 1440p, HEVC 8 Bit 1440p und HEVC 10 Bit 2160p (`variant=minimal`) |
 | 12.70 | `0x2e0` | nicht genannt | 0 | Bericht in Issue 17 (Host 0.2.3): mit dem Datensatz von 13.00 liefert `OpenVideo` 0, HEVC (Variante `minimal`) streamt; der Tester nennt es „fast fehlerfrei“ |
@@ -37,20 +37,87 @@ Außer für 10.20 nicht selbst gemessen. Der Block bei `0xb8` wächst mit der Fi
 
 `0x81950008` hat laut ps5-web-stream mehrere Zweige (Bildausgabe passt nicht, Größen im Datensatz fehlen, Ressource nicht aktiv). Laut PlayBridge erlaubt in `GetVideoOutMode` Bit `0x20` 1440p und Bit `0x08` 4K. Der Host prüft das nicht vorab, sondern fällt beim Scheitern zurück: Die Berichte passen dazu nicht vollständig (`0x13c` wird für 1080p und für 4K genannt). `host_diag.log` nennt den Wert seit diesem Stand als `video out mode`.
 
+## Hinweise aus anderen Projekten (Stand 2026-11-22, nicht selbst geprüft)
+
+Durchgesehen: PBS-Payload, Glint, PlayBridge, ps5-web-stream, HearBridge-PS5, BlueV (alle GPL-3.0), dazu etaHEN, HYPERHEN,
+ps5debug-NG und das Payload-SDK (dort nur Modultabellen, kein Datensatz). Nur Fakten übernommen, kein Code.
+
+**Datensatz unter 9.60.** Einzige Quelle ist PBS-Payload (`payload/src/platform/ps5/offset/*.c`,
+`tools/data/ps5_firmware_offsets.json`). Die Werte stammen aus Auszügen von `libSceAvcap2` und dem Konstruktor des Datensatzes in
+SceRemotePlay, in dem PBS die Aufnahme aufruft, nicht von Konsolen:
+
+| Firmware | Gesamt | Rate-Block (Ort/Größe) | Bild-Block (Ort/Größe) | Video-out-Modus |
+| --- | --- | --- | --- | --- |
+| 3.20 | `0x218` | `0x78`/`0x68` | `0x130`/`0xe8` | `0x200` |
+| 4.00, 4.51 | `0x230` | `0x90`/`0x68` | `0x148`/`0xe8` | `0x218` |
+| 5.00 bis 5.50 | `0x298` | `0x90`/`0xd0` | `0x1b0`/`0xe8` | `0x280` |
+| 6.02 bis 8.40 | `0x2a8` | `0x90`/`0xd0` | `0x1b0`/`0xf8` | `0x280` |
+| 9.20 bis 9.60 | `0x2b0` | `0x90`/`0xd0` | `0x1b0`/`0x100` | `0x280` |
+| 10.01 bis 10.60 | `0x2b8` | `0xa8`/`0xd8` | `0x1d0`/`0xe8` | `0x288` |
+| 11.20 bis 13.20 | `0x2e0` | `0xb8`/`0xe0` | `0x1e8`/`0xf8` | `0x2a0` |
+| 13.42 bis 13.60 | `0x2e8` | `0xb8`/`0xe8` | `0x1f0`/`0xf8` | `0x2a8` |
+
+- Für 13.00 entsprechen die Werte des Konstruktors laut der Durchsicht dem, was `configure()` schreibt.
+- Für 9.60 und 10.x widerspricht die Gesamtgröße unseren Messungen: Die Firmware-Sonde öffnete auf echten Konsolen nur `0x2c0`
+  bzw. `0x2c8`, und zwar mit unserer Blockaufteilung (Tabelle oben). Beides kann stimmen, wenn der Validator die Gesamtgröße
+  gegen die Blockgrößen prüft. Ein Nutzer meldet, dass PBS mit `0x2b0` auf 9.40 lief (PBS-Payload, PR 11).
+- Der einzige Hardwaretest unter 9 ging schief: 5.50 (`0x05500008`) mit `0x298` und `videoOutMode = 0x11c`; Callback,
+  `RUNNING` und `EnableScanInEncode` liefern 0, `OpenVideo` sechsmal `0x81950001` (PBS-Payload, Issue 12). Laut PBS selbst sind 5.00, 5.50 und 9.60 nicht auf
+  Hardware getestet.
+- Bis 5.50 kennt die Auflösungsliste kein 2560 (480, 640, 960, 1280, 1920, 3840): 1080p ist 4, 2160p ist 5, 1440p gibt es
+  nicht. Ab 6.02 steht 2560 dazwischen (1440p = 5, 2160p = 6), wie im Host.
+- Die Tabelle taugt damit als Startwerte für die Firmware-Sonde auf einer Konsole unter 9.60, nicht als Datensatz für den Host.
+
+**Rate-Felder auf 9.x und 10.x.** Im Rate-Block liegen laut PBS bei `+0x10` die Bitrate, `+0x14` die Spitze, `+0x18` Bits
+je Bild, `+0x1c`/`+0x20` kleinster und größter QP (35 und 51). Die QP-Felder, die die Sonde fand (9.60 `0xac`/`0xb0`, 10.x
+`0xc4`/`0xc8`), liegen genau dort; die Bitrate läge dann bei `0xa0` (9.x) bzw. `0xb8` (10.x). Auf 10.x steht an `0xb8` heute
+`0xc8`, die Blockgröße von 13.00 an ihrem alten Ort. Das könnte erklären, warum der Encoder auf 10.x bei seiner Standardrate
+bleibt. Ungetestet; braucht einen Lauf der Sonde auf 9.x oder 10.x.
+
+**ResourceArbitrator.** PBS, Glint und ps5-web-stream rufen ihn über Namen auf. Nachgerechnet (SHA-1 mit dem üblichen Suffix)
+gehören drei unserer NIDs zu `sceResourceArbitratorSetCallback`, `…ClearCallback` und `…ChangeState`; `fBX+DBOwNis` („list“)
+bleibt ohne Namen. `sceResourceArbitratorIsExecutable` (`3iZXcGeRgJk`) nutzt der Host nicht: ps5-web-stream ruft
+`ChangeState(id, "RUNNING")` erst, wenn `IsExecutable(id, "RUNNING") == 1`. Ob das gegen ein `RUNNING outcome=timeout`
+hilft, ist offen. PlayBridge (nur 13.60, feste Offsets) fragt nach RUNNING zusätzlich in einer Schleife den Kanal der Ressource ab.
+
+**Hängendes Öffnen nach einem Moduswechsel.** Laut ps5-web-stream (`docs/AVCAP2.md`, README „Automatic recovery“) beendet
+ein Titelwechsel unter offener Sitzung diese mit `0x81950009` (Ausgabemodus `0x13c` auf `0x16c`). Danach scheitert das
+Öffnen im selben Prozess oft dauerhaft, abwechselnd mit `0x81950008` und `0x81950001`; `Terminate`/`Initialize`, neue
+Registrierung beim ResourceArbitrator und Neuladen der Module halfen nicht zuverlässig. Ein neu gestarteter Prozess öffnet
+sofort, auch im Spiel; das Projekt startet sich deshalb über den ELF-Loader neu (etwa 10 s Pause). Der Host öffnet auf 13.00
+nach Titelwechseln im selben Prozess wieder, diesen Zustand gab es bei uns so nicht. Anders liegen Issue 56 (`OpenVideo` −1,
+Aufnahme und Remote Play der Konsole scheitern auch) und der Hänger des ResourceArbitrator vom 2026-11-22 (`STATUS.md`): Dort
+half ein neuer Host-Prozess nicht, nur ein Neustart der Konsole.
+
+**Wiederöffnen.** PlayBridge wartet vor dem Wiederöffnen auf eine Statusabfrage der Aufnahme (nicht exportiert, `+0x1750`
+auf 13.60, IPC `0xa7000c`; Byte `0x14` gesetzt heißt nicht bereit), alle 16 ms bis zu 2 s, statt blind zu wiederholen. Für
+13.00 müsste man die Funktion erst finden. Bei Lesefehler `0x8195000d` setzt PlayBridge den kleinsten QP auf 51.
+
+**120 Hz.** Glint (nur 13.60) stellt „120 Hz Output“ aus, solange es läuft, über den Registry-Schlüssel `0x0a240000`
+(`VIDEOOUT_hfr`, `sceRegMgrSetInt`, 0 = Automatisch, 1 = Aus), und danach zurück; den alten Wert hält es auch in einer Datei,
+für den Fall, dass es abgebrochen wird. Begründung dort: Ein Spiel, das auf 120 Hz schaltet, beendet die Aufnahme. Außerdem
+kann laut Glint ein gescheiterter 1440p-Versuch `Start` danach mit `0x80c78000` ablehnen lassen. Der Host verstellt keine
+Systemeinstellung; für Geräte, die es können, deckt „Follow the output's size“ den Fall ab.
+
+**Ton unter 9.60.** HearBridge-PS5 öffnet den Ton ohne ResourceArbitrator (Datensatz `0x38`, `+0x14 = 2`,
+`+0x1c = 0xffffffff`). Ein Nutzer-Log von 8.00 (`0x8000044`) zeigt `Initialize`, `OpenAudio` und `Start` mit 0 und danach
+Stereo-Float bei 48 kHz. Für Bilder auf 4.xx bis 8.xx zeigt kein Projekt eine funktionierende Aufnahme.
+
 ## ResourceArbitrator: Suche per NID
 
-`libSceResourceArbitrator.sprx` exportiert die vier Funktionen, aber nur unter NIDs, deren
-Klartextnamen nicht bekannt sind. Deshalb findet `kernel_dynlib_dlsym` (Name → NID) sie nicht. Früher
+`libSceResourceArbitrator.sprx` exportiert die vier Funktionen unter NIDs, deren Klartextnamen bei der Umstellung nicht
+bekannt waren; ohne Namen findet `kernel_dynlib_dlsym` (Name → NID) sie nicht. Drei Namen sind inzwischen bekannt (Tabelle,
+„Hinweise aus anderen Projekten“), die Suche per NID bleibt. Früher
 standen feste Adressen relativ zur Modulbasis im Code, abgesichert durch eine harte 13.00-Prüfung.
 
 Jetzt löst `ps_ra_resolve()` die vier NIDs direkt mit `kernel_dynlib_resolve()` auf:
 
-| Funktion | NID | 13.00 | 10.20 |
-| --- | --- | --- | --- |
-| register `(id, callback, user)` | `kJvjeet+f9I` | `0xdb0` | `0xde0` |
-| unregister `(id)` | `LqmYZGB-UEQ` | `0xee0` | `0xfe0` |
-| request `(id, state, data, pid)` | `CYjfezkWcaE` | `0x10b0` | `0x1220` |
-| list `(int32_t active[32])` | `fBX+DBOwNis` | `0x11f0` | `0x1360` |
+| Funktion | Name | NID | 13.00 | 10.20 |
+| --- | --- | --- | --- | --- |
+| register `(id, callback, user)` | `sceResourceArbitratorSetCallback` | `kJvjeet+f9I` | `0xdb0` | `0xde0` |
+| unregister `(id)` | `sceResourceArbitratorClearCallback` | `LqmYZGB-UEQ` | `0xee0` | `0xfe0` |
+| request `(id, state, data, pid)` | `sceResourceArbitratorChangeState` | `CYjfezkWcaE` | `0x10b0` | `0x1220` |
+| list `(int32_t active[32])` | unbekannt | `fBX+DBOwNis` | `0x11f0` | `0x1360` |
 
 NIDs sind Hashes der Symbolnamen und bleiben gleich, solange Sony die Funktion nicht umbenennt; die
 Adressen dagegen verschieben sich mit jedem Build des Moduls. Die Entscheidungsregel steht portabel in
