@@ -8,6 +8,7 @@
 #include "platform/ps5/capture.h"
 #include "video/capture_mode.hpp"
 #include "video/channel_choice.hpp"
+#include "video/descriptor_clock.hpp"
 #include "video/frame_pacing.hpp"
 #include "video/hdr10_metadata.hpp"
 #include "video/keyframe_policy.hpp"
@@ -834,6 +835,9 @@ void capture(safe::mail_t mail, config_t config, stream::session_t *channel_data
         }
         prospero::EncodedFrame frame;
         prospero::CaptureSession::Descriptor desc{};
+        // For the debug log: what the descriptor's words and the timestamps handed on do over 300 frames after each open
+        // and every 5 minutes (video/descriptor_clock.hpp; issue 61).
+        prospero::DescriptorClock descriptor_clock;
         auto keyframes_logged = std::chrono::steady_clock::now();
         // Moonlight asks for an IDR after loss; Avcap2 delivers one within 2-3 frames (R1). Every IDR is a large frame for
         // every stream on the channel, so the keyframe policy decides which requests reach the encoder, and when.
@@ -863,6 +867,7 @@ void capture(safe::mail_t mail, config_t config, stream::session_t *channel_data
                 // stream (recover, above). The reopened capture sends an IDR first (opened()).
                 BOOST_LOG(warning) << "PS5 capture lost ("sv << static_cast<int>(status) << "), reopening"sv;
                 if (!recover(std::chrono::steady_clock::now(), false)) break;
+                descriptor_clock.reset();
                 continue;
             }
             const auto timestamp = capture_time(desc, frame.read_time, hevc);
@@ -881,6 +886,14 @@ void capture(safe::mail_t mail, config_t config, stream::session_t *channel_data
                 continue;
             }
             await_idr = false;
+            const auto ns = [](std::chrono::steady_clock::time_point t) {
+                return std::chrono::duration_cast<std::chrono::nanoseconds>(t.time_since_epoch()).count();
+            };
+            if (const auto report = descriptor_clock.add(desc, ns(frame.read_time), ns(timestamp), timestamp == frame.read_time)) {
+                BOOST_LOG(debug) << "PS5 video: channel "sv << slot << (hevc ? " HEVC"sv : " H.264"sv) << " descriptor over "sv
+                                 << report->steps;
+                BOOST_LOG(debug) << "PS5 video: channel "sv << slot << " descriptor at the start of that: "sv << report->words;
+            }
             {
                 std::lock_guard lock(captures.mutex);
                 ch.keyframes.frame_read(frame.idr);

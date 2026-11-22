@@ -23,6 +23,12 @@
 - **Stopping the host** (from PR 35 by IlushaKAI): the control socket now closes after the streams and their capture
   session, so "Restart host" and `host_restart.elf` don't start a new host while the old one still holds capture. This holds
   with `haptic_mode` off too. `host_restart.elf` and the firmware probe wait up to 20 s for it and then 2 s more.
+- **The debug build logs how evenly the capture delivers frames** (issue 61). After each open of the capture and every 5
+  minutes, `sunshine.log` gets two lines at log level `debug` (the debug build's default) about the next 300 frames: the
+  smallest, average and largest gap between their reads and between the timestamps handed on, how many timestamps fell
+  back to the read time, how each word of the frame descriptor steps, and the descriptor's words. On a firmware the host
+  wasn't measured on, this shows where the encoder's clock and the capture stamp are. `docs/avcap2-descriptor.md` explains
+  the lines.
 
 ## 0.6.7-beta.2 (2026-11-22, pre-release)
 
