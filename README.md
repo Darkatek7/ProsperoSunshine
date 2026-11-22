@@ -83,8 +83,8 @@ its own profiles doesn't get the question ([Profiles per device](#profiles-per-d
 
 By default the host never closes a game, because that could lose unsaved progress. Quitting in Moonlight ends the stream, and
 the game keeps running on the console. If another game is open, in front or behind the settings app, picking a game fails
-(Moonlight reports error 409) and starts nothing: close the running game first, on the console or in a "PS5 Screen" stream,
-then pick the game again. Media apps aren't listed; start those through "PS5 Screen".
+and starts nothing: Moonlight says which title is open (error 409). Close it first, on the console or in a "PS5 Screen"
+stream, then pick the game again. Media apps aren't listed; start those through "PS5 Screen".
 
 **Closing the game from Moonlight:** with **Quit closes the game** on in the app's **Settings**
 (`close_game_on_quit = 1` in `sunshine.conf`, off by default), the host behaves like Sunshine on a PC for the game the stream

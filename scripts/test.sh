@@ -72,6 +72,7 @@ run_test host_control_test
 run_test http_guard_test
 run_test file_bridge_test "$root/src/control/file_bridge.cpp"
 run_test quit_policy_test
+run_test launch_refusal_test
 run_test encoder_qp_test
 run_test web_auth_test
 run_test web_lines_test

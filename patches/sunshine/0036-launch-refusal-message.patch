@@ -1,0 +1,37 @@
+ProsperoSunshine: /launch says which title is open when the host doesn't start the game a client picked
+
+The PS5 host doesn't start a game while another title is open on the console, because starting one would close the other
+and could lose its progress (process_ps5.cpp, start_title). Moonlight then only showed Sunshine's "Failed to start the
+specified application". Now the launch reply carries the reason process_ps5.cpp gives: which title is open (unless the
+device may not see it) and to close it first or pick PS5 Screen.
+
+--- a/src/process.h
++++ b/src/process.h
+@@ -273,5 +273,11 @@
+    * @brief app_allowed() for an app ID, as /launch and /resume get it.
+    */
+   bool app_id_allowed(const std::string &client_cert, int app_id);
++
++  /**
++   * @brief Why the last execute() on this thread didn't start its title, for Moonlight to show (process_ps5.cpp); empty when
++   * it gave no reason. Taking it clears it.
++   */
++  std::string take_launch_refusal();
+ #endif
+ }  // namespace proc
+--- a/src/nvhttp.cpp
++++ b/src/nvhttp.cpp
+@@ -1699,7 +1699,13 @@
+       auto err = proc::proc.execute((int) appid, launch_session);
+       if (err) {
+         tree.put("root.<xmlattr>.status_code", err);
++#ifdef __SCE__
++        // Another title open on the console stays open: Moonlight says which one and what to do (process_ps5.cpp).
++        const auto refusal = proc::take_launch_refusal();
++        tree.put("root.<xmlattr>.status_message", refusal.empty() ? std::string("Failed to start the specified application") : refusal);
++#else
+         tree.put("root.<xmlattr>.status_message", "Failed to start the specified application");
++#endif
+         tree.put("root.gamesession", 0);
+ 
+         return;

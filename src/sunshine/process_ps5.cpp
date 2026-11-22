@@ -4,6 +4,7 @@
 // is in front. Nothing here closes a game by default, because that would lose unsaved progress: ending a session leaves it
 // running. Only with close_game_on_quit in sunshine.conf does Moonlight's Terminate App close the game the session started.
 #include "apps/app_access.hpp"
+#include "apps/launch_refusal.hpp"
 #include "apps/quit_policy.hpp"
 #include "apps/titles.hpp"
 #include "control/device_profiles.hpp"
@@ -19,7 +20,9 @@
 #include <fstream>
 #include <mutex>
 #include <optional>
+#include <string>
 #include <thread>
+#include <utility>
 
 using namespace std::literals;
 
@@ -90,6 +93,17 @@ std::string session_game, session_game_cert, closed_game;
 int session_app_id = 0;
 ctx_t session_app;
 std::chrono::steady_clock::time_point closed_at;
+
+// Why execute() didn't start its title, for /launch to show in Moonlight (take_launch_refusal, patch 0036). execute() runs
+// on the request's thread, so the reason stays with that request.
+thread_local std::string launch_refusal;
+
+// The name a device sees for a title: its name in the app list, or none when the list hides it from the device or lacks it.
+std::string title_name(const std::string &title_id, const std::string &cert) {
+    for (const auto &app : all_apps())
+        if (app.cmd == title_id) return app_allowed(cert, app) ? app.name : std::string();
+    return {};
+}
 
 // Any /mnt/sandbox/<id>_* entry, empty or not: what ShadowMountPlus waits for before it finalizes the title's exit.
 bool sandbox_entry_left(const std::string &id) {
@@ -185,11 +199,13 @@ bool start_title(const std::string &id, const std::string &cert, bool &in_front)
         }
         if (settings_app != running || !settings_app_closed()) {
             BOOST_LOG(warning) << "Not starting "sv << id << ": "sv << running << " is in front and closing it could lose progress"sv;
+            launch_refusal = prospero::launch_refusal(title_name(running, cert), title_name(id, cert), prospero::OpenTitle::in_front);
             return false;
         }
     }
     if (const auto open = other_open_title(id); !open.empty()) {
         BOOST_LOG(warning) << "Not starting "sv << id << ": "sv << open << " is still open and starting another title could close it"sv;
+        launch_refusal = prospero::launch_refusal(title_name(open, cert), title_name(id, cert), prospero::OpenTitle::behind);
         return false;
     }
     // While nobody is in front, a device with its own profiles gets the game for one of them, signed in first if needed:
@@ -228,6 +244,7 @@ std::unique_ptr<platf::deinit_t> init() {
 void refresh(const std::string &) {}
 
 int proc_t::execute(int app_id, std::shared_ptr<rtsp_stream::launch_session_t> launch_session) {
+    launch_refusal.clear();
     terminate();
     const auto app = std::find_if(_apps.begin(), _apps.end(), [&](const ctx_t &a) { return a.id == std::to_string(app_id); });
     if (app == _apps.end()) {
@@ -253,6 +270,8 @@ int proc_t::execute(int app_id, std::shared_ptr<rtsp_stream::launch_session_t> l
     if (in_front) session_app = _app;
     return 0;
 }
+
+std::string take_launch_refusal() { return std::exchange(launch_refusal, {}); }
 
 int proc_t::running() { return placebo ? _app_id : 0; }
 

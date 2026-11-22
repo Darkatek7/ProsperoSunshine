@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Changed
+
+- **Moonlight says which title is open when the host doesn't start a game.** While another title is open on the console,
+  the host doesn't start the game a client picks, because that would close the other one and could lose its progress.
+  Moonlight showed only "Failed to start the specified application"; now it shows, for example, "RetroArch is open on the
+  console, and starting ProsperoStore would close it. Close it first, or pick PS5 Screen to go on with it." A title hidden
+  from the device isn't named.
+
 ### Fixed
 
 - **A game starting or closing no longer ends a running 1440p or 4K stream at once** (issue 62). When the console takes
