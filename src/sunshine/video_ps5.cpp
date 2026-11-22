@@ -3,6 +3,7 @@
 // colour conversion: frames from CaptureSession go straight into the stream's packet queue.
 #include "sunshine/video_ps5.hpp"
 #include "capture/capture_session.hpp"
+#include "capture/output_mode.h"
 #include "platform/ps5/capture.h"
 #include "video/capture_mode.hpp"
 #include "video/channel_choice.hpp"
@@ -64,6 +65,15 @@ std::chrono::steady_clock::time_point capture_time(const prospero::CaptureSessio
     if (!stamp || stamp > now) return read_time;
     const auto age = std::chrono::nanoseconds(static_cast<int64_t>((now - stamp) / tsc_per_ns()));
     return age < 1s ? read_time - age : read_time;
+}
+
+// Why the output took no picture of this size, when its mode says so: a game set it to 120 Hz, where a PS5 takes no 1440p
+// or 4K (capture/output_mode.h). Turning off the console's 120 Hz output keeps 60 Hz. Empty otherwise.
+std::string_view at_120hz_note(int slot, uint32_t resolution) {
+    const uint32_t output = ps_capture_slot_open_output(slot);
+    if (!ps_output_at_120hz(output) || ps_output_holds(output, resolution)) return {};
+    return " (the console's output runs at 120 Hz, which takes no 1440p or 4K; 120 Hz output off in the console's video "
+           "settings keeps 60 Hz)"sv;
 }
 
 // The HEVC setup is measured on firmware 13.00 and 10.20 only. Elsewhere a client that prefers HEVC would lose the stream
@@ -320,7 +330,8 @@ void capture(safe::mail_t mail, config_t config, stream::session_t *channel_data
                 BOOST_LOG(info) << "PS5 capture: back to "sv << delivered.width << 'x' << delivered.height;
             else
                 BOOST_LOG(warning) << "PS5 capture: "sv << (delivered_height > delivered.height ? "larger"sv : "smaller"sv)
-                                   << " mode refused by the system, delivering "sv << delivered.width << 'x' << delivered.height;
+                                   << " mode refused by the system, delivering "sv << delivered.width << 'x' << delivered.height
+                                   << at_120hz_note(slot, mode.resolution);
         }
         announce_mode(delivered);
         std::lock_guard lock(captures.mutex);
@@ -576,7 +587,9 @@ void capture(safe::mail_t mail, config_t config, stream::session_t *channel_data
                 bool recovered = false, size_refused = false;
                 // The stream keeps the size it delivers: the client set up its decoder for it (issue 39). The title that
                 // took the capture leaves the output without a mode for up to about 2 s (10.20), and the reopens wait for
-                // it. An output that no longer takes the mode ends the stream, so the client starts anew at what it takes.
+                // it. A settled output may refuse the mode for a moment too (issue 62), so in the first 3 s after the loss
+                // that is tried again as well (ps_capture_slot_set_reopening below starts them). An output that still
+                // refuses the mode after them ends the stream, so the client starts anew at what it takes.
                 const auto takeover_waits = [&] {
                     std::lock_guard lock(captures.mutex);
                     return !ch.joined.empty();
@@ -599,7 +612,8 @@ void capture(safe::mail_t mail, config_t config, stream::session_t *channel_data
                 if (size_refused) {
                     const auto delivered = prospero::capture_mode_of(ps_capture_slot_video_resolution(slot));
                     BOOST_LOG(error) << "PS5 capture: the console's output no longer takes "sv << delivered.width << 'x'
-                                     << delivered.height << ", ending the session; the next one starts at what it takes"sv;
+                                     << delivered.height << at_120hz_note(slot, delivered.resolution)
+                                     << ", ending the session; the next one starts at what it takes"sv;
                     shutdown_event->raise(true);
                     lost = true;
                     break;

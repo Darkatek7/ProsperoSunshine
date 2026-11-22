@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **A game starting or closing no longer ends a running 1440p or 4K stream at once** (issue 62). When the console takes
+  the capture away, the host reopens it at the stream's size. If `OpenVideo` refused that size (`0x81950008`) while the
+  output's mode stayed the same, the stream ended after about 200 ms. Within 3 s of the loss such a refusal now keeps the
+  size for the next reopen, as a refusal while the output has no mode already did. A refusal that lasts longer still ends
+  the stream, and the client's next stream falls back to 1080p. If a title really refuses the mode, the picture stays
+  still about 3 s longer before the stream ends. Not when the output's mode says it can't hold the size: a game that
+  sets the output to 120 Hz (RetroArch, seen on 13.00) leaves a standard PS5 no 1440p or 4K capture, so the stream ends
+  at once as before, a new stream falls back to 1080p at the first refusal instead of trying a lower rate or another
+  variant first, and `sunshine.log` names 120 Hz as the reason where the host read the output's mode (always for a new
+  stream's fallback). With the console's 120 Hz Output set to Off, such titles keep 4K.
+- **A game starting or closing no longer lowers a running stream's bitrate or trips an experimental switch** (issue 62)
+  while the output has no mode or within 3 s of the loss. Such a failed reopen counted against the switches: a 4K stream
+  at 63 Mbit/s went on at 50 Mbit/s, and a switch still on trial could step its variant or turn off. A new stream counts
+  such a failure as before, so a title started together with it still gets a second open at the stream's size.
+
 ## 0.6.7-beta.1 (2026-11-19, pre-release)
 
 ### Changed

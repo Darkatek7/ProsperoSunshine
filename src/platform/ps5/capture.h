@@ -99,9 +99,11 @@ int ps_capture_open(ps_capture **out);
 // ps_capture_open, then ps_capture_fall_back_mode and once more, and with a switch on the variants and the first frame
 // too. Each attempt goes to host_diag.log. After a failure ps_capture_hevc_allowed and the others may say no.
 int ps_capture_open_or_fall_back(ps_capture **out);
-// Whether the next opens reopen a running stream's capture. Then a refused mode fails instead of falling back to 1080p, as
-// the stream keeps its size. While the output had no mode or changed it, as while a title starts or closes, the next
-// reopen may get it; once the output is settled, ps_capture_size_refused says so and the stream has to end.
+// Whether the next opens reopen a running stream's capture; turning it on starts a grace of 3 s for this loss. Then a
+// refused mode fails instead of falling back to 1080p, as the stream keeps its size. While the output had no mode or
+// changed it, as while a title starts or closes, the next reopen may get it; so it may after a settled output answered
+// 0x81950008 at OpenVideo within the grace (issue 62). Neither counts against a switch or the rate. A settled output that
+// refuses the mode after the grace: ps_capture_size_refused says so and the stream has to end.
 void ps_capture_set_reopening(int on);
 int ps_capture_size_refused(void);
 // Whether the last OpenVideo returned -1 (issue 56): the console's capture path is stuck, and only a console restart
@@ -134,6 +136,9 @@ uint32_t ps_capture_slot_video_resolution(int slot);
 int ps_capture_slot_fall_back_mode(int slot);
 void ps_capture_slot_set_reopening(int slot, int on);
 int ps_capture_slot_size_refused(int slot);
+// The video out mode the slot's last open to reach OpenVideo read (0 before the first), for what the log tells the user
+// (capture/output_mode.h).
+uint32_t ps_capture_slot_open_output(int slot);
 // The slot's last good open read the encoder's first frame, its IDR, itself (H.264 below 11.00, an unproven experimental
 // open): the stream won't read it and asks for one at once.
 int ps_capture_slot_opening_frame_read(int slot);

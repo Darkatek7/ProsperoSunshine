@@ -1,9 +1,9 @@
 # Firmware-Matrix
 
-Stand: 10. November 2026, Host 0.6.0. Was auf welcher Firmware nachgewiesen ist, mit dem Nachweis. Geprüft sind nur 13.00
-und 10.20 (`STATUS.md`, „Kurzfassung“); alles andere sind Berichte anderer oder Vermutungen. Was am Host firmwareabhängig ist
-und wie eine neue Version geprüft wird: `docs/firmware-porting.md`. Die Sonde für eine unbekannte Firmware:
-`docs/firmware-probe.md`.
+Stand: 10. November 2026, Host 0.6.0; am 20. November 2026 ergänzt um 12.40 (Issue 62, Diagnosebericht mit Host 0.6.6).
+Was auf welcher Firmware nachgewiesen ist, mit dem Nachweis. Geprüft sind nur 13.00 und 10.20 (`STATUS.md`, „Kurzfassung“);
+alles andere sind Berichte anderer oder Vermutungen. Was am Host firmwareabhängig ist und wie eine neue Version geprüft wird:
+`docs/firmware-porting.md`. Die Sonde für eine unbekannte Firmware: `docs/firmware-probe.md`.
 
 ## Zustände
 
@@ -30,7 +30,7 @@ Host dort schickt (`record_shift` in `capture.c`); „Vermutung“ heißt, dass 
 | 10.40 (`0x10400007`, nicht Pro), Datensatz `0x2c8` | Bericht (Diagnosebericht, Issue 2) | Bericht (Sonde; Mitwirkender streamte rund zwei Stunden über Tailscale) | Bericht (Sonde 8 und 10 Bit; Nutzer in Issue 2 streamt HEVC); im Host nur mit Schalter | Bericht (Mitwirkender: HEVC HDR blieb nach einer Weile hängen, Ursache offen) | Bericht (Sonde: alle zwölf Modi von 360p bis 2160p); im Host nur mit Schalter | Bericht (Sonde: QP in `0xc4`/`0xc8` wirkt, `SetVideoBitrate` beendet den Kanal mit `0x80c78000`) | Bericht (Sonde: PCM und Opus) | ungeprüft | ungeprüft | Bericht (Diagnosebericht, Autoload) | `STATUS.md` „Firmware-Sonde auf 10.20 und 10.40“; Archiv „Berichte von Testern zu 0.1.7“; Issue 2 |
 | 11.20 (Slim), Datensatz `0x2e0` | Bericht: startet bei einem Nutzer (Issue 37), bei einem anderen nicht, ohne Log (Issue 51) | Bericht (Issue 37: Bild über Tailscale, ohne Log, Codec nicht genannt) | ungeprüft | ungeprüft | ungeprüft | ungeprüft | Bericht: kein Ton in allen Spielen (Issue 37, ohne Log) | ungeprüft | Bericht (Issue 37: Eingaben kommen an) | ungeprüft | Issues 37 und 51, Nutzer ohne Log |
 | 11.40, Datensatz `0x2e0` | Bericht (Diagnosebericht, Issue 24) | Bericht (streamt laut Nutzer, nachdem ps5-tailscale UDP 47999 nicht mehr hielt; ohne Log) | ungeprüft | ungeprüft | ungeprüft | ungeprüft | ungeprüft | ungeprüft | ungeprüft | Bericht (Diagnosebericht aus der App) | `STATUS.md` „Belegter Steuerport“, Issue 24 |
-| 12.40, Datensatz `0x2e0` | ungeprüft | ungeprüft | ungeprüft | ungeprüft | ungeprüft | ungeprüft | ungeprüft | ungeprüft | ungeprüft | ungeprüft | Nur die Größe `0x2e0` aus dem Log eines anderen Projekts (`docs/firmware-porting.md`) |
+| 12.40 (`0x12400009`), Datensatz `0x2e0` | Bericht (Diagnosebericht, Host 0.6.6: `host ready`; beim Bericht lief kein Host, `sunshine.log` und `host_diag.log` vom 15. November) | Bericht (Diagnosebericht: 1080p60 mit 6 Mbit/s und 1440p60 mit 25 Mbit/s öffnen mit `rc 0`) | Bericht (Diagnosebericht: 8 Bit 1440p60 und 10 Bit 2160p60, `variant=minimal`, `OpenVideo` 0; Wiederöffnungen nach `0x81950009` gehen); im Host nur mit Schalter | Bericht (Diagnosebericht: Schalter `ok, rc 0 (minimal)`; 10 Bit 2160p60 mit 63 Mbit/s rund 48 min im Stream, bis die Konsole den Kanal mit `0x81950009` entzog) | über: Bericht (Diagnosebericht: Schalter `ok, rc 0 (standard)`, 1440p und 2160p öffnen, `video out mode` `0x13c`). Nach drei Entzügen (`0x81950009`) in 8,6 s lehnte `OpenVideo` die Wiederöffnung in 4K alle fünf Wiederholungen lang (sechs Aufrufe, rund 200 ms) mit `0x81950008` ab, der Stream endete (`capture output refuses resolution`). Unter: ungeprüft | Bericht (Diagnosebericht: 62988 kbit/s beim Öffnen von 2160p, 25388 bei 1440p) | Bericht (Diagnosebericht: `OpenAudio` und `audio Start` mit `rc=0`; in einem Lauf `0x80020003` bei `audio Stop`, `audio Close` und jedem neuen `OpenAudio`) | ungeprüft | ungeprüft | Bericht (Diagnosebericht aus der App 01.000.028; `autoload.txt` und `pldmgr_config.txt` für die App nicht lesbar, Modus `0600`, Besitzer root) | Issue 62, Diagnosebericht |
 | 12.70 (`0x12700001`), Datensatz `0x2e0` | Bericht (Diagnosebericht 0.2.3) | ungeprüft (der Client nahm HEVC) | Bericht (Diagnosebericht: Schalter, `variant=minimal`, `rc=0`, erstes Bild; Nutzer: „fast fehlerfrei“) | ungeprüft (Schalter an, nicht versucht) | über: ungeprüft (1440p verlangt, ohne Schalter 1080p geliefert). Unter: ungeprüft | Bericht (44,6 Mbit/s beim Öffnen; 150 nicht versucht) | Bericht (Log: `game audio via Avcap2`, Opus 2 Kanäle) | ungeprüft | ungeprüft | Bericht (Diagnosebericht aus der App) | Issue 17, Nutzer mit Diagnosebericht |
 | 13.00 (`0x13000040`), Datensatz `0x2e0` | geprüft | geprüft | geprüft | geprüft | geprüft (640x360 bis 4K; im Spiel verweigern manche Titel den großen Modus) | geprüft (bis 150 Mbit/s) | geprüft | geprüft nur der Weg (5.1/7.1-Stream); die Konsole im Test gibt Stereo aus, Inhalt ungeprüft | geprüft | geprüft | `STATUS.md` „Kurzfassung“ und die Release-Einträge; Archiv „Modi unter 1080p (2026-11-02, 13.00)“, „HDR“; „Raumklang folgt einem breiteren Stream“ |
 | 13.40 (`0x13400002`, Slim Digital), Datensatz `0x2e8` | Bericht (Log) | Bericht (Testbuild `0.3.1-fw1340-1`: `OpenVideo` 0, `Start` 0, Bild auf Android) | ungeprüft | ungeprüft | ungeprüft | ungeprüft | Bericht (Log: `OpenAudio` 0, `audio Start` 0) | ungeprüft | ungeprüft | Bericht (nur zum Pairing benutzt) | Issue 14, Nutzer mit Log; `STATUS.md` „Berichte nach 0.3.1“ |
@@ -74,7 +74,9 @@ Danach kann der Startcode noch scheitern, wenn eine Systembibliothek oder ein im
 - **11.20 (Issues 51 und 37):** Für 51 der Diagnosebericht und wie der Host gestartet wird; ab dem nächsten Release nennt
   `host_diag.log` belegte und nicht lauschende Ports. Für 37 die Zeilen `PS5 audio:` aus `sunshine.log` (kein Ton).
 - **11.40:** ein Diagnosebericht nach einem Stream mit dem aktuellen Host.
-- **12.40, 14.00, 14.10:** kein Bericht. Erster Schritt wäre ein Stream mit Diagnosebericht.
+- **12.40 (Issue 62):** `sunshine.log` der Streams, ein Diagnosebericht direkt nach einem Boot ohne Host (der im Bericht lief nicht) und das
+  Kernel-Log eines solchen Boots. Offen sind Eingabe, Raumklang und Modi unter 1080p.
+- **14.00, 14.10:** kein Bericht. Erster Schritt wäre ein Stream mit Diagnosebericht.
 - **12.70:** H.264, HDR und 1440p/4K mit Schalter, jeweils mit Diagnosebericht.
 - **13.40:** Eingabe, HEVC mit Schalter, längere Sitzung.
 - **13.60 (Issue 18):** Raumklang braucht ein Ausgabegerät, das 6 oder 8 Kanäle LPCM meldet; ohne das keine Änderung am

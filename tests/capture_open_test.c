@@ -2,6 +2,10 @@
 // The Experimental switches through capture.c's real open path, against fake_avcap.h: which records go out in which order,
 // what the host offers afterwards, and what host_diag.log gets.
 #define PS_FIRST_FRAME_MS 20
+#include <stdint.h>
+// The clock capture.c reads for a reopen's grace: it stands still unless a test moves it.
+static uint64_t fake_now_ms = 1000000;
+#define PS_CAPTURE_NOW_MS() fake_now_ms
 #include "fake_avcap.h"
 #include <assert.h>
 
@@ -49,6 +53,12 @@ static int open_and_close(void)
 }
 
 static int logged(const char *text) { return strstr(fake_log, text) != NULL; }
+static int times_logged(const char *text)
+{
+    int count = 0;
+    for (const char *at = strstr(fake_log, text); at; at = strstr(at + 1, text)) count++;
+    return count;
+}
 
 static int start_needs_full(const char *step, const uint8_t *record)
 {
@@ -183,6 +193,31 @@ static int count_reads(const char *step, const uint8_t *record)
 static int start_refuses_slices(const char *step, const uint8_t *record)
 {
     return !strcmp(step, "Start") && record[0x44] ? START_FAILED : 0;
+}
+// A settled output that refuses the mode for a moment right after a title switch (issue 62): OpenVideo answers
+// RESOURCE_NOT_ACTIVE to its first refused_calls calls, then takes it.
+static int refused_calls;
+static int refused_for_a_while(const char *step, const uint8_t *record)
+{
+    (void)record;
+    return !strcmp(step, "OpenVideo") && fake_opens <= refused_calls ? RESOURCE_NOT_ACTIVE : 0;
+}
+// A title started together with a new stream: the output has no mode for the open's wait and all its repeats, and gets the
+// title's right after the last refused call.
+static int mode_after_refused_calls(const char *step, const uint8_t *record)
+{
+    (void)record;
+    if (strcmp(step, "OpenVideo") || fake_opens > refused_calls) return 0;
+    if (fake_opens == refused_calls) fake_output = 0x13c;
+    return RESOURCE_NOT_ACTIVE;
+}
+// Issue 62's stream: 12.40 with the HDR, 1440p/4K and bitrate switches, HEVC 10 bit at 4K and 62988 kbit/s.
+static void setup_issue62(void)
+{
+    setup(0x12400009u, 0, 1, 1, 1, 1, 6);
+    set_switches(0, 1, 1, 1);
+    ps_capture_set_opening_bitrate(62988000u, 70546560u);
+    fake_log[0] = 0;
 }
 // The console's capture path stuck (issue 56): OpenVideo returns -1 for every mode until the console restarts.
 static int capture_stuck_now;
@@ -379,11 +414,13 @@ int main(void)
     fake_log[0] = 0;
     assert(open_and_close() == 0);
     assert(ps_capture_video_resolution() == 6 && !ps_capture_size_refused());
-    // ... and an output that can't hold it, as with a 1080p video app in front, ends the stream instead of a picture
-    // the client can't decode.
+    // ... and an output that refuses it at a mode that looks able to hold it ends the stream instead of a picture the
+    // client can't decode, once the first 3 s after the loss are over (issue 62, below); one whose mode can't hold it, at
+    // once (120 Hz, below).
     setup(0x13000040u, 0, 0, 0, 0, 0, 6);
     fake_decide = large_refused;
     ps_capture_set_reopening(1);
+    fake_now_ms += REOPEN_GRACE_MS;
     assert(open_and_close() != 0);
     assert(ps_capture_video_resolution() == 6 && logged("output refuses resolution 6 now") && ps_capture_size_refused());
     // At 1080p there is nothing to fall back to: the reopen fails and is tried again, as before.
@@ -393,6 +430,146 @@ int main(void)
     ps_capture_set_reopening(1);
     assert(open_and_close() != 0);
     assert(ps_capture_video_resolution() == 4 && !ps_capture_size_refused());
+
+    // Issue 62 (12.40): three capture losses in 8.6 s, and the third reopen refused 4K at an unchanged 0x13c for its 5
+    // repeats, which ended the stream. Within 3 s of the loss such a refusal keeps the mode for the next reopen, which gets
+    // it at the stream's size and rate, and it counts against nothing.
+    setup_issue62();
+    assert(open_and_close() == 0);  // the stream's first open: it proves HDR, 4K and the rate
+    assert(experiment.trial[1].confirmed && experiment.confirmed[PS_EXP_LARGE] && experiment.confirmed[PS_EXP_BITRATE]);
+    fake_log[0] = 0;
+    fake_opens = 0;
+    refused_calls = 12;  // two reopens of 1 + 5 repeats
+    fake_decide = refused_for_a_while;
+    ps_capture_set_reopening(1);
+    assert(open_and_close() != 0 && !ps_capture_size_refused());
+    fake_now_ms += 450;  // the reopen loop's 250 ms and the open's 200
+    assert(open_and_close() != 0 && !ps_capture_size_refused());
+    fake_now_ms += 450;
+    assert(open_and_close() == 0);
+    assert(fake_opens == 13 && record_u32(0x18) == 6 && record_u32(0xc8) == 62988000u);
+    assert(ps_capture_video_resolution() == 6 && ps_capture_opening_average() == 62988000u && !ps_capture_size_refused());
+    assert(times_logged("capture resolution 6 refused at a settled output 0 ms after the loss: kept for the reopens within 3000 ms\n") == 1);
+    assert(!logged("output refuses resolution") && !logged("kbit=50000") && !logged("disabled"));
+    assert(experiment.trial[1].variant == PS_EXP_MINIMAL && !experiment.pending[PS_EXP_BITRATE] && !experiment.pending[PS_EXP_LARGE]);
+    ps_capture_set_reopening(0);
+    // One that persists ends the stream after the 3 s, not before; each loss starts them anew.
+    setup(0x13000040u, 0, 0, 0, 0, 0, 6);
+    fake_decide = large_refused;
+    ps_capture_set_reopening(1);
+    {
+        static const uint64_t elapsed[] = {0, 1000, 2000, REOPEN_GRACE_MS - 1};
+        const uint64_t lost = fake_now_ms;
+        for (size_t i = 0; i < sizeof elapsed / sizeof elapsed[0]; i++) {
+            fake_now_ms = lost + elapsed[i];
+            assert(open_and_close() != 0 && !ps_capture_size_refused());
+        }
+        fake_now_ms = lost + REOPEN_GRACE_MS;
+    }
+    assert(times_logged("refused at a settled output") == 1 && !logged("output refuses resolution"));
+    assert(open_and_close() != 0 && ps_capture_size_refused() && ps_capture_video_resolution() == 6);
+    assert(times_logged("capture output refuses resolution 6 now; a running stream keeps its size\n") == 1);
+    fake_log[0] = 0;
+    ps_capture_set_reopening(1);
+    assert(open_and_close() != 0 && !ps_capture_size_refused() && logged("refused at a settled output 0 ms after the loss"));
+    // A mode that can't hold the size (13.00: a game set the output to 120 Hz, 0x140, and 4K was refused for as long as it
+    // stayed in front) ends the stream at once, without the 3 s, and counts against nothing, above 50 Mbit/s as well.
+    assert(ps_output_holds(0x13c, 6) && ps_output_holds(0x138, 5) && ps_output_holds(0x144, 4) && ps_output_holds(0, 6));
+    assert(!ps_output_holds(0x140, 6) && !ps_output_holds(0x144, 5) && !ps_output_holds(0x44, 5) && !ps_output_holds(0x44, 6));
+    assert(ps_output_at_120hz(0x140) && ps_output_at_120hz(0x44) && !ps_output_at_120hz(0x13c));
+    setup_issue62();
+    assert(open_and_close() == 0);
+    fake_log[0] = 0;
+    fake_opens = 0;
+    fake_output = 0x140;
+    fake_decide = large_refused;
+    ps_capture_set_reopening(1);
+    assert(open_and_close() != 0 && ps_capture_size_refused() && ps_capture_video_resolution() == 6);
+    assert(fake_opens == 6 && ps_capture_opening_average() == 62988000u && ps_capture_slot_open_output(0) == 0x140);
+    assert(times_logged("capture video out mode 0x140 can't hold resolution 6 (120 Hz)\n") == 1);
+    assert(logged("capture output refuses resolution 6 now; a running stream keeps its size\n"));
+    assert(!logged("refused at a settled output") && !logged("kbit=50000") && !logged("disabled"));
+    assert(!experiment.pending[PS_EXP_BITRATE] && !experiment.pending[PS_EXP_LARGE]);
+    ps_capture_set_reopening(0);
+    // A new stream at such a mode gets 1080p at its first refusal, without a lower rate or another variant first.
+    setup_issue62();
+    fake_opens = 0;
+    fake_output = 0x140;
+    fake_decide = large_refused;
+    assert(open_and_close() == 0);
+    assert(fake_opens == 7 && record_u32(0x18) == 4 && ps_capture_video_resolution() == 4);
+    assert(ps_capture_opening_average() == 62988000u / 4 && logged("can't hold resolution 6 (120 Hz)"));
+    assert(!logged("kbit=50000") && !logged("variant=full") && !logged("disabled"));
+    assert(ps_capture_hdr_allowed() && ps_capture_large_modes_allowed() && ps_capture_high_bitrate_allowed());
+    // An output without a mode (or a changed one) during a reopen counts against nothing either, also after the 3 s and
+    // above 50 Mbit/s: the stream keeps its rate whether that was proven or not (issue 62's first reopen left the rest of
+    // that stream at 50 Mbit/s), and no variant or switch moves.
+    setup_issue62();
+    assert(open_and_close() == 0);
+    fake_log[0] = 0;
+    fake_opens = 0;
+    fake_output = 0;
+    fake_decide = refused_without_output;
+    ps_capture_set_reopening(1);
+    fake_now_ms += 10 * REOPEN_GRACE_MS;
+    assert(open_and_close() != 0);
+    assert(fake_opens == 6 && ps_capture_opening_average() == 62988000u && logged("output not settled") && !logged("kbit=50000"));
+    assert(!ps_capture_size_refused() && !logged("disabled") && !experiment.pending[PS_EXP_BITRATE]);
+    fake_output = 0x13c;
+    assert(open_and_close() == 0 && record_u32(0x18) == 6 && record_u32(0xc8) == 62988000u);
+    setup_issue62();
+    fake_output = 0;
+    fake_decide = refused_without_output;
+    ps_capture_set_reopening(1);
+    fake_now_ms += 10 * REOPEN_GRACE_MS;
+    assert(open_and_close() != 0);
+    assert(fake_opens == 6 && ps_capture_opening_average() == 62988000u && logged("trial=hdr,large,bitrate") && !logged("kbit=50000"));
+    assert(!experiment.confirmed[PS_EXP_BITRATE] && !experiment.pending[PS_EXP_BITRATE] && !experiment.pending[PS_EXP_LARGE]);
+    assert(experiment.trial[1].variant == PS_EXP_MINIMAL && !logged("variant=full") && !logged("disabled"));
+    assert(ps_capture_hdr_allowed() && ps_capture_large_modes_allowed() && ps_capture_high_bitrate_allowed());
+    // A new stream still counts it, as 0.6.7-beta.1 did. Started together with a title whose mode comes only after the
+    // open's wait and repeats, a stream above 50 Mbit/s gets its second open at 50 Mbit/s and its size: at 4K instead of
+    // 1080p at a quarter of the rate, and at 1080p instead of a failed start.
+    for (int large = 1; large >= 0; large--) {
+        setup_issue62();
+        if (!large) {
+            ps_capture_set_video_mode(4, 1);
+            ps_capture_set_opening_bitrate(80000000u, 88000000u);
+        }
+        assert(open_and_close() == 0);  // the first stream proves HDR and the rate
+        assert(experiment.confirmed[PS_EXP_BITRATE]);
+        fake_log[0] = 0;
+        fake_opens = 0;
+        fake_output = 0;
+        refused_calls = large ? 6 : 26;  // the first call and its repeats
+        fake_decide = mode_after_refused_calls;
+        assert(open_and_close() == 0);
+        const uint32_t resolution = large ? 6 : 4;
+        assert(fake_opens == refused_calls + 1 && record_u32(0x18) == resolution && record_u32(0xc8) == 50000000u);
+        assert(ps_capture_video_resolution() == resolution && ps_capture_opening_average() == 50000000u);
+        assert(logged("kbit=50000") && !logged("not settled") && !logged("fallback to 1080p") && !logged("disabled"));
+        assert(ps_capture_hdr_allowed() && ps_capture_large_modes_allowed() && ps_capture_high_bitrate_allowed());
+    }
+    // A new stream falls back to 1080p as before, after its 5 repeats at 4K, also right after another stream's reopens.
+    setup(0x13000040u, 0, 0, 0, 0, 0, 6);
+    ps_capture_set_reopening(1);
+    ps_capture_set_reopening(0);
+    fake_decide = large_refused;
+    assert(open_and_close() == 0);
+    assert(fake_opens == 7 && logged("OpenVideo repeated 5 times") && logged("fallback to 1080p at 5000 kbit/s"));
+    assert(ps_capture_video_resolution() == 4 && record_u32(0x18) == 4 && ps_capture_opening_average() == 5000000u);
+    assert(!logged("refused at a settled output") && !logged("output refuses resolution") && !ps_capture_size_refused());
+    // A stuck capture (issue 56) during a reopen still stops at once: one OpenVideo, nothing kept or refused.
+    setup(0x13000040u, 0, 0, 0, 1, 1, 6);
+    capture_stuck_now = 1;
+    fake_decide = stuck_capture;
+    ps_capture_set_reopening(1);
+    assert(open_and_close() == PS_CAPTURE_ERROR);
+    assert(fake_opens == 1 && ps_capture_stuck() && !ps_capture_size_refused() && ps_capture_video_resolution() == 6);
+    assert(logged("stuck: OpenVideo returned -1") && !logged("refused at a settled output") && !logged("not settled"));
+    assert(!logged("output refuses resolution"));
+    capture_stuck_now = 0;
+    ps_capture_set_reopening(0);
     // The output loses its mode only after it was read, for longer than the repeats of OpenVideo last (1.2 s here, a
     // game started behind the welcome screen on 13.00): the open waits for the mode with the time the first wait didn't
     // use, and gets the title's mode. Before, the 25 repeats ran out and the stream ended at its start.
@@ -724,6 +901,6 @@ int main(void)
     fake_decide = NULL;
     unlink(marker);
 
-    puts("PASS: experimental switches through the open path (variants, first frame, fallback, off until restart, verified firmware, stuck capture)");
+    puts("PASS: experimental switches through the open path (variants, first frame, fallback, off until restart, verified firmware, reopen grace, stuck capture)");
     return 0;
 }

@@ -438,7 +438,10 @@ address.
   while an app or game with a 1080p video output is in front (VLC for PS5, Black Myth: Wukong). A stream started then runs
   at 1080p. When such a title takes over during a 1440p or 4K stream, including one launched from Moonlight, the host ends
   the stream rather than change its size, which Moonlight for Windows can't follow: Moonlight shows "Connection
-  terminated", and starting the stream again gets 1080p.
+  terminated", and starting the stream again gets 1080p. A common cause is a title that switches the console's output to
+  120 Hz (the Mario 64 port, RetroArch): at 120 Hz a standard PS5 captures 1080p at most, and the host's log names 120 Hz
+  as the reason. With **Settings → Screen and Video → Video Output → 120 Hz Output** set to Off, such titles run at 60 Hz
+  and 4K stays (measured on 13.00 with the Mario 64 port: a 4K stream came back at 4K when it started, and a new one got 4K).
 - At 4K the console can show "Gameplay recording paused because you entered a blocked scene" shortly after the stream starts
   (seen in GTA III). The stream keeps running.
 - HEVC and HDR are offered on firmware 13.00 and 10.20, elsewhere H.264 unless you turn on the

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Derived from ps5-mcp/payload/avcap_probe/avcap_probe.c, FW 13.00 research.
 #include "capture.h"
+#include "capture/output_mode.h"
 #include "capture/start_phase.h"
 #include "diag.h"
 #include "encoder_qp.h"
@@ -15,6 +16,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 #include <x86intrin.h>
 #include <ps5/kernel.h>
@@ -83,6 +85,24 @@ static atomic_int refused_value[PS_CAPTURE_SLOTS];  // data[0] of the answer tha
 // The last open was refused while the output had no mode or changed it; the next opens reopen a running stream's capture;
 // the last reopen was refused by a settled output, so the stream can't go on at its size.
 static atomic_int unsettled[PS_CAPTURE_SLOTS], reopening[PS_CAPTURE_SLOTS], size_refused[PS_CAPTURE_SLOTS];
+// The video out mode the last open read, after its repeats (capture/output_mode.h).
+static atomic_uint open_output[PS_CAPTURE_SLOTS];
+// How long after a capture loss a settled output's 0x81950008 at OpenVideo still keeps a running stream's mode for the
+// next reopen (open_or_fall_back, issue 62).
+#define REOPEN_GRACE_MS 3000u
+// When the slot's reopens began (PS_CAPTURE_NOW_MS), and whether they logged a refusal inside the grace yet.
+static _Atomic uint64_t reopen_since[PS_CAPTURE_SLOTS];
+static atomic_int grace_logged[PS_CAPTURE_SLOTS];
+// Milliseconds on the monotonic clock. tests/capture_open_test.c brings its own clock, to step through the grace.
+#ifndef PS_CAPTURE_NOW_MS
+static uint64_t monotonic_ms(void)
+{
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    return (uint64_t)now.tv_sec * 1000u + (uint64_t)now.tv_nsec / 1000000u;
+}
+#define PS_CAPTURE_NOW_MS() monotonic_ms()
+#endif
 static atomic_int stuck;  // the last OpenVideo, on either slot, returned CAPTURE_STUCK
 static int resource_event(int id, int event, const uint8_t *data)
 {
@@ -852,6 +872,9 @@ static int open_slot(int slot, ps_capture **out)
     // moment; stay below the 2 s a client waits for the stream (Initial Ping Timeout). A larger mode gets the same code
     // when the console's output is too small for it, and needs the time left for the open at 1080p, as does a smaller one.
     // It also answers this when the output's mode changed since it was read, as while a title comes up, so that is read anew.
+    // A reopen of a running stream has neither the client's 2 s nor a 1080p to fall back to, but it keeps these repeats:
+    // its loop in video_ps5.cpp tries again, and a refusal in the first REOPEN_GRACE_MS after the loss keeps the mode for
+    // that (open_or_fall_back).
     const int repeats = atomic_load(&open_attempts) ? atomic_load(&open_attempts) - 1
                         : atomic_load(&video_resolution[slot]) != 4 ? 5 : 25;
     int changed = 0;
@@ -891,6 +914,7 @@ static int open_slot(int slot, ps_capture **out)
         }
     }
     atomic_store(&unsettled[slot], rc && (changed || !output));
+    atomic_store(&open_output[slot], (unsigned)output);
     atomic_store(&last_open_rc, rc);
     atomic_store(&failure_rc[slot], rc);
     SLOG(slot, "OpenVideo rc=%#x\n", rc);
@@ -1131,15 +1155,35 @@ static int open_or_fall_back(int slot, ps_capture **out)
             SLOG(slot, "stuck: OpenVideo returned -1, only a console restart frees the capture (issue 56)\n");
             return rc;
         }
+        // A reopen of a running stream that OpenVideo refused while the output had no mode or changed it, or refused with
+        // RESOURCE_NOT_ACTIVE at a settled output in the first REOPEN_GRACE_MS after the loss: a title starting or closing,
+        // which says nothing about a switch or the rate. Counted against them, it lowered a running 4K stream from 63 to
+        // 50 Mbit/s for the rest of the stream (issue 62), and with a switch still on trial it could step the variant or
+        // turn the switch off. A new stream still counts it, as before: there the lower rate or the next variant is one more
+        // open at the stream's size, which a title started together with the stream may need for its mode; without it the
+        // stream would fall back to 1080p or, at 1080p, fail to start.
+        const char *const failed_step = atomic_load(&failure_step[slot]);
+        const int refused_at_open = rc == PS_CAPTURE_ERROR && failed_step && strcmp(failed_step, "OpenVideo") == 0 &&
+                                    atomic_load(&failure_rc[slot]) == RESOURCE_NOT_ACTIVE;
+        const int reopen = atomic_load(&reopening[slot]);
+        const uint64_t since_loss = reopen ? PS_CAPTURE_NOW_MS() - atomic_load(&reopen_since[slot]) : 0;
+        // A refusal at a mode that can't hold the size (a game set the output to 120 Hz) is the output's, for sure: it
+        // gets no grace and counts against nothing, in a new stream as well.
+        const uint32_t output = atomic_load(&open_output[slot]);
+        const int output_too_small = refused_at_open && !ps_output_holds(output, resolution);
+        if (output_too_small)
+            SLOG(slot, "video out mode %#x can't hold resolution %u%s\n", output, resolution,
+                 ps_output_at_120hz(output) ? " (120 Hz)" : "");
+        const int refused_in_grace = refused_at_open && reopen && since_loss < REOPEN_GRACE_MS && !output_too_small;
+        const int settling = (rc && reopen && atomic_load(&unsettled[slot])) || refused_in_grace;
         pthread_mutex_lock(&experiment_lock);
         enum ps_exp_next next = PS_EXP_GIVE_UP;
         if (rc) {
-            const int attributable = rc == PS_CAPTURE_ERROR && atomic_load(&reached_encoder[slot]);
+            const int attributable =
+                rc == PS_CAPTURE_ERROR && atomic_load(&reached_encoder[slot]) && !settling && !output_too_small;
             next = ps_exp_failed(&experiment, codec, ten_bit, resolution, average, attributable,
                                  atomic_load(&refused[slot]) && ps_exp_mode_may_fall_back(resolution));
-            const char *const step = atomic_load(&failure_step[slot]);
-            if (next == PS_EXP_FALL_BACK && atomic_load(&failure_rc[slot]) == RESOURCE_NOT_ACTIVE && step && strcmp(step, "OpenVideo") == 0)
-                ps_exp_output_refused(&experiment, resolution);
+            if (next == PS_EXP_FALL_BACK && refused_at_open) ps_exp_output_refused(&experiment, resolution);
         } else {
             ps_exp_succeeded(&experiment, codec, ten_bit, resolution, average);
         }
@@ -1158,11 +1202,21 @@ static int open_or_fall_back(int slot, ps_capture **out)
         // A running stream keeps its size: the client set up its decoder for it, and Moonlight for Windows doesn't set it
         // up anew when the size changes, so the picture breaks (issue 39). A title starting or closing leaves the output
         // without a mode for up to about 2 s (10.20), longer than the opens above wait, so a refusal then says nothing:
-        // the reopen fails and its loop tries the same mode again. A settled output that refuses the mode ends the stream,
-        // and the client's next one starts at what the output takes.
-        if (next == PS_EXP_FALL_BACK && atomic_load(&reopening[slot])) {
+        // the reopen fails and its loop tries the same mode again. Right after a title switch a settled output may refuse
+        // the mode for a moment too: on 12.40 (issue 62) OpenVideo refused 4K at an unchanged 0x13c for the 200 ms of its
+        // repeats and the stream ended, seconds after two 4K reopens had worked, and in an older run the same refusal of
+        // 1440p cleared on the last repeat. So in the first REOPEN_GRACE_MS after the loss that is tried again as well; that
+        // it clears within them is inferred from that report, not measured. A settled output that still refuses the mode
+        // after them ends the stream, and the client's next one starts at what the output takes. So does one whose mode
+        // can't hold the size, at once: on 13.00 a game set the output to 120 Hz (0x140), and 4K was refused for as long as
+        // it stayed in front, in that stream's reopens and at the next stream's start.
+        if (next == PS_EXP_FALL_BACK && reopen) {
             if (atomic_load(&unsettled[slot])) {
                 SLOG(slot, "output not settled: resolution %u kept for the next reopen\n", resolution);
+            } else if (refused_in_grace) {
+                if (!atomic_exchange(&grace_logged[slot], 1))
+                    SLOG(slot, "resolution %u refused at a settled output %u ms after the loss: kept for the reopens within %u ms\n",
+                         resolution, (unsigned)since_loss, REOPEN_GRACE_MS);
             } else {
                 SLOG(slot, "output refuses resolution %u now; a running stream keeps its size\n", resolution);
                 atomic_store(&size_refused[slot], 1);
@@ -1206,12 +1260,20 @@ int ps_capture_open_or_fall_back(ps_capture **out) { return ps_capture_slot_open
 
 void ps_capture_slot_set_reopening(int slot, int on)
 {
-    if (valid_slot(slot)) atomic_store(&reopening[slot], on != 0);
+    if (!valid_slot(slot)) return;
+    if (on) {
+        // Before the flag: an open that sees it reopening counts the grace from this loss, not from the one before.
+        atomic_store(&reopen_since[slot], PS_CAPTURE_NOW_MS());
+        atomic_store(&grace_logged[slot], 0);
+    }
+    atomic_store(&reopening[slot], on != 0);
 }
 
 void ps_capture_set_reopening(int on) { ps_capture_slot_set_reopening(0, on); }
 
 int ps_capture_slot_size_refused(int slot) { return valid_slot(slot) && atomic_load(&size_refused[slot]); }
+
+uint32_t ps_capture_slot_open_output(int slot) { return valid_slot(slot) ? atomic_load(&open_output[slot]) : 0; }
 int ps_capture_slot_opening_frame_read(int slot) { return valid_slot(slot) && atomic_load(&opening_frame_read[slot]); }
 
 int ps_capture_size_refused(void) { return ps_capture_slot_size_refused(0); }
