@@ -87,6 +87,9 @@ nur ein erfolgreicher Build.
     Testsuiten und ein Stream auf der Konsole vor dem Merge.
 17. **Formatierung für neuen Code:** eine `.clang-format` und eine `.editorconfig`, passend zum bestehenden Stil, nur für neuen
     oder geänderten Code, damit die Diffs alter Dateien klein bleiben.
+18. **Verlauf der letzten Streams auf der Webseite** (Wunsch aus Issue 63): je Stream Gerät, Modus, Dauer und verlorene
+    Frames, um die Verbindung zu prüfen und Fehler einzugrenzen. Offen: wie viele Einträge, ob sie einen Neustart des Hosts
+    überdauern, und woher die Zahl der verlorenen Frames kommt (der Host sieht nur, was Moonlight ihm über den Steuerkanal meldet).
 
 ## Bis 1.0
 
