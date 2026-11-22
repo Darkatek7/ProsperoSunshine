@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.7-beta.2 (2026-11-22, pre-release)
 
 ### Added
 
