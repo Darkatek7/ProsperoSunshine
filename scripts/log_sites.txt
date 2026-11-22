@@ -57,7 +57,7 @@ src/web/web_server.cpp|BOOST_LOG(error) << "Web page: restart failed: "sv << pro
 src/web/web_server.cpp|BOOST_LOG(warning) << "Web page: remembered sign-ins not stored: "sv << problem;
 
 # A fault in a call into the haptic channel: the signal, the instruction and the memory address it touched, numbers of the host's own process, not anyone's network address ('a fault in the haptic channel').
-src/sunshine/platform_ps5.cpp|BOOST_LOG(warning) << "PS5 haptics: read faulted, signal "sv << fault.signal << " at "sv << util::hex(fault.instruction).to_string_view() << ", address "sv << util::hex(fault.address).to_string_view() << "; off until the host restarts"sv;
+src/sunshine/platform_ps5.cpp|BOOST_LOG(warning) << "PS5 haptics: "sv << call << " faulted, signal "sv << fault.signal << " at "sv << util::hex(fault.instruction).to_string_view() << ", address "sv << util::hex(fault.address).to_string_view() << "; the channel stays closed until "sv << haptic_blocked().string() << " is deleted"sv;
 
 # Ownership cleanup messages contain only the port, fixed reason and UPnP error text; no endpoint or client values.
 src/net/upnp_client.cpp|for (const auto &line : unmap(stale, {}, nullptr, false, stop)) BOOST_LOG(warning) << "UPnP: "sv << line;

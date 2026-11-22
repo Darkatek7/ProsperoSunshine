@@ -860,14 +860,22 @@ static void poll_pad_output(std::stop_token stop, input_raw_t *input) {
     }
 }
 
-// While this file exists the channel stays closed, whatever sunshine.conf says: the host died or faulted reading it. Delete it to try
-// again.
-static constexpr auto haptic_blocked = "/data/prosperosunshine/haptic_blocked";
+// While this file exists the channel stays closed, whatever sunshine.conf says: the host died with it open, or a call into it
+// faulted. Delete it to try again.
+static std::filesystem::path haptic_blocked() { return appdata() / "haptic_blocked"; }
 // Exists from before the channel opens until it has run for a while. Found at the start, it means the host died with the channel
 // open: then the channel gets blocked, so that one bad try can't break every stream that follows.
-static constexpr auto haptic_attempt = "/data/prosperosunshine/haptic_attempt";
+static std::filesystem::path haptic_attempt() { return appdata() / "haptic_attempt"; }
 
 namespace {
+struct haptic_open_call {
+    ps_capture *session;
+    const uint32_t *words;
+};
+int haptic_open_step(void *argument) {
+    auto *call = static_cast<haptic_open_call *>(argument);
+    return ps_capture_haptic_open(call->session, call->words, 0);
+}
 struct haptic_read_call {
     ps_capture *session;
     void *destination;
@@ -886,30 +894,51 @@ static void poll_haptics(std::stop_token stop, input_raw_t *input) {
     const auto shutdown_event = mail::man->event<bool>(mail::shutdown);
     std::shared_ptr<prospero::SharedCapture> shared;
     unsigned generation = 0;
-    bool open = false, gave_up = false, faulted = false, attempt_open = false;
+    bool open = false, gave_up = false, faulted = false, attempt_open = false, told_blocked = false;
     std::vector<uint8_t> packet(0x10000);
     alignas(16) uint8_t header[0x400];  // only 0x18 are known; room in case the call writes more
     prospero::HapticSplitter splitter;
     auto opened_at = std::chrono::steady_clock::now();
     std::error_code attempt_ec;
-    if (std::filesystem::exists(haptic_attempt, attempt_ec)) {
-        BOOST_LOG(warning) << "PS5 haptics: the host stopped during the last try, the channel stays closed"sv;
-        std::ofstream(haptic_blocked).flush();
-        std::filesystem::remove(haptic_attempt, attempt_ec);
+    if (std::filesystem::exists(haptic_attempt(), attempt_ec)) {
+        BOOST_LOG(warning) << "PS5 haptics: the host stopped during the last try, the channel stays closed until "sv
+                           << haptic_blocked().string() << " is deleted"sv;
+        std::ofstream(haptic_blocked()).flush();
+        std::filesystem::remove(haptic_attempt(), attempt_ec);
+        told_blocked = true;
     }
     const auto attempt_over = [&] {
         if (!attempt_open) return;
         std::error_code ec;
-        std::filesystem::remove(haptic_attempt, ec);
+        std::filesystem::remove(haptic_attempt(), ec);
         attempt_open = false;
     };
-    const auto try_open = [&](ps_capture *s) {
-        if (generation != shared->generation()) return false;
+    ps_haptic_fault fault{};
+    const auto try_open = [&](ps_capture *s) -> int {
+        if (generation != shared->generation()) return PS_CAPTURE_ERROR;
         // Audio's first block (size, kind, purpose, encoder, resource id) with encoder 2, the one that opens on 9.60.
         constexpr uint32_t words[4] = {0, 2, 2, PS_CAPTURE_HAPTIC_RESOURCE};
-        const int rc = ps_capture_haptic_open(s, words, 0);
-        if (rc) BOOST_LOG(warning) << "PS5 haptics: open failed: "sv << util::hex(rc).to_string_view();
-        return rc == 0;
+        haptic_open_call call{s, words};
+        const int rc = ps_haptic_guarded(haptic_open_step, &call, &fault);
+        // After a fault the channel is forgotten without calling into it, a lock in there may still be held.
+        if (rc == PS_HAPTIC_FAULT)
+            ps_capture_haptic_abandon(s);
+        else if (rc)
+            BOOST_LOG(warning) << "PS5 haptics: open failed: "sv << util::hex(rc).to_string_view();
+        return rc;
+    };
+    // A call into the channel faulted: closed for good, here and, through haptic_blocked, for the hosts that follow.
+    const auto block = [&](std::string_view call) {
+        BOOST_LOG(warning) << "PS5 haptics: "sv << call << " faulted, signal "sv << fault.signal << " at "sv
+                           << util::hex(fault.instruction).to_string_view() << ", address "sv
+                           << util::hex(fault.address).to_string_view() << "; the channel stays closed until "sv
+                           << haptic_blocked().string() << " is deleted"sv;
+        std::ofstream(haptic_blocked()).flush();
+        told_blocked = true;
+        open = false;
+        shared.reset();
+        faulted = gave_up = true;
+        attempt_over();
     };
     const auto release = [&] {
         if (open && shared) shared->exclusive([&](ps_capture *s) { return generation == shared->generation() ? ps_capture_haptic_close(s) : 0; });
@@ -927,7 +956,13 @@ static void poll_haptics(std::stop_token stop, input_raw_t *input) {
         // A stopping host lets go of the channel first, while its session is whole, and doesn't keep that session open for later.
         const bool stopping = shutdown_event->peek();
         if (stopping && open) BOOST_LOG(info) << "PS5 haptics: closing the channel, the host is stopping"sv;
-        if (stopping || !pad || !input->haptics_enabled || (!open && std::filesystem::exists(haptic_blocked, ec))) {
+        const bool blocked = !open && std::filesystem::exists(haptic_blocked(), ec);
+        if (!blocked) told_blocked = false;
+        if (blocked && pad && input->haptics_enabled && !told_blocked) {
+            BOOST_LOG(warning) << "PS5 haptics: "sv << haptic_blocked().string() << " is there, the channel stays closed; delete it to try again"sv;
+            told_blocked = true;
+        }
+        if (stopping || !pad || !input->haptics_enabled || blocked) {
             release();
             attempt_over();
             gave_up = faulted;
@@ -945,9 +980,14 @@ static void poll_haptics(std::stop_token stop, input_raw_t *input) {
                 continue;
             }
             generation = shared->generation();
-            std::ofstream(haptic_attempt).flush();
+            std::ofstream(haptic_attempt()).flush();
             attempt_open = true;
-            open = shared->exclusive(try_open);
+            const int opened = shared->exclusive(try_open);
+            if (opened == PS_HAPTIC_FAULT) {
+                block("open");
+                continue;
+            }
+            open = opened == 0;
             if (!open) {
                 BOOST_LOG(warning) << "PS5 haptics: the channel didn't open, no more tries in this stream"sv;
                 shared.reset();
@@ -963,23 +1003,16 @@ static void poll_haptics(std::stop_token stop, input_raw_t *input) {
             shared.reset();
             continue;
         }
-        ps_haptic_fault fault{};
         const int rc = shared->with_session([&](ps_capture *s) {
             haptic_read_call call{s, packet.data(), packet.size(), header};
             return ps_haptic_guarded(haptic_read_step, &call, &fault);
         });
         if (rc == PS_HAPTIC_FAULT) {
-            BOOST_LOG(warning) << "PS5 haptics: read faulted, signal "sv << fault.signal << " at "sv << util::hex(fault.instruction).to_string_view()
-                               << ", address "sv << util::hex(fault.address).to_string_view() << "; off until the host restarts"sv;
             shared->exclusive([](ps_capture *s) {
                 ps_capture_haptic_abandon(s);
                 return 0;
             });
-            std::ofstream(haptic_blocked).flush();
-            open = false;
-            shared.reset();
-            faulted = gave_up = true;
-            attempt_over();
+            block("read");
             continue;
         }
         if (attempt_open && std::chrono::steady_clock::now() - opened_at >= 5s) attempt_over();
