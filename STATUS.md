@@ -1,6 +1,6 @@
 # Arbeitsstand
 
-Stand: 22. November 2026, Beta 0.6.7-beta.1 und die Fixes zu Issue 62 (noch nicht veröffentlicht). Hier steht nur, was live geprüft ist, mit dem Messweg. Was ausgeliefert ist:
+Stand: 22. November 2026, Beta 0.6.7-beta.1, die Fixes zu Issue 62 und „Follow the output's size“ (noch nicht veröffentlicht). Hier steht nur, was live geprüft ist, mit dem Messweg. Was ausgeliefert ist:
 `CHANGELOG.md`. Plan und Reihenfolge: `ROADMAP.md`. Architektur: `docs/adr/001-sunshine-port.md`.
 
 Die älteren Einträge (bis 4. November 2026) und die ersten Nachweise nach Roadmap stehen unverändert und mit denselben
@@ -92,6 +92,62 @@ Issue 36“) und ein Debug-Build in jedem Release („Debug-Build (PR 29) zusamm
     Store nicht eigens installiert worden.
 
 ## Neuere Nachweise
+
+### Der Ausgabegröße folgen (2026-11-22, 13.00, Debug-Builds `follow01` bis `follow03` aus dem Speicher, nicht veröffentlicht)
+
+Messweg: Testclient unter Linux (`run_smoke.sh`, `--network host`), zweite Identität `out/moonlight-client2` für zwei Geräte
+auf einem Kanal, Einstellung über `SETFOLLOWSIZE`. Die Mario-64-Demo stellt die Ausgabe auf 120 Hz (`0x140`); „120 Hz
+Output“ blieb auf Automatic. Die Bildgrößen je Bild per `ffprobe` aus dem Bitstrom des Clients, dazu `ffmpeg -xerror` über
+die ganze Datei. Am Ende jeder Runde wieder der installierte CI-Host 0.6.7-beta.1, alle Dateien byte-gleich.
+
+- **Ein Gerät, das folgt (`follow02`):** HEVC 10 Bit HDR 3840x2160, 120 s, Demo gestartet und geschlossen: 4K → 1080p → 4K,
+  886, 2496 und 3076 Bilder, 0 fehlend, alles dekodierbar, `STREAMS` 62988 → 15747 → 62988 kbit/s, nicht beendet. Lücke beim
+  Start der Demo 5,8 s (Wiederöffnung 5787 ms). Beim Schließen öffnete der Host erst in 1080p neu (5019 ms), las `0x13c` und
+  öffnete gleich danach in 4K (726 ms); der Client sah eine Lücke von 5,75 s. H.264 3840x2160 über 90 s ebenso: 888, 2152 und
+  1722 Bilder, 0 fehlend, Lücken 3,5 und 5,5 s.
+- **`follow01`** ging nicht zurück: Er versuchte 4K beim ersten Öffnen nach dem Schließen der Demo, der ResourceArbitrator
+  lehnte bei `RUNNING` sofort ab (noch im Zustand der 120-Hz-Demo), und der Stream blieb bis zum Ende bei 1080p.
+  Deshalb wartet `follow02` auf eine Öffnung, die einen Modus mit 4K gelesen hat.
+- **Einstellung aus:** Der Stream endet wie bisher, die Fehlerzeile nennt 120 Hz und die Einstellung. 1080p-Stream mit
+  Einstellung an: keine Zeile zur Größe, 1080p durchgehend, 0 fehlend.
+- **Zwei Geräte auf einem Kanal (`follow02`):** Folgt der Halter und das andere nicht, läuft der Halter in 1080p weiter und
+  wieder in 4K (5274 Bilder, 0 fehlend), das andere endet mit der neuen Zeile „ending the stream of a device that joined
+  channel 0“ und bekam nur 4K-Bilder. Folgt nur das beigetretene Gerät, endet der Halter wie bisher; das andere übernimmt
+  (Wiederöffnung 183 ms), läuft in 1080p weiter und wieder in 4K (3478 Bilder, 0 fehlend). Mit `follow01` war es umgekehrt:
+  Der Halter, der folgte, endete, und das andere wurde über die alte Übernahme (Öffnen wie ein neuer Stream) still auf 1080p
+  gestellt; nach dem Code gilt das für jeden Host bis 0.6.7-beta.1.
+- **Keines folgt (`follow02`):** Der Halter endet wie bisher; das übernehmende Gerät bekam kein 1080p-Bild. Es endete aber
+  nicht mit der Fehlerzeile zur Größe: Der ResourceArbitrator führte 182 nach `STOP` und `unregister` des Hosts (beide `rc=0`)
+  weiter als aktiv, die Übernahme scheiterte 20-mal bei `resource list` (21 s stehendes Bild) und endete mit „could not be
+  reopened“. Danach scheiterte jeder Stream, auch 1080p H.264 und mit dem installierten Host, bei `RUNNING` mit
+  `outcome=timeout`; im Kernel-Log wuchs die Warteschlange des Arbitrators nur noch (`size[11]` bis `size[20]`). Erst ein
+  Neustart der Konsole half. Dieselben Schritte des Hosts liefen vorher und nachher ohne Hänger (beide Runden mit zwei Geräten
+  oben, die Runde mit `follow01`). Bei der ersten Wiederholung mit Kernel-Log nahm die Ausgabe nach dem Neustart die
+  120 Hz der Demo nicht an (`119.88 Hz accepted, but a vblank comes every 16.682 ms; 59.94 Hz restored`), solange der
+  Bildschirm an der Konsole aus war; vor dem Neustart bekam die Demo 120 Hz auch bei ausgeschaltetem Bildschirm. Mit
+  eingeschaltetem Bildschirm (`2160P_11988`) lief der Fall dreimal ohne Hänger: Der Arbitrator lehnte 4K jedes Mal schon bei
+  `RUNNING` ab (`ScanIn Is4KRunnable: 4K NG(4K120)`), Halter und übernehmendes Gerät endeten mit der Fehlerzeile zur Größe
+  (das zweite rund 70 ms nach dem ersten), beide nur mit 4K-Bildern, 0 fehlend, und die Warteschlange des Arbitrators lief
+  jedes Mal leer. Den Weg aus dem Hänger (`RUNNING` gewährt, `OpenVideo` bei `0x140` abgelehnt, danach 182 weiter gelistet)
+  nahm keiner der drei Läufe; was ihn auslöste, ist offen.
+- **Nach dem Neustart (`follow02`, ohne 120 Hz):** Übernahme durch ein beigetretenes Gerät bei 1080p und 4K über die offene
+  Sitzung („took the open channel 0 over, no reopen“), 2398 Bilder je beigetretenem Stream, 0 fehlend, Größe unverändert.
+  GTA III nahm die Aufnahme beim Start und Ende nicht weg, das Wiederöffnen bei 60 Hz lief dort also nicht; beim Start der
+  Demo öffnete der Host noch bei `0x138` in 4K neu (1523 ms), bevor sie auf 120 Hz stellte.
+- **Echtes Moonlight (`follow02`, Geräte des Besitzers, Hardware-Decoding):** Moonlight für Android auf einem Fire TV (4K60
+  HEVC HDR, 117964 kbit/s) und Moonlight für iOS auf einem iPhone (4K verlangt, 3840x2160@60 geliefert, 78988 kbit/s), je mit
+  Start und Ende der Demo: Der Host ging bei beiden auf 1080p und nach dem Schließen wieder auf 4K (`back to it`), ohne
+  `Error`. Laut Besitzer lief das Bild bei beiden weiter, kam nach dem Schließen scharf zurück, und der Ton lief. Die Clients
+  baten bei keinem Wechsel um ein IDR. Ein Stream, der mit der Demo vorne startete, bekam 1080p und blieb nach ihrem Ende bei
+  1080p: `follow02` kannte nur den Weg zurück für einen Stream, der vorher größer lief.
+- **Start unter 120 Hz (`follow03`, Testclient):** Mit der Demo vorne startete ein 4K-Stream in 1080p, mit der neuen Zeile
+  „the console's output takes no 3840x2160 now (120 Hz), starting at 1920x1080 …“; nach dem Schließen der Demo ging er auf
+  4K (`back to it`). HEVC 10 Bit HDR über 90 s: 1862 Bilder 1080p, dann 3205 4K, 0 fehlend, eine Lücke von 5,4 s für beide
+  Öffnungen, `STREAMS` 15747 → 62988 kbit/s. H.264 über 70 s: 1939 und 1971 Bilder, 0 fehlend, Lücke 4,75 s. Mit der
+  Einstellung aus blieb derselbe Stream bei 1080p (5122 Bilder, 0 fehlend). Der Ablauf aus dem 4K-Start (4K → 1080p → 4K)
+  lief mit `follow03` unverändert (992, 1735 und 2100 Bilder, 0 fehlend).
+- Nicht geprüft: Moonlight für Windows bei einem Größenwechsel, die Übernahme nach „the client left during a reopen“.
+- Keine `stuck`-Zeile, kein `OpenVideo rc=0xffffffff`.
 
 ### Startverweigerung mit Namen (2026-11-22, 13.00, Debug-Build `launch01` aus dem Speicher, nicht veröffentlicht)
 
