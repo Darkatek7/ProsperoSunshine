@@ -93,6 +93,15 @@ Issue 36“) und ein Debug-Build in jedem Release („Debug-Build (PR 29) zusamm
 
 ## Neuere Nachweise
 
+### Startverweigerung mit Namen (2026-11-22, 13.00, Debug-Build `launch01` aus dem Speicher, nicht veröffentlicht)
+
+Messweg: `tools/moonlight/pair.py launch` mit der Identität des Testclients, `run_smoke.sh` für den Stream. Mit GTA III
+vorne antwortete `/launch` der Mario-64-Demo mit 409 und „Grand Theft Auto III – The Definitive Edition is open on the
+console, and starting Mario 64 would close it. Close it first, or pick PS5 Screen to go on with it.“ GTA III blieb offen.
+Vom Home-Bildschirm startete dieselbe Anfrage die Demo (200). Mit GTA III vorne lief „PS5 Screen“ (10 s H.264 1080p60, 597
+Bilder, 0 fehlend). Nicht geprüft: der Text für einen vor dem Gerät versteckten Titel, ein Spiel hinter der App, die Anzeige
+im echten Moonlight.
+
 ### Fixes zu Issue 62 auf der Konsole (2026-11-22, 13.00, Builds `i62fix02`, nicht veröffentlicht)
 
 Messweg: Testclient unter Linux (`run_smoke.sh`, `--network host`). Erst der Debug-Build aus dem Speicher, dann der normale
