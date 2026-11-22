@@ -1,0 +1,36 @@
+ProsperoSunshine: sunshine.conf sets whether devices follow the console's output size by default
+
+follow_output_size (off by default) is what a paired device does that has no line of its own in device_follow_size.txt
+(control/device_follow_size.hpp): when a game switches the console's output so that it no longer takes a running 1440p or 4K
+stream's size (120 Hz), the stream goes on at 1920x1080 instead of ending, and goes back to its size at a later reopen whose
+output takes it again (video_ps5.cpp). Off, such a stream ends as before, because some clients (Moonlight for Windows with
+D3D11, issue 39) break on a size change mid-stream.
+
+--- a/src/config.h
++++ b/src/config.h
+@@ -423,6 +423,7 @@
+     bool pair_over_internet;  ///< Pairing requests from outside the LAN and Tailscale are answered (off by default).
+     int internet_pace_percent;  ///< Clients over the internet: the rest of a large frame leaves at this percent of the stream's rate.
+     int internet_burst_kb;  ///< Clients over the internet: the most of a frame that leaves at once, in kB.
++    bool follow_output_size;  ///< Default for devices without their own line in device_follow_size.txt (off by default).
+   };
+ 
+   extern ps5_t ps5;
+--- a/src/config.cpp
++++ b/src/config.cpp
+@@ -911,6 +911,7 @@
+     false,  // pair_over_internet
+     200,  // internet_pace_percent (video/frame_pacing.hpp)
+     16,  // internet_burst_kb
++    false,  // follow_output_size (control/device_follow_size.hpp)
+   };
+ #endif
+ 
+@@ -1776,6 +1777,7 @@
+     bool_f(vars, "pair_over_internet", ps5.pair_over_internet);
+     int_between_f(vars, "internet_pace_percent", ps5.internet_pace_percent, {125, 800});
+     int_between_f(vars, "internet_burst_kb", ps5.internet_burst_kb, {2, 64});
++    bool_f(vars, "follow_output_size", ps5.follow_output_size);
+ #endif
+     generic_f(vars, "dd_mode_remapping", video.dd.mode_remapping, dd::mode_remapping_from_view);
+     {

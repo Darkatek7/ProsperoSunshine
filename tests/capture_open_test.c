@@ -31,6 +31,7 @@ static void setup(uint32_t firmware, int hevc, int hdr, int large, uint32_t code
     fake_opens = 0;
     fake_output = 0x13c;
     ps_capture_set_reopening(0);
+    ps_capture_slot_set_follow_size(0, 0);
     fake_log[0] = 0;
     unlink(marker);
     set_switches(hevc, hdr, large, 0);
@@ -225,6 +226,12 @@ static int stuck_capture(const char *step, const uint8_t *record)
 {
     (void)record;
     return !strcmp(step, "OpenVideo") && capture_stuck_now ? (int)0xffffffff : 0;
+}
+// At 120 Hz the arbitrator mostly refuses resource 182 (1440p and 4K) at RUNNING already, before the mode is read (13.00).
+static int large_resource_refused(const char *step, const uint8_t *record)
+{
+    (void)record;
+    return !strcmp(step, "grant") && atomic_load(&resource_id[0]) == 182 ? 3 : 0;
 }
 static int marker_seen;
 static int look_for_marker(const char *step, const uint8_t *record)
@@ -501,6 +508,129 @@ int main(void)
     assert(ps_capture_opening_average() == 62988000u / 4 && logged("can't hold resolution 6 (120 Hz)"));
     assert(!logged("kbit=50000") && !logged("variant=full") && !logged("disabled"));
     assert(ps_capture_hdr_allowed() && ps_capture_large_modes_allowed() && ps_capture_high_bitrate_allowed());
+    // That fallback was the output's, for now (a title at 120 Hz): video_ps5.cpp may take the stream back up to 4K once the
+    // output takes it, for devices that follow the output's size. The next open without a fallback clears it.
+    assert(ps_capture_slot_fell_back_for_output(0) && !ps_capture_slot_fell_back_for_output(1));
+    fake_decide = NULL;
+    assert(open_and_close() == 0 && ps_capture_video_resolution() == 4 && !ps_capture_slot_fell_back_for_output(0));
+    // So is one after the arbitrator refused 4K's resource at RUNNING, as it mostly does at 120 Hz (the owner's stream that
+    // started with the demo in front), once the 1080p open read an output at 120 Hz or one that holds 4K.
+    for (int i = 0; i < 3; i++) {
+        static const uint32_t outputs[] = {0x140, 0x13c, 0x10};
+        setup_issue62();
+        fake_output = outputs[i];
+        fake_decide = large_resource_refused;
+        assert(open_and_close() == 0 && ps_capture_video_resolution() == 4 && logged("RUNNING outcome=refused value=3"));
+        assert(ps_capture_slot_fell_back_for_output(0) == (outputs[i] != 0x10) && !experiment.pending[PS_EXP_LARGE]);
+        // An open that fails says nothing of the one before.
+        fake_decide = no_answer;
+        assert(open_and_close() != 0 && !ps_capture_slot_fell_back_for_output(0));
+    }
+    // Not an output that never takes 4K (a 1080p TV, 0x10, not at 120 Hz), not a refusal from the encoder at a mode that holds
+    // the size (the 4K switch on trial goes off), not a RUNNING that got no answer, and not a mode without a fallback.
+    setup_issue62();
+    fake_output = 0x10;
+    fake_decide = large_refused;
+    assert(open_and_close() == 0 && ps_capture_video_resolution() == 4 && logged("can't hold resolution 6\n"));
+    assert(!ps_capture_slot_fell_back_for_output(0));
+    setup(0x13600000u, 0, 0, 1, 0, 0, 6);
+    fake_decide = large_fails;
+    assert(open_and_close() == 0 && ps_capture_video_resolution() == 4 && !ps_capture_slot_fell_back_for_output(0));
+    assert(!ps_capture_large_modes_allowed());
+    setup_issue62();
+    fake_decide = no_answer;
+    assert(open_and_close() != 0 && !ps_capture_slot_fell_back_for_output(0));
+    setup(0x13000040u, 0, 0, 0, 0, 0, 4);
+    fake_decide = large_resource_refused;
+    assert(open_and_close() == 0 && !ps_capture_slot_fell_back_for_output(0));
+    fake_decide = NULL;
+    // Devices that follow the output's size (device_follow_size.hpp, off by default) go on at 1080p instead: at such a mode
+    // at once, with the rate scaled as a new stream's fallback, codec and bit depth kept, and nothing counted against a
+    // switch or the rate.
+    assert(ps_reopen_may_follow(1, 6) && ps_reopen_may_follow(1, 5) && !ps_reopen_may_follow(1, 4));
+    assert(!ps_reopen_may_follow(1, 3) && !ps_reopen_may_follow(0, 6));
+    setup_issue62();
+    assert(open_and_close() == 0);
+    fake_log[0] = 0;
+    fake_opens = 0;
+    fake_output = 0x140;
+    fake_decide = large_refused;
+    ps_capture_slot_set_follow_size(0, 1);
+    ps_capture_set_reopening(1);
+    assert(open_and_close() == 0);
+    assert(fake_opens == 7 && record_u32(0x18) == 4 && ps_capture_video_resolution() == 4 && !ps_capture_size_refused());
+    assert(ps_capture_opening_average() == 62988000u / 4 && record_u32(0xc8) == 62988000u / 4);
+    assert(times_logged("capture output refuses resolution 6 now; the streams follow the output's size: 1080p\n") == 1);
+    assert(logged("fallback to 1080p at 15747 kbit/s") && !logged("keeps its size") && !logged("kbit=50000"));
+    assert(!logged("variant=full") && !logged("disabled") && !experiment.pending[PS_EXP_LARGE] && !experiment.pending[PS_EXP_BITRATE]);
+    assert(experiment.confirmed[PS_EXP_LARGE] && !experiment.failed[PS_EXP_LARGE] && ps_capture_large_modes_allowed());
+    assert(ps_capture_hdr_allowed() && ps_capture_high_bitrate_allowed());
+    // A later reopen whose output takes 4K again goes back to it, at the stream's rate (video_ps5.cpp sets them).
+    fake_log[0] = 0;
+    fake_opens = 0;
+    fake_output = 0x13c;
+    fake_decide = NULL;
+    ps_capture_set_video_mode(6, 1);
+    ps_capture_set_opening_bitrate(62988000u, 70546560u);
+    ps_capture_set_reopening(1);
+    assert(open_and_close() == 0);
+    assert(fake_opens == 1 && record_u32(0x18) == 6 && record_u32(0xc8) == 62988000u && ps_capture_video_resolution() == 6);
+    assert(!logged("refuses") && experiment.confirmed[PS_EXP_LARGE]);
+    // At a mode that looks able to hold the size they keep the 3 s grace, as the others: a refusal there may clear.
+    fake_log[0] = 0;
+    fake_opens = 0;
+    fake_decide = large_refused;
+    ps_capture_set_reopening(1);
+    assert(open_and_close() != 0 && ps_capture_video_resolution() == 6 && !ps_capture_size_refused());
+    assert(logged("kept for the reopens within 3000 ms") && !logged("follow"));
+    fake_now_ms += REOPEN_GRACE_MS;
+    assert(open_and_close() == 0 && ps_capture_video_resolution() == 4 && !ps_capture_size_refused());
+    assert(times_logged("the streams follow the output's size: 1080p") == 1 && !experiment.pending[PS_EXP_BITRATE]);
+    assert(!logged("kbit=50000") && ps_capture_opening_average() == 62988000u / 4);
+    // While the output has no mode they keep the size for the next reopen, as the others.
+    ps_capture_set_video_mode(6, 1);
+    ps_capture_set_opening_bitrate(62988000u, 70546560u);
+    fake_log[0] = 0;
+    fake_output = 0;
+    fake_decide = refused_without_output;
+    ps_capture_set_reopening(1);
+    fake_now_ms += 10 * REOPEN_GRACE_MS;
+    assert(open_and_close() != 0 && ps_capture_video_resolution() == 6 && logged("output not settled") && !logged("follow"));
+    ps_capture_set_reopening(0);
+    // So when the arbitrator refuses 4K's resource at RUNNING, as it mostly does at 120 Hz: a stream that doesn't follow ends
+    // there as before, one that follows goes on at 1080p on resource 180.
+    for (int follow = 0; follow <= 1; follow++) {
+        setup_issue62();
+        assert(open_and_close() == 0);
+        fake_log[0] = 0;
+        fake_output = 0x140;
+        fake_decide = large_resource_refused;
+        ps_capture_slot_set_follow_size(0, follow);
+        ps_capture_set_reopening(1);
+        assert((open_and_close() == 0) == follow && ps_capture_size_refused() == !follow);
+        assert(ps_capture_video_resolution() == (follow ? 4u : 6u) && logged("RUNNING outcome=refused value=3"));
+        assert(logged(follow ? "refuses resolution 6 now; the streams follow" : "refuses resolution 6 now; a running stream keeps"));
+        if (follow) assert(atomic_load(&resource_id[0]) == 180 && ps_capture_opening_average() == 62988000u / 4);
+        assert(!experiment.pending[PS_EXP_LARGE] && !logged("disabled") && !logged("kbit=50000"));
+        ps_capture_set_reopening(0);
+    }
+    // 1440p alike; a smaller size ends the stream as before, as 1080p would outgrow the client's decoder.
+    setup(0x13000040u, 0, 0, 0, 0, 0, 5);
+    fake_output = 0x144;
+    fake_decide = large_refused;
+    ps_capture_slot_set_follow_size(0, 1);
+    ps_capture_set_reopening(1);
+    assert(open_and_close() == 0 && ps_capture_video_resolution() == 4 && record_u32(0x18) == 4 && !ps_capture_size_refused());
+    assert(ps_capture_opening_average() == 20000000u / 16 * 9 && logged("refuses resolution 5 now; the streams follow"));
+    setup_small(0x10200006u, 0, 0, 2);
+    fake_decide = small_fails;
+    ps_capture_slot_set_follow_size(0, 1);
+    ps_capture_set_reopening(1);
+    assert(open_and_close() != 0);
+    assert(ps_capture_video_resolution() == 2 && logged("output refuses resolution 2 now; a running stream keeps its size") &&
+           ps_capture_size_refused() && !logged("follow"));
+    ps_capture_set_reopening(0);
+    ps_capture_slot_set_follow_size(0, 0);
     // An output without a mode (or a changed one) during a reopen counts against nothing either, also after the 3 s and
     // above 50 Mbit/s: the stream keeps its rate whether that was proven or not (issue 62's first reopen left the rest of
     // that stream at 50 Mbit/s), and no variant or switch moves.
@@ -901,6 +1031,6 @@ int main(void)
     fake_decide = NULL;
     unlink(marker);
 
-    puts("PASS: experimental switches through the open path (variants, first frame, fallback, off until restart, verified firmware, reopen grace, stuck capture)");
+    puts("PASS: experimental switches through the open path (variants, first frame, fallback, off until restart, verified firmware, reopen grace, following the output's size, stuck capture)");
     return 0;
 }

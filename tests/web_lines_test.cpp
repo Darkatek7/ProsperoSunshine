@@ -45,6 +45,11 @@ int main() {
     assert(console_user("1b1d9382").at("name").empty());
     const auto profiles = device_profiles("ABC-1 1b1d9381,guest");
     assert(profiles.at("uuid") == "ABC-1" && profiles.at("profiles") == "1b1d9381,guest");
+    const auto follow_default = device_follow_size("default off");
+    assert(follow_default.at("uuid") == "default" && follow_default.at("follow") == "off");
+    const auto follow = device_follow_size("ABC-1 on");
+    assert(follow.at("uuid") == "ABC-1" && follow.at("follow") == "on");
+    assert(device_follow_size("ABC-2").at("follow").empty());
 
     const auto app = app_entry("PPSA01234 hidden Some Store App");
     assert(app.at("id") == "PPSA01234" && app.at("state") == "hidden" && app.at("name") == "Some Store App");

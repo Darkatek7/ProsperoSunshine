@@ -135,7 +135,9 @@ frames it reads and, when it has to, waits less than one refresh before it start
 
 The host can serve a small web page, so a phone or PC in your network can do what the app does without leaving the game:
 see the host's status, version and firmware, enter the PIN of a pending pairing, end a device's stream, rename or remove
-paired devices, choose the console profiles each device plays as and which of them reach the console's menus, [hide apps](#hiding-apps) from devices you don't trust, change the settings, read or download the end of `sunshine.log` and `host_diag.log`, get the same
+paired devices, choose the console profiles each device plays as and which of them reach the console's menus, let a device
+follow the console's output size (a 4K stream goes on at 1080p when a game switches to 120 Hz, see
+[Known limits](#known-limits)), [hide apps](#hiding-apps) from devices you don't trust, change the settings, read or download the end of `sunshine.log` and `host_diag.log`, get the same
 diagnostic report as the app's (ready to paste into an issue), and restart the host.
 It is off until you set a login, and nothing listens on its port before that.
 
@@ -442,6 +444,18 @@ address.
   120 Hz (the Mario 64 port, RetroArch): at 120 Hz a standard PS5 captures 1080p at most, and the host's log names 120 Hz
   as the reason. With **Settings → Screen and Video → Video Output → 120 Hz Output** set to Off, such titles run at 60 Hz
   and 4K stays (measured on 13.00 with the Mario 64 port: a 4K stream came back at 4K when it started, and a new one got 4K).
+  To keep 120 Hz Output on and the stream going, turn on **Follow the output's size** for the device on the
+  [web page](#web-page) (Devices): its stream then goes on at 1080p, at the bitrate scaled down as for a stream that starts
+  at 1080p. At the next title switch whose output takes the old size again (the 120 Hz game closed), it goes back to 1440p
+  or 4K, with a second short gap in the picture while the capture reopens; if the console still refuses, it stays at
+  1080p until the title switch after. A stream that starts while such a game is in front starts at 1080p and goes up
+  the same way when the game closes. The setting counts per device: when several devices share a picture, the ones that
+  follow go on at 1080p and the ones that don't end, and it goes back up only when every device on it follows and asked
+  for that size. It is off by default (`follow_output_size = 1` in `sunshine.conf` turns it
+  on for devices without their own setting), because the client has to handle a size change mid-stream: Moonlight for
+  Windows with its default D3D11 decoder showed a broken picture for the rest of the stream (issue 39). Moonlight for
+  Android on a Fire TV and Moonlight on an iPhone went down to 1080p and back to 4K with hardware decoding and kept a clean
+  picture; other Android and iOS devices are likely to do the same.
 - At 4K the console can show "Gameplay recording paused because you entered a blocked scene" shortly after the stream starts
   (seen in GTA III). The stream keeps running.
 - HEVC and HDR are offered on firmware 13.00 and 10.20, elsewhere H.264 unless you turn on the
@@ -635,7 +649,8 @@ switch off and choose **Save and restart host**.
 ## Development control socket
 
 The host listens on TCP **47995** with a line-based control socket: `STATUS`, `PAIRINGS`, `PIN [<id>] <pin> [name]`,
-`DEVICES`, `STREAMS`, `ENDSTREAM <uuid>`, `RENAME <uuid> <name>`, `UNPAIR <uuid>`, `REPORT`, `AUTOLOAD [ON|OFF]`, `RELISTEN`, `PROBE`,
+`DEVICES`, `STREAMS`, `ENDSTREAM <uuid>`, `RENAME <uuid> <name>`, `UNPAIR <uuid>`, `FOLLOWSIZE`,
+`SETFOLLOWSIZE <uuid> <on|off|unset>`, `REPORT`, `AUTOLOAD [ON|OFF]`, `RELISTEN`, `PROBE`,
 `CANCELPIN <id>`, `WEBLOGIN [SET <user> <password>|ON|OFF|FORGET]` and `QUIT`. It is **unauthenticated**. By default it listens on `127.0.0.1` only (ROADMAP P9.1), so the app on the
 console can use it but the LAN cannot. Creating the empty file `/data/prosperosunshine/control_lan` re-enables LAN
 access for development. Do this only on trusted networks.

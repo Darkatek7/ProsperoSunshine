@@ -136,6 +136,16 @@ uint32_t ps_capture_slot_video_resolution(int slot);
 int ps_capture_slot_fall_back_mode(int slot);
 void ps_capture_slot_set_reopening(int slot, int on);
 int ps_capture_slot_size_refused(int slot);
+// Whether the device of the stream reading the slot follows the output's size (device_follow_size.hpp), for its next
+// reopens: then a 1440p or 4K size the output refuses after the grace, or at once at a mode that can't hold it (120 Hz),
+// reopens at 1080p with the rate scaled as a new stream's fallback, instead of size_refused. Counts against no switch.
+// Off unless set.
+void ps_capture_slot_set_follow_size(int slot, int on);
+// Whether the slot's last open_or_fall_back succeeded at 1080p after the output refused the larger size it asked for: the
+// arbitrator refused its resource at RUNNING, or OpenVideo refused it at a mode that can't hold it, and the output the 1080p
+// open read holds that size or runs at 120 Hz (a title in front), so a later one may take it again. 0 for a fallback after
+// a switch or the encoder failed, for an output that never takes the size (a 1080p TV), and for an open without fallback.
+int ps_capture_slot_fell_back_for_output(int slot);
 // The video out mode the slot's last open to reach OpenVideo read (0 before the first), for what the log tells the user
 // (capture/output_mode.h).
 uint32_t ps_capture_slot_open_output(int slot);

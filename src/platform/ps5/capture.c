@@ -85,6 +85,11 @@ static atomic_int refused_value[PS_CAPTURE_SLOTS];  // data[0] of the answer tha
 // The last open was refused while the output had no mode or changed it; the next opens reopen a running stream's capture;
 // the last reopen was refused by a settled output, so the stream can't go on at its size.
 static atomic_int unsettled[PS_CAPTURE_SLOTS], reopening[PS_CAPTURE_SLOTS], size_refused[PS_CAPTURE_SLOTS];
+// The device of the stream that reads the slot follows the output's size: a reopen the output refuses at 1440p or 4K goes on
+// at 1080p (video_ps5.cpp ends the joined streams whose devices don't).
+static atomic_int follow_size[PS_CAPTURE_SLOTS];
+// The last open fell back to 1080p because the output refused the size for now (ps_capture_slot_fell_back_for_output).
+static atomic_int output_fell_back[PS_CAPTURE_SLOTS];
 // The video out mode the last open read, after its repeats (capture/output_mode.h).
 static atomic_uint open_output[PS_CAPTURE_SLOTS];
 // How long after a capture loss a settled output's 0x81950008 at OpenVideo still keeps a running stream's mode for the
@@ -1125,6 +1130,9 @@ void ps_capture_set_experimental(const int switches[PS_EXP_SWITCH_COUNT], const 
 static int open_or_fall_back(int slot, ps_capture **out)
 {
     atomic_store(&size_refused[slot], 0);
+    atomic_store(&output_fell_back[slot], 0);
+    // The size a fallback to 1080p left because the output refused it, 0 for none or another cause.
+    uint32_t output_refused = 0;
     for (;;) {
         const uint32_t codec = atomic_load(&video_codec[slot]), ten_bit = atomic_load(&video_ten_bit[slot]);
         const uint32_t resolution = atomic_load(&video_resolution[slot]), timing = atomic_load(&video_timing[slot]);
@@ -1175,12 +1183,23 @@ static int open_or_fall_back(int slot, ps_capture **out)
             SLOG(slot, "video out mode %#x can't hold resolution %u%s\n", output, resolution,
                  ps_output_at_120hz(output) ? " (120 Hz)" : "");
         const int refused_in_grace = refused_at_open && reopen && since_loss < REOPEN_GRACE_MS && !output_too_small;
+        // The arbitrator answered RUNNING with no, before the mode was read: at 120 Hz it refuses 1440p's and 4K's resource
+        // there (13.00, "4K NG(4K120)" in its log). A timeout or a revoked grant is not that.
+        const int resource_refused = rc == PS_CAPTURE_ERROR && failed_step && strcmp(failed_step, "RUNNING") == 0 &&
+                                     atomic_load(&refused[slot]) && !atomic_load(&revoked[slot]);
         const int settling = (rc && reopen && atomic_load(&unsettled[slot])) || refused_in_grace;
+        // Streams that follow the output's size go on at 1080p where the others end: at a settled output after the grace,
+        // or at once at a mode that can't hold the size (120 Hz). While the output has no mode, or within the grace, the
+        // next reopen may still get their size, as for the others. Their refusal at OpenVideo is the output's: it lowers
+        // no rate and steps no variant before the 1080p.
+        const int follows = rc && reopen && ps_reopen_may_follow(atomic_load(&follow_size[slot]), resolution) &&
+                            !atomic_load(&unsettled[slot]) && !refused_in_grace;
         pthread_mutex_lock(&experiment_lock);
         enum ps_exp_next next = PS_EXP_GIVE_UP;
         if (rc) {
             const int attributable =
-                rc == PS_CAPTURE_ERROR && atomic_load(&reached_encoder[slot]) && !settling && !output_too_small;
+                rc == PS_CAPTURE_ERROR && atomic_load(&reached_encoder[slot]) && !settling && !output_too_small &&
+                !(follows && refused_at_open);
             next = ps_exp_failed(&experiment, codec, ten_bit, resolution, average, attributable,
                                  atomic_load(&refused[slot]) && ps_exp_mode_may_fall_back(resolution));
             if (next == PS_EXP_FALL_BACK && refused_at_open) ps_exp_output_refused(&experiment, resolution);
@@ -1190,7 +1209,14 @@ static int open_or_fall_back(int slot, ps_capture **out)
         const ps_experiment after = experiment;
         pthread_mutex_unlock(&experiment_lock);
         log_disabled(&before, &after);
-        if (!rc) return 0;
+        if (!rc) {
+            // Only an output that may take the size later: one that holds it, or runs at 120 Hz, which a title sets for as
+            // long as it is in front. One that never takes it (a 1080p TV, 0x10) doesn't count.
+            const uint32_t now_output = atomic_load(&open_output[slot]);
+            atomic_store(&output_fell_back[slot],
+                         output_refused && (ps_output_at_120hz(now_output) || ps_output_holds(now_output, output_refused)));
+            return 0;
+        }
         if (next == PS_EXP_NEXT_VARIANT) continue;
         if (next == PS_EXP_LOWER_RATE) {
             // The peak keeps its share of the average. The client needs no word of this: it gets fewer bits, nothing else.
@@ -1210,7 +1236,7 @@ static int open_or_fall_back(int slot, ps_capture **out)
         // after them ends the stream, and the client's next one starts at what the output takes. So does one whose mode
         // can't hold the size, at once: on 13.00 a game set the output to 120 Hz (0x140), and 4K was refused for as long as
         // it stayed in front, in that stream's reopens and at the next stream's start.
-        if (next == PS_EXP_FALL_BACK && reopen) {
+        if (next == PS_EXP_FALL_BACK && reopen && !follows) {
             if (atomic_load(&unsettled[slot])) {
                 SLOG(slot, "output not settled: resolution %u kept for the next reopen\n", resolution);
             } else if (refused_in_grace) {
@@ -1223,7 +1249,20 @@ static int open_or_fall_back(int slot, ps_capture **out)
             }
             return rc;
         }
+        if (next == PS_EXP_FALL_BACK && follows) {
+            // The device of the stream reading this channel chose to follow the output's size (off by default): it goes on
+            // at 1080p, as a new stream would, and gets its size back at a later reopen whose output takes it (video_ps5.cpp,
+            // which also ends the joined streams that don't follow). Such a refusal counts against no switch: the
+            // 1440p/4K one stays as it was.
+            SLOG(slot, "output refuses resolution %u now; the streams follow the output's size: 1080p\n", resolution);
+            pthread_mutex_lock(&experiment_lock);
+            ps_exp_output_refused(&experiment, resolution);
+            pthread_mutex_unlock(&experiment_lock);
+        }
         if (next == PS_EXP_FALL_BACK && ps_capture_slot_fall_back_mode(slot)) {
+            // Whether the output refused the size, not a switch or the encoder: for video_ps5.cpp, which may take a new
+            // stream back up to it once the output does (ps_capture_slot_fell_back_for_output).
+            output_refused = (resource_refused || output_too_small) && ps_reopen_may_follow(1, resolution) ? resolution : 0;
             // A rate chosen for a larger picture, scaled to 1080p's; the reopens of this stream keep it.
             const uint32_t scaled = ps_exp_fall_back_rate(average, resolution);
             if (scaled != average && average) {
@@ -1272,6 +1311,13 @@ void ps_capture_slot_set_reopening(int slot, int on)
 void ps_capture_set_reopening(int on) { ps_capture_slot_set_reopening(0, on); }
 
 int ps_capture_slot_size_refused(int slot) { return valid_slot(slot) && atomic_load(&size_refused[slot]); }
+
+void ps_capture_slot_set_follow_size(int slot, int on)
+{
+    if (valid_slot(slot)) atomic_store(&follow_size[slot], on != 0);
+}
+
+int ps_capture_slot_fell_back_for_output(int slot) { return valid_slot(slot) && atomic_load(&output_fell_back[slot]); }
 
 uint32_t ps_capture_slot_open_output(int slot) { return valid_slot(slot) ? atomic_load(&open_output[slot]) : 0; }
 int ps_capture_slot_opening_frame_read(int slot) { return valid_slot(slot) && atomic_load(&opening_frame_read[slot]); }

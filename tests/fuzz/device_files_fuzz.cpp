@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The small files the host keeps in its data folder and reads at start, which a person or an older version may have left in
-// any state: device_profiles.txt, device_seats.txt, device_modes.txt, menu_profiles.txt, web_trusted.txt. Whatever is in them,
+// any state: device_profiles.txt, device_seats.txt, device_modes.txt, menu_profiles.txt, web_trusted.txt,
+// device_follow_size.txt. Whatever is in them,
 // a device never ends with more profiles than its line grants, and what the host writes reads back as it was.
 #include "fuzz_common.hpp"
+#include "control/device_follow_size.hpp"
 #include "control/device_modes.hpp"
 #include "control/device_profiles.hpp"
 #include "control/menu_access.hpp"
@@ -187,6 +189,28 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         FUZZ_CHECK(change_uuid_lines(file, {uuid, uuid}, false));
         const auto removed = read_uuid_lines(file);
         FUZZ_CHECK(std::count(removed.begin(), removed.end(), uuid) == std::max<long>(0, copies - 2));
+    }
+
+    // device_follow_size.txt: a line that doesn't read leaves its device at the default, and what is written reads back.
+    {
+        const fs::path file = dir / "device_follow_size.txt";
+        const std::string text = in.ConsumeRandomLengthString(200);
+        write_file(file, text);
+        DeviceFollowSize follow(file);
+        std::map<std::string, bool> expected;
+        std::istringstream lines(text);
+        for (std::string line; std::getline(lines, line);) {
+            std::istringstream fields(line);
+            std::string uuid, word, extra;
+            if (!(fields >> uuid >> word) || (fields >> extra)) continue;
+            if (const auto on = parse_follow_size(word)) expected[uuid] = *on;
+        }
+        FUZZ_CHECK(follow.all() == expected);
+        for (const auto &[uuid, on] : follow.all()) FUZZ_CHECK(plain_word(uuid) && follow.follows(uuid, !on) == on);
+        const std::string uuid = "dev-" + std::to_string(in.ConsumeIntegralInRange<int>(0, 9));
+        const bool on = in.ConsumeBool();
+        FUZZ_CHECK(follow.set(uuid, on) && DeviceFollowSize(file).all() == follow.all());
+        FUZZ_CHECK(follow.forget(uuid) && !DeviceFollowSize(file).get(uuid));
     }
     return 0;
 }

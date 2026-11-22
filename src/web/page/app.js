@@ -177,7 +177,7 @@ async function refresh() {
       loadUsers().catch(() => {});
     }
     renderMenus(lastMenus);
-    renderDevices(data.devices, data.streams, trusted);
+    renderDevices(data.devices, data.streams, trusted, data.host.follow_size_default === true);
   } catch (e) {
     failed(e);
   } finally {
@@ -454,14 +454,38 @@ function explainedBadge(d, profiles, why) {
   return badge;
 }
 
-function renderDevices(devices, streams = [], trusted = []) {
+// "Follow the output's size" (src/control/device_follow_size.hpp): when a game takes 1440p or 4K away (120 Hz), the device's
+// stream goes on at 1080p instead of ending. Off by default, as some clients break on a size change mid-stream.
+const followHelp = 'Go on at 1080p when the console takes 4K away (120 Hz games). Some clients can\'t follow a size change: '
+  + 'Moonlight on Windows shows a broken picture.';
+
+function followSwitch(d, followDefault) {
+  const on = d.follow_size ?? followDefault;
+  const input = el('input', { type: 'checkbox' });
+  input.checked = on;
+  input.addEventListener('change', () => setFollowSize(d, input.checked, followDefault));
+  return el('label', { class: 'check sub', title: followHelp },
+    input, ` Follow the output's size${d.follow_size == null ? ' (default)' : ''}`);
+}
+
+async function setFollowSize(d, on, followDefault) {
+  try {
+    // Back to the default when it says the same: sunshine.conf's follow_output_size then counts for it again.
+    await api('/api/devices/follow-size', { uuid: d.uuid, follow: on === followDefault ? 'unset' : on ? 'on' : 'off' });
+    notice(on ? `${d.name || d.uuid} follows the output's size.`
+      : `${d.name || d.uuid} keeps its size: its stream ends when the console takes the size away.`);
+    refresh();
+  } catch (e) { failed(e); refresh(); }
+}
+
+function renderDevices(devices, streams = [], trusted = [], followDefault = false) {
   const list = $('devices');
   if (!devices.length) {
     list.replaceChildren(el('li', { class: 'empty', text: 'No device is paired yet.' }));
     return;
   }
   // A rename in progress keeps its field while the list refreshes.
-  if (list.querySelector('input:focus')) return;
+  if (list.querySelector('input:not([type="checkbox"]):focus')) return;
   list.replaceChildren(...devices.map((d) => {
     const stream = streams.find((s) => s.uuid === d.uuid);
     const profiles = profilesOf(d.profiles, trusted.includes(d.uuid));
@@ -471,7 +495,8 @@ function renderDevices(devices, streams = [], trusted = []) {
       el('div', { class: 'grow' },
         el('div', { class: 'title', text: d.name || d.uuid }),
         el('div', { class: 'sub', text: d.mode ? `last mode ${d.mode}` : 'not streamed yet' }),
-        el('div', { class: 'sub', text: `Profiles: ${profiles.text}` })),
+        el('div', { class: 'sub', text: `Profiles: ${profiles.text}` }),
+        followSwitch(d, followDefault)),
       why ? explainedBadge(d, profiles, why)
         : profiles.badge ? el('span', { class: `badge ${profiles.badgeClass}`, text: profiles.badge }) : null,
       d.streaming === '1' ? el('span', { class: 'badge live', text: 'streaming' }) : null,

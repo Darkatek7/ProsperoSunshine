@@ -114,6 +114,13 @@ inline Record device_profiles(std::string_view line) {
             {"profiles", space == std::string_view::npos ? std::string() : std::string(line.substr(space + 1))}};
 }
 
+// FOLLOWSIZE: "default <on|off>", then "<uuid> <on|off>".
+inline Record device_follow_size(std::string_view line) {
+    const size_t space = line.find(' ');
+    return {{"uuid", std::string(line.substr(0, space))},
+            {"follow", space == std::string_view::npos ? std::string() : std::string(line.substr(space + 1))}};
+}
+
 // APPS: "<title id> <hidden|shown> <name>", the name the rest of the line (empty for a hidden title no longer installed).
 inline Record app_entry(std::string_view line) {
     const size_t first = line.find(' ');

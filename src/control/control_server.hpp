@@ -22,6 +22,11 @@
 //                                  (device_profiles.hpp: free, none, or ids and "guest" separated by commas)
 //   SETPROFILES <uuid> <profiles|unset> -> sets which profiles a paired device may play as; "unset" takes the setting
 //                                  away ("OK saved" / "ERR ..."). Every id must be a profile on the console.
+//   FOLLOWSIZE                  -> "OK default <on|off>" (follow_output_size in sunshine.conf), then "OK <uuid> <on|off>"
+//                                  per device with its own setting, then "END" (device_follow_size.hpp)
+//   SETFOLLOWSIZE <uuid> <on|off|unset> -> whether a paired device follows the console's output size when a game takes
+//                                  1440p or 4K away (120 Hz); "unset" gives it the default ("OK saved" / "ERR ..."). Counts
+//                                  from the stream's next capture loss.
 //   APPS                        -> "OK <title id> <hidden|shown> <name>" per installed title, then the hidden ids of titles
 //                                  no longer installed ("OK <id> hidden"), then "END" (app_access.hpp)
 //   SETAPPS <title id> <hidden|shown> -> hides an app from devices that aren't trusted, or shows it again ("OK saved")
@@ -47,6 +52,7 @@
 // can pair devices, change the web page's login and stop the host, so the host says so: a warning in its log, lan=1 in
 // STATUS, which the app's home page and the web page's Status show.
 #pragma once
+#include "control/device_follow_size.hpp"
 #include "control/device_modes.hpp"
 #include "control/device_profiles.hpp"
 #include "src/thread_safe.h"
@@ -86,6 +92,7 @@ private:
     std::shared_ptr<safe::event_t<bool>> shutdown_;
     DeviceModes modes_;
     DeviceProfiles profiles_;
+    DeviceFollowSize follow_size_;
     std::atomic_bool report_listening_{false};
     std::atomic_bool relisten_{false};
     std::atomic_bool client_local_{true};

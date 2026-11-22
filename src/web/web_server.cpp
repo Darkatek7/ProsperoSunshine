@@ -655,10 +655,22 @@ void routes(Server &server, State &state, ControlServer &control, const std::sha
             const auto record = device_profiles(line);
             profiles[record.at("uuid")] = record.at("profiles");
         }
+        // Whether each device follows the console's output size (device_follow_size.hpp): null while it uses the default,
+        // which the first line gives.
+        bool follow_default = false;
+        std::map<std::string, bool> follow;
+        for (const auto &line : ok_lines(control.handle("FOLLOWSIZE", Caller::web))) {
+            const auto record = device_follow_size(line);
+            if (record.at("uuid") == "default") follow_default = record.at("follow") == "on";
+            else follow[record.at("uuid")] = record.at("follow") == "on";
+        }
+        host["follow_size_default"] = follow_default;
         json devices = records(ok_lines(control.handle("DEVICES", Caller::web)), device);
         for (auto &d : devices) {
             const auto it = profiles.find(d.value("uuid", ""));
             d["profiles"] = profiles_unreadable ? json("none") : it == profiles.end() ? json(nullptr) : json(it->second);
+            const auto followed = follow.find(d.value("uuid", ""));
+            d["follow_size"] = followed == follow.end() ? json(nullptr) : json(followed->second);
         }
         // The profiles that reach the console's menus: null while they aren't chosen, else their ids (none: empty).
         json menus = nullptr;
@@ -737,6 +749,13 @@ void routes(Server &server, State &state, ControlServer &control, const std::sha
                            });
         if (!word(uuid, 64) || !plain) return send_error(response, SimpleWeb::StatusCode::client_error_bad_request, "check the profiles");
         send_answer(response, control.handle("SETPROFILES " + uuid + " " + profiles, ControlServer::Caller::web));
+    });
+    // {"uuid": ..., "follow": "on" | "off" | "unset"}: whether the device follows the console's output size.
+    post("^/api/devices/follow-size$", [&control](const Response &response, const json &body) {
+        const std::string uuid = text_field(body, "uuid"), follow = text_field(body, "follow");
+        if (!word(uuid, 64) || (follow != "on" && follow != "off" && follow != "unset"))
+            return send_error(response, SimpleWeb::StatusCode::client_error_bad_request, "follow must be on, off or unset");
+        send_answer(response, control.handle("SETFOLLOWSIZE " + uuid + " " + follow, ControlServer::Caller::web));
     });
     // {"profiles": "unset" | "none" | ids separated by commas}: which profiles reach the console's menus from Moonlight.
     post("^/api/menus$", [&control](const Response &response, const json &body) {

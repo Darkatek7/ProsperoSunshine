@@ -4,6 +4,7 @@
 #include "sunshine/video_ps5.hpp"
 #include "capture/capture_session.hpp"
 #include "capture/output_mode.h"
+#include "control/device_follow_size.hpp"
 #include "platform/ps5/capture.h"
 #include "video/capture_mode.hpp"
 #include "video/channel_choice.hpp"
@@ -14,6 +15,8 @@
 #include "src/globals.h"
 #include "src/input.h"
 #include "src/logging.h"
+#include "src/nvhttp.h"
+#include "src/platform/common.h"
 #include "src/rtsp.h"
 #include "src/stream.h"
 #include "src/video.h"
@@ -22,6 +25,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <mutex>
 #include <optional>
@@ -146,6 +150,15 @@ struct channel_t {
     // The open session its holder left behind for a joined stream to take over without closing and reopening the channel,
     // which cost about 185 ms of picture (STATUS.md). Only between the holder's end and the takeover.
     std::unique_ptr<prospero::CaptureSession> parked;
+    // What the channel delivered, and opened with, before a reopen followed the output down to 1080p (device_follow_size.hpp),
+    // or what a new stream asked for when the output refused it at the start (a title at 120 Hz in front). A later reopen
+    // whose output takes it again goes back to it. A joined stream that takes the channel over keeps it, open or reopened; a
+    // stream that opens the channel as a new one starts without, unless its own open fell back that way.
+    struct followed_t {
+        prospero::CaptureMode mode;
+        uint32_t average;  // bit/s
+    };
+    std::optional<followed_t> followed_from;
 };
 
 // Up to two channels, each with its own mode: a second one on profile 175 runs next to the first, up to 1080p (STATUS.md).
@@ -204,6 +217,27 @@ std::size_t wire_bytes(std::size_t bytes) {
 void log_capture_stuck() {
     BOOST_LOG(error) << "PS5 capture: the console's video capture is stuck (OpenVideo -1). Restart the console; restarting "
                         "the host doesn't help (issue 56)"sv;
+}
+
+// The streams on a channel as a reopen sees them, from their client certificates and the heights they asked for: whether
+// each device follows the output's size (device_follow_size.txt, else follow_output_size in sunshine.conf). Read anew at
+// each reopen, so a change on the web page counts from the next one. Called without captures.mutex.
+std::vector<prospero::SizeFollower> size_followers(const std::vector<std::pair<std::string, int>> &streams) {
+    const prospero::DeviceFollowSize settings(platf::appdata() / "device_follow_size.txt");
+    const auto clients = nvhttp::get_all_clients();
+    std::vector<prospero::SizeFollower> followers;
+    for (const auto &[cert, height] : streams) {
+        bool follows = config::ps5.follow_output_size;
+        for (const auto &client : clients) {
+            const std::string uuid = client.value("uuid", "");
+            if (!uuid.empty() && nvhttp::get_cert_by_uuid(uuid) == cert) {
+                follows = settings.follows(uuid, config::ps5.follow_output_size);
+                break;
+            }
+        }
+        followers.push_back({follows, height});
+    }
+    return followers;
 }
 
 // At most every 10 s, and only for a stream that keeps asking: what the keyframe policy did. Caller holds captures.mutex.
@@ -323,9 +357,9 @@ void capture(safe::mail_t mail, config_t config, stream::session_t *channel_data
     }
     int slot = 0;  // the channel this stream holds or joined
     // The session falls back to 1080p when the system refuses a larger or smaller mode.
-    const auto check_fallback = [&] {
+    const auto check_fallback = [&](bool logged = false) {
         const auto delivered = prospero::capture_mode_of(ps_capture_slot_video_resolution(slot));
-        if (delivered.height != delivered_height) {
+        if (delivered.height != delivered_height && !logged) {
             if (delivered.height == mode.height)
                 BOOST_LOG(info) << "PS5 capture: back to "sv << delivered.width << 'x' << delivered.height;
             else
@@ -432,21 +466,28 @@ void capture(safe::mail_t mail, config_t config, stream::session_t *channel_data
         uint32_t requested = config.bitrate > 0 ? static_cast<uint32_t>(config.bitrate) * 1000u : default_average;
         mode = wanted;
         low_rate = low_rate_wanted;
-        // A takeover keeps the running mode: the others keep the picture they had, and a friend on a slow link gets no more
-        // than before.
+        uint32_t average = 0;
+        // A takeover keeps the running picture: the size the channel delivers and the rate it last opened with, so the
+        // others keep the picture they had, and a friend on a slow link gets no more than before. The mode its holder
+        // opened it with stays the channel's, for the next takeover.
         if (took_over) {
             mode = ch.mode;
             low_rate = ch.low_rate;
             requested = ch.requested;
-            BOOST_LOG(info) << "PS5 capture: keeping the running mode "sv << mode.width << 'x' << mode.height << '@'
-                            << (low_rate ? 30 : 60) << ", "sv << requested / 1000 << " kbit/s"sv;
-        } else if (slot == 1 && mode.resolution > prospero::mode_1080p.resolution) {
-            // Profile 175 grants up to 1080p.
-            mode = prospero::mode_1080p;
-            BOOST_LOG(info) << "PS5 capture: the second channel delivers up to 1920x1080"sv;
+            average = ch.average;
+            BOOST_LOG(info) << "PS5 capture: keeping the running mode "sv << ch.delivered.width << 'x' << ch.delivered.height
+                            << '@' << (low_rate ? 30 : 60) << ", "sv << average / 1000 << " kbit/s"sv;
+        } else {
+            if (slot == 1 && mode.resolution > prospero::mode_1080p.resolution) {
+                // Profile 175 grants up to 1080p.
+                mode = prospero::mode_1080p;
+                BOOST_LOG(info) << "PS5 capture: the second channel delivers up to 1920x1080"sv;
+            }
+            average = std::min({requested, max_average, prospero::max_average_of(mode, low_rate)});
+            ch.delivered = mode;
         }
-        announce_mode(mode);
-        const uint32_t average = std::min({requested, max_average, prospero::max_average_of(mode, low_rate)});
+        const prospero::CaptureMode opens_at = ch.delivered;
+        announce_mode(opens_at);
         ch.mode = mode;
         ch.low_rate = low_rate;
         ch.requested = requested;
@@ -456,7 +497,6 @@ void capture(safe::mail_t mail, config_t config, stream::session_t *channel_data
         ch.shutdown = shutdown_event;
         ch.video_format = config.videoFormat;
         ch.hdr = hdr;
-        ch.delivered = mode;
         // The session the last holder left open, when this stream takes the channel over in its mode.
         std::unique_ptr<prospero::CaptureSession> session;
         if (took_over) session = std::move(ch.parked);
@@ -467,13 +507,15 @@ void capture(safe::mail_t mail, config_t config, stream::session_t *channel_data
             else ch.keyframes.expect_opening_keyframe(std::chrono::steady_clock::now());
         };
         // A channel that opens anew starts its keyframe policy anew; one taken over keeps what it learnt about the
-        // streams on it.
+        // streams on it. Only a stream that opens the channel as a new one starts without the size it followed down from
+        // (its own open may set one, below).
         if (!handed_over) ch.keyframes = {};
+        if (!took_over) ch.followed_from.reset();
         running_hdr[slot] = hdr;
         running_format[slot] = config.videoFormat;
         update_offers();
         std::string opening;
-        if (slot == 1) {
+        if (slot == 1 && !took_over) {
             opening = "PS5 capture: second channel on profile 175 for " + describe(ch) + ", " + std::to_string(average / 1000) + " kbit/s";
             if (captures.channels[0].streaming) opening += ", next to " + describe(captures.channels[0]);
         }
@@ -496,6 +538,211 @@ void capture(safe::mail_t mail, config_t config, stream::session_t *channel_data
             }
             captures.changed.notify_all();
         });
+        const auto codec = hevc ? prospero::Codec::hevc : prospero::Codec::h264;
+        bool lost = false;  // the session could not be reopened: nothing to hand over
+        // A reopen changed the picture's size (device_follow_size.hpp): no frame goes out before the IDR that carries the
+        // new parameter sets, so the client's decoder meets the new size there first.
+        bool await_idr = false;
+        uint32_t qp_coarser_logged = 0;
+
+        // The reopen of a running picture: after a capture loss, on the way back to the size the channel followed down
+        // from (go_back), and for a joined stream that takes over a channel whose session is gone. The stream keeps the size
+        // it delivers: the client set up its decoder for it (issue 39). The title that took the capture leaves the output
+        // without a mode for up to about 2 s (10.20), and the reopens wait for it. A settled output may refuse the mode for
+        // a moment too (issue 62), so in the first 3 s after `since` that is tried again as well (ps_capture_slot_set_reopening
+        // starts them). An output that still refuses the mode after them ends the stream, so the client starts anew at what
+        // it takes, unless this stream's device follows the output's size (`follow`, off by default): then a 1440p or 4K
+        // the output refuses goes on at 1080p (capture.c). Up to 20 s, 250 ms before each try (but the first, `at_once`).
+        enum class reopen_end { recovered, size_refused, left, failed };
+        const auto takeover_waits = [&] {
+            std::lock_guard lock(captures.mutex);
+            return !ch.joined.empty();
+        };
+        const auto reopen = [&](std::chrono::steady_clock::time_point since, bool follow, bool at_once) {
+            auto end = reopen_end::failed;
+            ps_capture_slot_set_follow_size(slot, follow);
+            ps_capture_slot_set_reopening(slot, 1);
+            for (bool first = true; !shutdown_event->peek() && std::chrono::steady_clock::now() - since < 20s; first = false) {
+                if (!first || !at_once) std::this_thread::sleep_for(250ms);
+                // The stream ended meanwhile: nobody would read what an open brings, unless a joined stream takes the
+                // channel over. That one still gets this try: a session that opens is handed to it, while on its own it
+                // opens the channel anew through this procedure.
+                if (shutdown_event->peek() && !takeover_waits()) break;
+                if (session->start() == 0) {
+                    end = reopen_end::recovered;
+                    break;
+                }
+                if (ps_capture_slot_size_refused(slot)) {
+                    end = reopen_end::size_refused;
+                    break;
+                }
+                if (ps_capture_stuck()) break;  // more tries only hold the stream up (issue 56)
+            }
+            ps_capture_slot_set_reopening(slot, 0);
+            ps_capture_slot_set_follow_size(slot, 0);
+            if (end == reopen_end::failed && shutdown_event->peek()) end = reopen_end::left;
+            return end;
+        };
+        // A reopen that didn't recover ends the stream, and there is nothing to hand over.
+        const auto reopen_failed = [&](reopen_end end) {
+            lost = true;
+            if (end == reopen_end::size_refused) {
+                const auto refused = prospero::capture_mode_of(ps_capture_slot_video_resolution(slot));
+                BOOST_LOG(error) << "PS5 capture: the console's output no longer takes "sv << refused.width << 'x'
+                                 << refused.height << at_120hz_note(slot, refused.resolution)
+                                 << ", ending the session; the next one starts at what it takes"sv
+                                 << (ps_reopen_may_follow(1, refused.resolution)
+                                         ? ". Devices set to follow the output's size (web page, Devices) go on at 1920x1080 instead"sv
+                                         : ""sv);
+                shutdown_event->raise(true);
+            } else if (end == reopen_end::left) {
+                // The stream ended while the capture was away (the client left, ENDSTREAM, a new stream from the same
+                // device): nothing failed that anyone would see, so no error. A joined stream that takes the channel over
+                // opens it itself, as a reopen of its running picture (with the grace and its own follow setting): the
+                // single try it had before could fail on a title still starting. A stuck capture is still said, the next
+                // stream fails on it as well.
+                BOOST_LOG(info) << "PS5 capture: the client left during a reopen"sv;
+                if (ps_capture_stuck()) log_capture_stuck();
+            } else {
+                BOOST_LOG(error) << "PS5 capture could not be reopened; ending the session"sv;
+                if (ps_capture_stuck()) log_capture_stuck();
+                shutdown_event->raise(true);
+            }
+        };
+        const auto log_reopened = [&](std::chrono::steady_clock::time_point since) {
+            BOOST_LOG(info) << "PS5 capture reopened after "sv
+                            << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - since).count()
+                            << " ms"sv;
+            if (const auto coarser = ps_capture_slot_qp_coarser(slot); coarser != qp_coarser_logged) {
+                qp_coarser_logged = coarser;
+                BOOST_LOG(warning) << "PS5 capture: the encoder lost the picture right after opening, QP "sv << coarser
+                                   << (coarser == 1 ? " step"sv : " steps"sv) << " coarser for this stream"sv;
+            }
+        };
+        // Whether this stream's device follows the output's size, read anew for each reopen.
+        const auto follows_size = [&] { return size_followers({{cert, config.height}}).front(); };
+        // The joined streams still going on, and whether each one's device follows the output's size.
+        const auto joined_followers = [&] {
+            std::vector<std::pair<std::string, int>> streams;
+            std::vector<joined_stream *> joined;
+            {
+                std::lock_guard lock(captures.mutex);
+                for (auto *j : ch.joined) {
+                    if (j->shutdown->peek()) continue;
+                    streams.emplace_back(j->cert, j->config->height);
+                    joined.push_back(j);
+                }
+            }
+            return std::pair{joined, size_followers(streams)};
+        };
+        // A smaller picture ends each joined stream whose device doesn't follow the output's size: its client set up its
+        // decoder for the size it had (issue 39). The ones that follow go on with it (device_follow_size.hpp).
+        const auto end_non_followers = [&](const prospero::CaptureMode &before, const prospero::CaptureMode &now) {
+            const auto [joined, followers] = joined_followers();
+            const auto ending = prospero::streams_ended_by_resize(followers, before.height, now.height);
+            if (ending.empty()) return;
+            std::lock_guard lock(captures.mutex);
+            for (const auto i : ending) {
+                joined_stream *j = joined[i];
+                if (std::find(ch.joined.begin(), ch.joined.end(), j) == ch.joined.end()) continue;  // it left meanwhile
+                BOOST_LOG(error) << "PS5 capture: the console's output no longer takes "sv << before.width << 'x' << before.height
+                                 << at_120hz_note(slot, before.resolution) << ", ending the stream of a device that joined channel "sv
+                                 << slot << "; the next one starts at what it takes. Devices set to follow the output's size "sv
+                                    "(web page, Devices) go on at "sv
+                                 << now.width << 'x' << now.height << " instead"sv;
+                j->shutdown->raise(true);
+            }
+        };
+        // After an open that recovered: what the channel delivers now against `before`. Smaller when the output no longer
+        // took the size and this stream's device follows it, larger on the way back (go_back).
+        const auto settle_size = [&](const prospero::CaptureMode &before, uint32_t average_before) {
+            const auto now = prospero::capture_mode_of(ps_capture_slot_video_resolution(slot));
+            const bool smaller = now.height < before.height, resized = now.height != before.height;
+            if (smaller)
+                BOOST_LOG(warning) << "PS5 capture: the console's output no longer takes "sv << before.width << 'x' << before.height
+                                   << (ps_output_at_120hz(ps_capture_slot_open_output(slot)) ? " (120 Hz)"sv : ""sv)
+                                   << ", going on at "sv << now.width << 'x' << now.height
+                                   << " for the devices that follow the output's size"sv;
+            else if (resized)
+                BOOST_LOG(info) << "PS5 capture: the console's output takes "sv << now.width << 'x' << now.height
+                                << " again, back to it for the devices that follow the output's size"sv;
+            if (resized) await_idr = true;
+            check_fallback(resized);
+            {
+                std::lock_guard lock(captures.mutex);
+                if (smaller && !ch.followed_from) ch.followed_from = channel_t::followed_t{before, average_before};
+                if (resized && !smaller) ch.followed_from.reset();
+                ch.average = ps_capture_slot_opening_average(slot);
+            }
+            if (smaller) end_non_followers(before, now);
+            return now;
+        };
+        // After a reopen that recovered at the size the channel followed down to: back to the size it followed down from,
+        // when the output that open read takes it and doesn't run at 120 Hz, and every stream on the channel follows the
+        // output's size and asked for at least that much (channel_may_return_to). At the first open after a loss the
+        // arbitrator may still hold the 120 Hz title's state and refuse at once (console round of 2026-11-22), so the way
+        // back waits for an open that read the output's mode. It stops the session and runs the reopen procedure once more,
+        // with its own grace and follow on: a second short gap for the client. An output that refuses still goes on at
+        // 1080p, and only the next loss tries again. False when the stream ends.
+        const auto go_back = [&] {
+            std::optional<channel_t::followed_t> from;
+            prospero::CaptureMode before;
+            uint32_t average_before = 0;
+            {
+                std::lock_guard lock(captures.mutex);
+                from = ch.followed_from;
+                before = ch.delivered;
+                average_before = ch.average;
+            }
+            const uint32_t output = ps_capture_slot_open_output(slot);
+            if (!from || before.height >= from->mode.height || !ps_output_holds(output, from->mode.resolution) ||
+                ps_output_at_120hz(output))
+                return true;
+            auto followers = joined_followers().second;
+            followers.insert(followers.begin(), follows_size());
+            if (!prospero::channel_may_return_to(followers, from->mode.height)) return true;
+            char shown[16];
+            std::snprintf(shown, sizeof shown, "%#x", static_cast<unsigned>(output));
+            BOOST_LOG(info) << "PS5 capture: the console's output takes "sv << from->mode.width << 'x' << from->mode.height
+                            << " again (video out mode "sv << shown
+                            << "), reopening at it for the devices that follow the output's size"sv;
+            const auto since = std::chrono::steady_clock::now();
+            session->stop();
+            ps_capture_slot_set_video_mode(slot, from->mode.resolution, low_rate ? 0 : 1);
+            ps_capture_slot_set_opening_bitrate(slot, from->average, from->average / 100 * (hevc ? 110 : 112));
+            if (const auto end = reopen(since, true, true); end != reopen_end::recovered) {
+                reopen_failed(end);
+                return false;
+            }
+            log_reopened(since);
+            if (const auto now = settle_size(before, average_before); now.height == before.height)
+                BOOST_LOG(info) << "PS5 capture: the console's output refused "sv << from->mode.width << 'x' << from->mode.height
+                                << " again, staying at "sv << now.width << 'x' << now.height
+                                << " for the devices that follow the output's size until the next title switch"sv;
+            return true;
+        };
+        // The reopen procedure, then the size it brought, then maybe the way back up. False when the stream ends.
+        const auto recover = [&](std::chrono::steady_clock::time_point since, bool at_once) {
+            prospero::CaptureMode before;
+            uint32_t average_before = 0;
+            {
+                std::lock_guard lock(captures.mutex);
+                before = ch.delivered;
+                average_before = ch.average;
+            }
+            // A channel that followed the output down reopens at what it delivers; going back up is go_back's.
+            if (const auto end = reopen(since, follows_size().follows, at_once); end != reopen_end::recovered) {
+                reopen_failed(end);
+                return false;
+            }
+            log_reopened(since);
+            settle_size(before, average_before);
+            if (!shutdown_event->peek() && !go_back()) return false;
+            std::lock_guard lock(captures.mutex);
+            opened();
+            return true;
+        };
+
         if (handed_over) {
             // Same mode, same encoder: the frames go on where the last holder stopped reading them, and this stream has
             // had its keyframe while it was joined.
@@ -506,13 +753,26 @@ void capture(safe::mail_t mail, config_t config, stream::session_t *channel_data
             }
             update_offers();
             BOOST_LOG(info) << "PS5 capture: took the open channel "sv << slot << " over, no reopen"sv;
+        } else if (took_over) {
+            // The holder's session is gone (its reopen failed or its client left during one): the channel opens anew for a
+            // stream whose client shows its picture already, so as a reopen of it, through the procedure above: at the
+            // size the channel delivers and the rate it last opened with, with the grace and this device's own follow
+            // setting. A new stream's fallback to 1080p would change the size under a client that didn't choose that
+            // (issue 39). A smaller picture ends the joined streams that don't follow the output's size.
+            ps_capture_slot_set_opening_bitrate(slot, average, average / 100 * (hevc ? 110 : 112));
+            ps_capture_slot_set_codec(slot, hevc ? 1 : 0);
+            ps_capture_slot_set_ten_bit(slot, hdr);
+            ps_capture_slot_set_video_mode(slot, opens_at.resolution, low_rate ? 0 : 1);
+            session = std::make_unique<prospero::CaptureSession>(prospero::make_ps5_capture_backend(codec, slot), codec);
+            const bool recovered = recover(std::chrono::steady_clock::now(), true);
+            update_offers();
+            if (!recovered) return;
         } else {
             if (!opening.empty()) BOOST_LOG(info) << opening;
             ps_capture_slot_set_opening_bitrate(slot, average, average / 100 * (hevc ? 110 : 112));
             ps_capture_slot_set_codec(slot, hevc ? 1 : 0);
             ps_capture_slot_set_ten_bit(slot, hdr);
             ps_capture_slot_set_video_mode(slot, mode.resolution, low_rate ? 0 : 1);
-            const auto codec = hevc ? prospero::Codec::hevc : prospero::Codec::h264;
             session = std::make_unique<prospero::CaptureSession>(prospero::make_ps5_capture_backend(codec, slot), codec);
             const int start_rc = session->start();
             update_offers();
@@ -534,15 +794,28 @@ void capture(safe::mail_t mail, config_t config, stream::session_t *channel_data
                 std::lock_guard lock(captures.mutex);
                 ch.average = ps_capture_slot_opening_average(slot);
             }
+            // A stream that starts while a title holds the output at 120 Hz gets 1080p (the arbitrator refuses 1440p's and
+            // 4K's resource then, or OpenVideo the size), and its picture would stay at that after the title closed. When its
+            // device follows the output's size, the channel counts as followed down from the size it asked for, at the rate
+            // that size would have opened with, and the next reopen whose output takes it goes back up to it (go_back): the
+            // title's close is such a reopen. Only for the output's refusal (capture.c says, and not for an output that never
+            // takes the size), not for a fallback after a switch or the encoder failed, and not on the second channel, whose
+            // 1080p is its profile's cap: it asked for no more.
+            if (ps_reopen_may_follow(1, mode.resolution) &&
+                ps_capture_slot_video_resolution(slot) == prospero::mode_1080p.resolution &&
+                ps_capture_slot_fell_back_for_output(slot) && follows_size().follows) {
+                {
+                    std::lock_guard lock(captures.mutex);
+                    ch.followed_from = channel_t::followed_t{mode, average};
+                }
+                BOOST_LOG(info) << "PS5 capture: the console's output takes no "sv << mode.width << 'x' << mode.height << " now"sv
+                                << (ps_output_at_120hz(ps_capture_slot_open_output(slot)) ? " (120 Hz)"sv : ""sv)
+                                << ", starting at "sv << prospero::mode_1080p.width << 'x' << prospero::mode_1080p.height
+                                << "; the stream goes up when it does, for the devices that follow the output's size"sv;
+            }
             BOOST_LOG(info) << "PS5 capture "sv << (hdr ? "HEVC HDR"sv : hevc ? "HEVC"sv : "H.264"sv)
                             << (slot ? " (second channel)"sv : ""sv) << " bitrate "sv << ps_capture_slot_opening_average(slot) / 1000
                             << " kbit/s (requested "sv << requested / 1000 << ')';
-            if (const auto asked = keyframe_client(channel_data, config); asked.remote) {
-                const auto pacing = asked.pacing;
-                BOOST_LOG(info) << "PS5 video: stream over the internet, up to "sv << pacing.burst_kb
-                                << " kB of a frame at once, the rest at "sv << pacing.pace_percent
-                                << "% of the stream's rate (internet_burst_kb, internet_pace_percent)"sv;
-            }
             // A capture that opens sends an IDR first, and the client's request at the stream's start waits for it (asking
             // the encoder as well brought a second IDR a few frames later). Where the open read that frame itself (H.264
             // below 11.00) the encoder is asked at once. Where the audio thread had opened the channel earlier, the first
@@ -551,10 +824,16 @@ void capture(safe::mail_t mail, config_t config, stream::session_t *channel_data
             std::lock_guard lock(captures.mutex);
             opened();
         }
+        if (!handed_over) {
+            if (const auto asked = keyframe_client(channel_data, config); asked.remote) {
+                const auto pacing = asked.pacing;
+                BOOST_LOG(info) << "PS5 video: stream over the internet, up to "sv << pacing.burst_kb
+                                << " kB of a frame at once, the rest at "sv << pacing.pace_percent
+                                << "% of the stream's rate (internet_burst_kb, internet_pace_percent)"sv;
+            }
+        }
         prospero::EncodedFrame frame;
         prospero::CaptureSession::Descriptor desc{};
-        bool lost = false;  // the session could not be reopened: nothing to hand over
-        uint32_t qp_coarser_logged = 0;
         auto keyframes_logged = std::chrono::steady_clock::now();
         // Moonlight asks for an IDR after loss; Avcap2 delivers one within 2-3 frames (R1). Every IDR is a large frame for
         // every stream on the channel, so the keyframe policy decides which requests reach the encoder, and when.
@@ -580,74 +859,10 @@ void capture(safe::mail_t mail, config_t config, stream::session_t *channel_data
             const auto status = session->read(frame, 100ms, {}, &desc);
             if (status == prospero::CaptureStatus::timeout) continue;
             if (status != prospero::CaptureStatus::frame) {
-                // Starting or closing a game takes the capture resource away for a moment; reopen
-                // instead of ending the stream. The reopened capture sends an IDR first (opened(), below).
+                // Starting or closing a game takes the capture resource away for a moment; reopen instead of ending the
+                // stream (recover, above). The reopened capture sends an IDR first (opened()).
                 BOOST_LOG(warning) << "PS5 capture lost ("sv << static_cast<int>(status) << "), reopening"sv;
-                const auto lost_at = std::chrono::steady_clock::now();
-                bool recovered = false, size_refused = false;
-                // The stream keeps the size it delivers: the client set up its decoder for it (issue 39). The title that
-                // took the capture leaves the output without a mode for up to about 2 s (10.20), and the reopens wait for
-                // it. A settled output may refuse the mode for a moment too (issue 62), so in the first 3 s after the loss
-                // that is tried again as well (ps_capture_slot_set_reopening below starts them). An output that still
-                // refuses the mode after them ends the stream, so the client starts anew at what it takes.
-                const auto takeover_waits = [&] {
-                    std::lock_guard lock(captures.mutex);
-                    return !ch.joined.empty();
-                };
-                ps_capture_slot_set_reopening(slot, 1);
-                while (!shutdown_event->peek() && std::chrono::steady_clock::now() - lost_at < 20s) {
-                    std::this_thread::sleep_for(250ms);
-                    // The stream ended meanwhile: nobody would read what an open brings, unless a joined stream takes the
-                    // channel over. That one still gets this try: a session that opens is handed to it, while on its own
-                    // it opens the channel anew with a single try.
-                    if (shutdown_event->peek() && !takeover_waits()) break;
-                    if (session->start() == 0) {
-                        recovered = true;
-                        break;
-                    }
-                    if ((size_refused = ps_capture_slot_size_refused(slot))) break;
-                    if (ps_capture_stuck()) break;  // more tries only hold the stream up (issue 56)
-                }
-                ps_capture_slot_set_reopening(slot, 0);
-                if (size_refused) {
-                    const auto delivered = prospero::capture_mode_of(ps_capture_slot_video_resolution(slot));
-                    BOOST_LOG(error) << "PS5 capture: the console's output no longer takes "sv << delivered.width << 'x'
-                                     << delivered.height << at_120hz_note(slot, delivered.resolution)
-                                     << ", ending the session; the next one starts at what it takes"sv;
-                    shutdown_event->raise(true);
-                    lost = true;
-                    break;
-                }
-                if (!recovered && shutdown_event->peek()) {
-                    // The stream ended while the capture was away (the client left, ENDSTREAM, a new stream from the
-                    // same device): nothing failed that anyone would see, so no error. A joined stream that takes the
-                    // channel over opens it itself. A stuck capture is still said, the next stream fails on it as well.
-                    BOOST_LOG(info) << "PS5 capture: the client left during a reopen"sv;
-                    if (ps_capture_stuck()) log_capture_stuck();
-                    lost = true;
-                    break;
-                }
-                if (!recovered) {
-                    BOOST_LOG(error) << "PS5 capture could not be reopened; ending the session"sv;
-                    if (ps_capture_stuck()) log_capture_stuck();
-                    shutdown_event->raise(true);
-                    lost = true;
-                    break;
-                }
-                BOOST_LOG(info) << "PS5 capture reopened after "sv
-                                << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() -
-                                                                                         lost_at).count()
-                                << " ms"sv;
-                if (const auto coarser = ps_capture_slot_qp_coarser(slot); coarser != qp_coarser_logged) {
-                    qp_coarser_logged = coarser;
-                    BOOST_LOG(warning) << "PS5 capture: the encoder lost the picture right after opening, QP "sv << coarser
-                                       << (coarser == 1 ? " step"sv : " steps"sv) << " coarser for this stream"sv;
-                }
-                check_fallback();
-                {
-                    std::lock_guard lock(captures.mutex);
-                    opened();
-                }
+                if (!recover(std::chrono::steady_clock::now(), false)) break;
                 continue;
             }
             const auto timestamp = capture_time(desc, frame.read_time, hevc);
@@ -660,6 +875,12 @@ void capture(safe::mail_t mail, config_t config, stream::session_t *channel_data
                 idr_events->pop();
                 crossing = keyframe_client(channel_data, config);
             }
+            if (await_idr && !frame.idr) {
+                std::lock_guard lock(captures.mutex);
+                ch.keyframes.frame_read(false);  // asks for the IDR if the opening one didn't come first
+                continue;
+            }
+            await_idr = false;
             {
                 std::lock_guard lock(captures.mutex);
                 ch.keyframes.frame_read(frame.idr);
@@ -670,6 +891,8 @@ void capture(safe::mail_t mail, config_t config, stream::session_t *channel_data
                     ch.keyframes.keyframe_sent(frame.read_time, wire_bytes(frame.bytes.size()));
                 }
                 for (auto *j : ch.joined) {
+                    // One ended for a size its client didn't set up for gets nothing more (end_non_followers).
+                    if (j->shutdown->peek()) continue;
                     if (!j->keyframe_seen && !frame.idr) continue;
                     j->keyframe_seen = true;
                     auto copy = std::make_unique<counted_packet>(std::vector<uint8_t>(frame.bytes), j->next_index++, frame.idr, j->session);

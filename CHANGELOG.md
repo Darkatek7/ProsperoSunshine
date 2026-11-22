@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Added
+
+- **A 1440p or 4K stream can go on at 1080p when a game switches the console to 120 Hz**, for devices you choose.
+  At 120 Hz a standard PS5 captures no 1440p or 4K, and the host ended such a stream. With **Follow the output's size**
+  turned on for a device on the web page (Devices), its stream goes on at 1920x1080 instead, at the bitrate scaled down
+  as for a stream that starts at 1080p, with a fresh keyframe carrying the new size first. The setting counts per device:
+  when devices share a picture (a second player joined the stream), the ones that follow go on at 1080p and the ones that
+  don't end, as before. At the next title switch whose output takes the old size again (the 120 Hz game closed), the
+  host goes back to it for a stream whose devices all follow and all asked for that size: it reopens the capture once
+  more at the old size and bitrate, which costs a second short gap in the picture. If the console still refuses it, the
+  stream stays at 1080p until the next title switch. A stream that starts while such a game is in front starts at 1080p
+  and goes up the same way when the game closes. Off by default, because some clients can't follow a size change
+  mid-stream (Moonlight for Windows with D3D11 showed a broken picture, issue 39); `follow_output_size = 1` in
+  `sunshine.conf` makes it the default for devices without their own setting. The control socket has `FOLLOWSIZE` and
+  `SETFOLLOWSIZE`, and `sunshine.log` says "the console's output no longer takes 3840x2160 (120 Hz), going on at
+  1920x1080 for the devices that follow the output's size" and, on the way back, "the console's output takes 3840x2160
+  again (video out mode 0x13c), reopening at it for the devices that follow the output's size".
+
 ### Changed
 
 - **Moonlight says which title is open when the host doesn't start a game.** While another title is open on the console,
@@ -12,6 +30,11 @@
 
 ### Fixed
 
+- **A device that joined another's 1440p or 4K stream is no longer switched to 1080p mid-stream** when the console's
+  output stops taking that size and the first device's stream ends because of it. The joined device took the capture
+  over and opened it like a new stream, which falls back to 1080p, so its picture changed size under a client that may
+  not handle that (issue 39). It now reopens the capture at the size its client shows, with the same few seconds of
+  patience as any reopen, and its stream ends too, unless it follows the output's size: then it goes on at 1080p.
 - **A game starting or closing no longer ends a running 1440p or 4K stream at once** (issue 62). When the console takes
   the capture away, the host reopens it at the stream's size. If `OpenVideo` refused that size (`0x81950008`) while the
   output's mode stayed the same, the stream ended after about 200 ms. Within 3 s of the loss such a refusal now keeps the

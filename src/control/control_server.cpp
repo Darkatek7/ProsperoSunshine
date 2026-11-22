@@ -14,6 +14,7 @@
 #include "sunshine/video_ps5.hpp"
 #include "web/web_login.hpp"
 #include "platform/ps5/console_users.h"
+#include "src/config.h"
 #include "src/logging.h"
 #include "src/network.h"
 #include "src/platform/common.h"
@@ -71,7 +72,7 @@ long long seconds_since(std::chrono::steady_clock::time_point start, std::chrono
 
 ControlServer::ControlServer(std::shared_ptr<safe::event_t<bool>> shutdown)
     : shutdown_(std::move(shutdown)), modes_(platf::appdata() / "device_modes.txt"),
-      profiles_(platf::appdata() / "device_profiles.txt") {
+      profiles_(platf::appdata() / "device_profiles.txt"), follow_size_(platf::appdata() / "device_follow_size.txt") {
     nvhttp::set_launch_listener([this](const nvhttp::launch_client_t &client) {
         modes_.remember(client.uuid, format_mode(client.width, client.height, client.fps));
     });
@@ -251,6 +252,7 @@ std::string ControlServer::handle_locked(const std::string &line, Caller caller)
         rtsp_stream::terminate_sessions_by_cert(cert);
         modes_.forget(uuid);
         profiles_.forget(uuid);
+        follow_size_.forget(uuid);
         // The web page names devices by uuid in its lists too.
         prospero::change_uuid_lines(platf::appdata() / "web_trusted.txt", {uuid}, false);
         prospero::change_uuid_lines(platf::appdata() / "web_risk_ack.txt", {uuid}, false);
@@ -316,6 +318,30 @@ std::string ControlServer::handle_locked(const std::string &line, Caller caller)
                             : set->users.empty() ? "guest only"s
                                                  : std::to_string(set->users.size()) + " profile(s)" + (set->guest ? " and guest" : ""))
                         << ')';
+        return "OK saved";
+    }
+    // Whether devices follow the console's output size when a game takes 1440p or 4K away (device_follow_size.hpp): the
+    // default first, as "default" is no uuid.
+    if (command == "FOLLOWSIZE") {
+        std::string out = "OK default "s + format_follow_size(config::ps5.follow_output_size) + '\n';
+        for (const auto &[uuid, on] : follow_size_.all()) out += "OK " + uuid + ' ' + format_follow_size(on) + '\n';
+        return out + "END";
+    }
+    if (command == "SETFOLLOWSIZE") {
+        std::string uuid, text, extra;
+        in >> uuid >> text;
+        if (uuid.empty() || text.empty() || (in >> extra)) return "ERR usage: SETFOLLOWSIZE <uuid> <on|off|unset>";
+        if (nvhttp::get_cert_by_uuid(uuid).empty()) return "ERR no such device";
+        std::optional<bool> on;
+        if (text != "unset") {
+            on = parse_follow_size(text);
+            if (!on) return "ERR usage: SETFOLLOWSIZE <uuid> <on|off|unset>";
+        }
+        if (!follow_size_.set(uuid, on)) return "ERR the setting could not be saved";
+        BOOST_LOG(info) << "Control: a paired device "sv
+                        << (!on ? "follows the default for the output's size"sv
+                            : *on ? "follows the output's size"sv
+                                  : "keeps its size when the output changes"sv);
         return "OK saved";
     }
     // Apps the operator hides from devices they don't trust (app_access.hpp, issue 36): every installed title, then the

@@ -37,7 +37,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     size_t total = 0;
     for (const std::string *line : {&answer, &text}) {
         total += touch(fields(*line, last)) + touch(status(*line)) + touch(device(*line)) + touch(pairing(*line)) +
-                 touch(console_user(*line)) + touch(device_profiles(*line)) + touch(app_entry(*line));
+                 touch(console_user(*line)) + touch(device_profiles(*line)) + touch(device_follow_size(*line)) +
+                 touch(app_entry(*line));
     }
     (void)total;
     for (size_t limit : {size_t{0}, size_t{1}, size_t{7}, size_t{100}}) {

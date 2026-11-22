@@ -25,4 +25,9 @@ static inline int ps_output_holds(uint32_t output, uint32_t resolution)
 // The output runs at 120 Hz, as a game sets it while the console's 120 Hz output is on: then a PS5 takes no 1440p or 4K.
 static inline int ps_output_at_120hz(uint32_t output) { return (output & PS_OUT_120HZ) != 0; }
 
+// Whether a reopen of a running stream whose size the output refuses may go on at 1080p, for streams that follow the output's
+// size (device_follow_size.hpp): only from 1440p or 4K. A smaller size at 1080p would outgrow what the client set its decoder
+// up for, and at 1080p there is nothing to fall back to.
+static inline int ps_reopen_may_follow(int follow, uint32_t resolution) { return follow && (resolution == 5 || resolution == 6); }
+
 #endif

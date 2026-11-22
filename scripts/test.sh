@@ -50,6 +50,7 @@ run_test upnp_test
 run_test upnp_client_test -I "$root/tests/upnp_stubs" -pthread
 run_test device_modes_test
 run_test device_profiles_test
+run_test device_follow_size_test
 run_test profile_rules_test
 run_test menu_access_test
 run_test stream_list_test
