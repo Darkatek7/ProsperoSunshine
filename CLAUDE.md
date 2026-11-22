@@ -101,6 +101,7 @@ Toolchain: PS5 Payload SDK v0.45 in the Docker image `prosperosunshine-sdk:v0.45
   to; upload the new archive there under its original file name when bumping one (needs the owner's OK, it publishes).
 - `STATUS.md` records only what was verified live, with how it was measured. Plans go in `ROADMAP.md`.
 - Commit only when asked; never push without being asked.
+- Subagents may run on Opus, Sonnet or Haiku; pick the model that fits the task.
 - Do not test rest mode on the console without asking first (risk to the homebrew environment). One test
   ended in a hung console that had to be switched off at the power button. Close all games first.
 - Publishing (push, GitHub release, store catalog PR, issue comments) needs the owner's OK each time. No
