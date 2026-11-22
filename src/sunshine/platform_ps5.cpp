@@ -7,6 +7,7 @@
 #include "input/gamepad_map.hpp"
 #include "input/keyboard_map.hpp"
 #include "input/pad_roles.hpp"
+#include "input/pad_settings.hpp"
 #include "input/pad_touch.hpp"
 #include "platform/ps5/haptic_envelope.hpp"
 #include "platform/ps5/haptic_guard.h"
@@ -42,7 +43,6 @@
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
-#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -610,6 +610,31 @@ struct kbm_t {
     std::optional<std::pair<float, float>> pointer;  // the last absolute position, for abs_mouse
 };
 
+// Whether sunshine.conf changed since the last look, looked at no more often than every 2 s: the pads' settings
+// (input/pad_settings.hpp) take effect within seconds of saving, in a running stream too.
+class settings_watch_t {
+public:
+    bool changed() {
+        const auto now = std::chrono::steady_clock::now();
+        if (now - checked_ < 2s) return false;
+        checked_ = now;
+        const auto written = write_time();
+        if (!written || *written == written_) return false;
+        written_ = *written;
+        return true;
+    }
+
+private:
+    static std::optional<std::filesystem::file_time_type> write_time() {
+        std::error_code ec;
+        const auto written = std::filesystem::last_write_time(config::sunshine.config_file, ec);
+        if (ec) return std::nullopt;
+        return written;
+    }
+    std::filesystem::file_time_type written_ = write_time().value_or(std::filesystem::file_time_type{});
+    std::chrono::steady_clock::time_point checked_ = std::chrono::steady_clock::now();
+};
+
 struct input_raw_t {
     std::mutex mutex;
     std::array<ps_pad *, MAX_GAMEPADS> pads{};
@@ -690,6 +715,8 @@ struct input_raw_t {
     bool game_in_front = true;  // refreshed every half second by poll_pad_output
     bool ps_all_players = false;  // ps_button_all_players: every pad may press PS and Create, not only the host's
     std::atomic_int knock_percent{100};  // trigger_knock_strength
+    prospero::PadSettings pad_settings;  // as last read, by input() and then poll_pad_output only
+    settings_watch_t settings_watch;     // poll_pad_output's, made before the first read so no change is missed
     prospero::PadRoles<MAX_GAMEPADS> roles;  // who is the host: a paired device, not a slot (GitHub issue 15)
     std::jthread output_thread;
     std::jthread haptic_thread;
@@ -757,13 +784,20 @@ static bool game_in_front() {
     return focused != 0;
 }
 
-// Sunshine doesn't know this key. Read again whenever the file changes, so a change takes effect within seconds, in a running
-// stream too, from the next effect the game sends.
-static void load_knock_strength(input_raw_t &input) {
-    const auto settings = config::parse_config(file_handler::read_file(config::sunshine.config_file.c_str()));
-    const auto found = settings.find("trigger_knock_strength");
-    const int percent = found == settings.end() ? 100 : std::clamp(std::atoi(found->second.c_str()), 0, 100);
-    if (input.knock_percent.exchange(percent) != percent) BOOST_LOG(info) << "PS5 input: trigger knock "sv << percent << '%';
+// Sunshine doesn't know these keys (input/pad_settings.hpp). Read at the start and again whenever the file changes, so a
+// change takes effect within seconds, in a running stream too: the knock from the next effect the game sends, the vibration
+// at once. Logs what changed.
+static void load_pad_settings(input_raw_t &input, bool first) {
+    auto read = prospero::read_pad_settings(config::parse_config(file_handler::read_file(config::sunshine.config_file.c_str())));
+    for (const auto &note : read.notes) BOOST_LOG(warning) << "PS5 input: "sv << note;
+    const auto before = std::exchange(input.pad_settings, std::move(read));
+    const auto &now = input.pad_settings;
+    input.knock_percent = now.knock;
+    input.haptics.set_strength(now.haptic_strength);
+    input.haptics_enabled = now.rumble;
+    if (now.knock != before.knock) BOOST_LOG(info) << "PS5 input: trigger knock "sv << now.knock << '%';
+    if (first || now.rumble != before.rumble || now.haptic_strength != before.haptic_strength)
+        BOOST_LOG(info) << "PS5 input: vibration "sv << (now.rumble ? "rumble"sv : "off"sv) << " at "sv << now.haptic_strength << '%';
 }
 
 // Reads what the system wants from each pad at the cadence of Remote Play's own reader and passes on
@@ -782,22 +816,12 @@ static void poll_pad_output(std::stop_token stop, input_raw_t *input) {
     std::array<bool, MAX_GAMEPADS> failed{};
     auto next_owner_check = std::chrono::steady_clock::now();
     bool any_pad = false;
-    std::error_code time_ec;
-    auto settings_written = std::filesystem::last_write_time(config::sunshine.config_file, time_ec);
-    auto settings_checked = std::chrono::steady_clock::now();
     for (unsigned tick = 0; !stop.stop_requested(); ++tick) {
         std::optional<bool> front;
         if (any_pad && tick % 50 == 0) front = game_in_front();
         const auto rumble = input->haptics.tick();
         const auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
-        if (const auto now = std::chrono::steady_clock::now(); now - settings_checked >= 2s) {
-            settings_checked = now;
-            const auto written = std::filesystem::last_write_time(config::sunshine.config_file, time_ec);
-            if (!time_ec && written != settings_written) {
-                settings_written = written;
-                load_knock_strength(*input);
-            }
-        }
+        if (input->settings_watch.changed()) load_pad_settings(*input, false);
         {
             std::lock_guard lock(input->mutex);
             if (front) input->game_in_front = *front;
@@ -853,19 +877,6 @@ int haptic_read_step(void *argument) {
 }
 }
 
-// Sunshine doesn't know these keys. Read again whenever the file changes, so a change takes effect within seconds, in a running
-// stream too.
-static void load_vibration_settings(input_raw_t &input) {
-    const auto settings = config::parse_config(file_handler::read_file(config::sunshine.config_file.c_str()));
-    const auto mode = settings.find("haptic_mode");
-    const auto level = settings.find("haptic_strength");
-    const bool rumble = mode != settings.end() && mode->second == "rumble";
-    const int strength = level == settings.end() ? 100 : std::clamp(std::atoi(level->second.c_str()), 0, 200);
-    input.haptics_enabled = rumble;
-    input.haptics.set_strength(strength);
-    BOOST_LOG(info) << "PS5 input: vibration "sv << (rumble ? "rumble"sv : "off"sv) << " at "sv << strength << '%';
-}
-
 // Reads the haptic channel during a stream and hands its level to poll_pad_output as rumble. Games made for the PS5 send their
 // vibration only this way; Moonlight has no channel for it, but it has the two motors. See docs/re/haptics.md.
 static void poll_haptics(std::stop_token stop, input_raw_t *input) {
@@ -877,9 +888,6 @@ static void poll_haptics(std::stop_token stop, input_raw_t *input) {
     alignas(16) uint8_t header[0x400];  // only 0x18 are known; room in case the call writes more
     prospero::HapticSplitter splitter;
     auto opened_at = std::chrono::steady_clock::now();
-    auto settings_checked = opened_at;
-    std::error_code time_ec;
-    auto settings_written = std::filesystem::last_write_time(config::sunshine.config_file, time_ec);
     std::error_code attempt_ec;
     if (std::filesystem::exists(haptic_attempt, attempt_ec)) {
         BOOST_LOG(warning) << "PS5 haptics: the host stopped during the last try, the channel stays closed"sv;
@@ -913,15 +921,6 @@ static void poll_haptics(std::stop_token stop, input_raw_t *input) {
             for (const auto *candidate : input->pads) pad = pad || candidate;
         }
         std::error_code ec;
-        const auto checked_now = std::chrono::steady_clock::now();
-        if (checked_now - settings_checked >= 2s) {
-            settings_checked = checked_now;
-            const auto written = std::filesystem::last_write_time(config::sunshine.config_file, time_ec);
-            if (!time_ec && written != settings_written) {
-                settings_written = written;
-                load_vibration_settings(*input);
-            }
-        }
         // A stopping host lets go of the channel first, while its session is whole, and doesn't keep that session open for later.
         const bool stopping = shutdown_event->peek();
         if (stopping && open) BOOST_LOG(info) << "PS5 haptics: closing the channel, the host is stopping"sv;
@@ -1127,8 +1126,7 @@ input_t input() {
         BOOST_LOG(info) << "PS5 input: the console's menus are for "sv << menus->users.size()
                         << " profile(s); on a device with profiles of its own, that decides PS and Create"sv;
     raw->game_in_front = game_in_front();
-    load_knock_strength(*raw);
-    load_vibration_settings(*raw);
+    load_pad_settings(*raw, true);
     raw->output_thread = std::jthread(poll_pad_output, raw);
     raw->haptic_thread = std::jthread(poll_haptics, raw);
     {
