@@ -197,14 +197,27 @@ struct TriggerEffects {
     std::array<uint8_t, 10> left, right;
 };
 
-// Effect 0x26 knocks against the finger, with a 3-bit strength for each of ten zones in bytes 2 to 5. A client writes it to the
-// controller as it is, and a game's full strength is a hard knock. percent is trigger_knock_strength, 0 to 100.
+// Effect 0x26 knocks against the finger: bytes 0 and 1 are a mask of ten zones, bytes 2 to 5 a 3-bit value for each, the
+// strength minus one (1 to 8, docs/re/adaptive-triggers.md). A client writes it to the controller as it is, and a game's full
+// strength is a hard knock. percent is trigger_knock_strength, 0 to 100: it scales the strength, rounded, and a zone that comes
+// out at 0 leaves the mask, so 0 means no knock.
 inline constexpr uint8_t trigger_effect_knock = 0x26;
 constexpr void soften_knock(uint8_t type, std::array<uint8_t, 10> &data, int percent) {
     if (type != trigger_effect_knock || percent >= 100) return;
+    const uint32_t scale = uint32_t(std::max(percent, 0));
+    uint32_t mask = data[0] | uint32_t(data[1]) << 8;
     const uint32_t packed = data[2] | uint32_t(data[3]) << 8 | uint32_t(data[4]) << 16 | uint32_t(data[5]) << 24;
     uint32_t softer = packed & 0xc0000000u;
-    for (int zone = 0; zone < 10; ++zone) softer |= (((packed >> (3 * zone) & 7u) * uint32_t(percent) + 50) / 100) << (3 * zone);
+    for (int zone = 0; zone < 10; ++zone) {
+        const uint32_t strength = ((packed >> (3 * zone) & 7u) + 1) * scale;
+        const uint32_t rounded = (strength + 50) / 100;
+        if (rounded == 0)
+            mask &= ~(1u << zone);
+        else
+            softer |= (rounded - 1) << (3 * zone);
+    }
+    data[0] = uint8_t(mask);
+    data[1] = uint8_t(mask >> 8);
     for (int i = 0; i < 4; ++i) data[2 + i] = uint8_t(softer >> (8 * i));
 }
 

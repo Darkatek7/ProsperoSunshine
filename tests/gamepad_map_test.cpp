@@ -6,7 +6,8 @@ using namespace prospero;
 
 int main() {
     {
-        // The knock of a shot, as Uncharted sends it: strength 7 in every zone comes out as 5, the rest of the block as it was.
+        // The knock of a shot, as Uncharted sends it: value 7 in every zone, strength 8 of 8. At 70% that is 5.6, rounded strength 6,
+        // value 5; the rest of the block as it was.
         TriggerBlock knock{0x03, 0x26, 0xff, 0x03, 0xff, 0xff, 0xff, 0x3f, 0, 0, 1, 0, 0x26, 0xff, 0x03, 0xff, 0xff, 0xff, 0x3f, 0, 0, 1, 0, 0};
         const auto zones = [](const std::array<uint8_t, 10> &data) {
             return data[2] | uint32_t(data[3]) << 8 | uint32_t(data[4]) << 16 | uint32_t(data[5]) << 24;
@@ -19,10 +20,24 @@ int main() {
         for (int zone = 0; zone < 10; ++zone) assert((zones(soft.left) >> (3 * zone) & 7u) == 5);
         assert(soft.right == soft.left);
         assert(soft.flags == full.flags);
-        // 0% silences the zones and leaves the bytes around them alone, the two bits above the zones too.
+        // 0% takes every zone out of the mask, so there is no knock at all, and leaves the bytes around the zones alone, the two
+        // bits above them too.
         knock[7] = 0xff;
         const auto silent = map_trigger_effects(knock, triggers_off, 0);
-        assert(zones(silent.left) == 0xc0000000u && silent.left[0] == 0xff && silent.left[8] == 1);
+        assert(silent.type_left == 0x26 && silent.left[0] == 0 && silent.left[1] == 0);
+        assert(zones(silent.left) == 0xc0000000u && silent.left[8] == 1);
+        // Zone by zone: the weakest strength (value 0) stays at 50% (0.5 rounds up) and goes at 40%; a zone outside the mask stays
+        // outside, and so does its value; values 3 (strength 4) and 7 (strength 8) at 40% become strengths 2 and 3.
+        TriggerBlock mixed{0x03, 0x26, 0x0b, 0x00, 0x00, 0x00, 0x00, 0x00, 0, 0, 1, 0, 0x05};
+        mixed[4] = 3 << 3 | 0;  // zone 0 value 0, zone 1 value 3, zone 2 value 0 (outside the mask)
+        mixed[5] = 7 << 1;       // zone 3 value 7 (bits 9 to 11)
+        const auto half = map_trigger_effects(mixed, triggers_off, 50);
+        assert(half.left[0] == 0x0b && (zones(half.left) & 7u) == 0 && (zones(half.left) >> 3 & 7u) == 1 && (zones(half.left) >> 9 & 7u) == 3);
+        const auto weak = map_trigger_effects(mixed, triggers_off, 40);
+        assert(weak.left[0] == 0x0a && weak.left[1] == 0);  // zone 0 left the mask, zones 1 and 3 stay
+        assert((zones(weak.left) & 7u) == 0 && (zones(weak.left) >> 3 & 7u) == 1 && (zones(weak.left) >> 6 & 7u) == 0 && (zones(weak.left) >> 9 & 7u) == 2);
+        const auto whole = map_trigger_effects(mixed, triggers_off, 100);
+        assert(whole.left[0] == 0x0b && whole.left[2] == mixed[4] && whole.left[3] == mixed[5]);
         // Other effects stay as they are.
         TriggerBlock resistance{0x03, 0x21, 0xe0, 0x03, 0, 0, 0, 0, 0, 0, 0, 0, 0x25, 0x14, 0, 1};
         const auto same = map_trigger_effects(resistance, triggers_off, 70);
