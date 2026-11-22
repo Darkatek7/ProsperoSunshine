@@ -6,6 +6,7 @@
 #include "input/gamepad_map.hpp"
 #include "input/keyboard_map.hpp"
 #include "input/keyboard_pad.hpp"
+#include "input/pad_settings.hpp"
 #include "input/pad_touch.hpp"
 #include "input/profile_rules.hpp"
 #include "input/title_profile.hpp"
@@ -80,6 +81,31 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         for (auto &byte : a) byte = in.ConsumeIntegral<uint8_t>();
         for (auto &byte : b) byte = in.ConsumeIntegral<uint8_t>();
         (void)map_trigger_effects(a, b);
+        // trigger_knock_strength on whatever block a game sends: only the zones of effect 0x26 change, a zone never gets
+        // stronger, and the mask only loses zones.
+        if (in.ConsumeBool()) a[1] = trigger_effect_knock;
+        const int knock = in.ConsumeIntegralInRange<int>(-10, 120);
+        const auto soft = map_trigger_effects(a, b, knock);
+        const auto full = map_trigger_effects(a, b);
+        FUZZ_CHECK(soft.type_left == full.type_left && soft.type_right == full.type_right && soft.flags == full.flags);
+        if (soft.type_left != trigger_effect_knock || knock >= 100) {
+            FUZZ_CHECK(soft.left == full.left);
+        } else {
+            const auto zones = [](const std::array<uint8_t, 10> &d) {
+                return d[2] | uint32_t(d[3]) << 8 | uint32_t(d[4]) << 16 | uint32_t(d[5]) << 24;
+            };
+            const uint32_t mask_soft = soft.left[0] | uint32_t(soft.left[1]) << 8, mask_full = full.left[0] | uint32_t(full.left[1]) << 8;
+            FUZZ_CHECK((mask_soft & ~mask_full) == 0 && (mask_soft >> 10) == (mask_full >> 10));
+            FUZZ_CHECK((zones(soft.left) & 0xc0000000u) == (zones(full.left) & 0xc0000000u));
+            for (int zone = 0; zone < 10; ++zone) FUZZ_CHECK((zones(soft.left) >> (3 * zone) & 7u) <= (zones(full.left) >> (3 * zone) & 7u));
+            for (int i = 6; i < 10; ++i) FUZZ_CHECK(soft.left[i] == full.left[i]);
+            if (knock <= 0) FUZZ_CHECK((mask_soft & 0x3ffu) == 0);
+        }
+        // The pads' percentages in sunshine.conf: a value in range, or 100 for anything else.
+        const std::string text = in.ConsumeRandomLengthString(16);
+        const int max = in.ConsumeBool() ? knock_strength_max : haptic_strength_max;
+        const Percent parsed = parse_percent(text, max);
+        FUZZ_CHECK(parsed.value >= 0 && parsed.value <= max && (!parsed.fell_back || parsed.value == 100));
     }
 
     // Fingers: at most two, ids of seven bits, positions on the pad.
