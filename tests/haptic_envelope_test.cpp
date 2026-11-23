@@ -81,6 +81,36 @@ int main() {
     }
     assert((during == std::array<std::uint8_t, 2>{16, 16} || during == std::array<std::uint8_t, 2>{0, 16} || during == std::array<std::uint8_t, 2>{0, 0}));
 
+    // A faint lasting signal at the channel's real rate, packets 19 and 23.6 ms apart, ticks every 10 ms: one level, not on and off
+    // every tick (Teardown on 13.00 after the extinguisher: 16 and 0 about every 10 ms). One change is a slow fade over a step.
+    for (const float level : {0.2f, 0.3f, 0.5f, 1.0f}) {
+        HapticEnvelope steady;
+        double next_packet = 0;
+        int packet = 0, changes = 0;
+        std::array<std::uint8_t, 2> before{};
+        for (int ms = 0; ms < 3000; ms += 10) {
+            for (; next_packet <= ms; next_packet += (packet++ % 2) ? 19.0 : 23.6) steady.feed({level, level});
+            const auto now = steady.tick();
+            if (ms >= 1500 && now != before) ++changes;
+            before = now;
+        }
+        assert(changes <= 1);
+    }
+
+    // A click with silent packets after it: gone within 100 ms.
+    HapticEnvelope tail;
+    tail.feed({0, 0.2f});
+    auto felt = tail.tick();
+    assert(felt[1] >= 16);
+    for (int ms = 10, next = 21; ms <= 100; ms += 10) {
+        if (ms >= next) {
+            tail.feed({0, 0});
+            next += 21;
+        }
+        felt = tail.tick();
+    }
+    assert((felt == std::array<std::uint8_t, 2>{0, 0}));
+
     // A game with its own rumble keeps it, and the channel comes back only after 5 s of quiet motors.
     constexpr std::array<std::uint8_t, 2> quiet{0, 0}, game{200, 10}, channel{64, 32};
     MotorChoice choice;
@@ -92,6 +122,6 @@ int main() {
     assert(choice.choose({0, 1}, quiet, 8000) == (std::array<std::uint8_t, 2>{0, 1}));  // one motor is enough
     assert(choice.choose(quiet, channel, 8010) == quiet);
 
-    puts("PASS: haptic packets to motor levels (click, silence, near-zero tail, cap, no hum, a game's own rumble first)");
+    puts("PASS: haptic packets to motor levels (click, silence, near-zero tail, cap, no hum, no flicker, a game's own rumble first)");
     return 0;
 }

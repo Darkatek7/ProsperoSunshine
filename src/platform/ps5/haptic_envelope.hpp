@@ -43,9 +43,12 @@ private:
     float low_ = 0;
 };
 
-// feed() from the reader for every packet, tick() every 10 ms from the pad thread: rises at once, gone after about 60 ms. Only what
-// stands out of the last quarter second counts, so a lasting sound doesn't become a hum. Levels are linear and capped at half of
-// a motor's range: at full range a DualSense over Bluetooth drowns everything else. Steps of 16 keep small changes off the network.
+// feed() from the reader for every packet, tick() every 10 ms from the pad thread: rises at once, gone 2 to 4 packets later (40 to
+// 90 ms). Only what stands out of the last quarter second counts, so a lasting sound doesn't become a hum. Levels are linear and
+// capped at half of a motor's range: at full range a DualSense over Bluetooth drowns everything else. Steps of 16 keep small
+// changes off the network. A level falls once per packet and holds in the ticks between: packets come every 21 ms, and falling
+// every tick took a faint lasting signal under the floor between two packets, so the motor went on and off every 10 ms (Teardown
+// on 13.00). Only when packets stop does it fall every tick.
 class HapticEnvelope {
 public:
     // haptic_strength in percent, at any time.
@@ -54,19 +57,28 @@ public:
     void feed(HapticLevels levels) {
         raise(low_in_, stands_out(low_base_, levels.low));
         raise(high_in_, stands_out(high_base_, levels.high));
+        fed_.store(true, std::memory_order_relaxed);
     }
 
     // Large motor, small motor.
     std::array<std::uint8_t, 2> tick() {
-        low_ = std::max(low_ * kFall, take(low_in_));
-        high_ = std::max(high_ * kFall, take(high_in_));
+        if (fed_.exchange(false, std::memory_order_relaxed)) {
+            idle_ = 0;
+            low_ *= kFallPerPacket;
+            high_ *= kFallPerPacket;
+        } else if (++idle_ > kHoldTicks) {
+            low_ *= kFall;
+            high_ *= kFall;
+        }
+        low_ = std::max(low_, take(low_in_));
+        high_ = std::max(high_, take(high_in_));
         return {motor(low_, kLowGain), motor(high_, kHighGain)};
     }
 
 private:
-    static constexpr float kFall = 0.6f, kFloor = 0.03f, kLowGain = 0.8f, kHighGain = 0.6f;
+    static constexpr float kFall = 0.6f, kFallPerPacket = kFall * kFall, kFloor = 0.03f, kLowGain = 0.8f, kHighGain = 0.6f;
     static constexpr float kBaseRate = 0.08f, kBaseShare = 0.85f;
-    static constexpr int kStep = 16, kCap = 128;
+    static constexpr int kStep = 16, kCap = 128, kHoldTicks = 3;
 
     static float stands_out(float &base, float level) {
         base += kBaseRate * (level - base);
@@ -86,6 +98,8 @@ private:
     }
 
     std::atomic<std::uint32_t> low_in_{0}, high_in_{0};
+    std::atomic<bool> fed_{false};
+    int idle_ = 0;
     float low_ = 0, high_ = 0, low_base_ = 0, high_base_ = 0;
     std::atomic<int> strength_{100};
 };
