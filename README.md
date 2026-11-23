@@ -546,6 +546,12 @@ address.
   client and the console (client or router firewall).
 - **iPhone:** works. An earlier bug (sound but no picture, because the host announced HEVC) is fixed.
 - **Black or paused picture for a moment:** expected when a game starts or exits (see limits).
+- **HEVC stutters on an Android TV box while Moonlight's statistics show 60 fps:** a known problem of Moonlight for Android
+  with Amlogic's HEVC decoder (`c2.amlogic.hevc.decoder`, for example in the onn. 4K Streaming Box and the Xiaomi TV Stick).
+  With the low-latency options Moonlight asks for, it shows only a few frames a second
+  ([moonlight-android#1584](https://github.com/moonlight-stream/moonlight-android/issues/1584),
+  [#1610](https://github.com/moonlight-stream/moonlight-android/issues/1610)). Use H.264 on such a device until Moonlight
+  has a fix. Issue 61 has the details, including an unofficial build without those options that played HEVC smoothly.
 - **Controller works on the home screen but not in an app:** turn off other controllers connected to the console (see
   limits).
 - **The TV switches to the PS5 when a stream starts:** the console sends HDMI-CEC One-Touch Play when the host adds the
