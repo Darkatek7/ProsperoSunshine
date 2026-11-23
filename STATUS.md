@@ -94,6 +94,22 @@ Issue 36“) und ein Debug-Build in jedem Release („Debug-Build (PR 29) zusamm
 
 ## Neuere Nachweise
 
+### Beta 0.6.7-beta.3 auf der Konsole (2026-11-23, 13.00)
+
+Messweg: Testclient unter Linux (`run_smoke.sh`, `--network host`), je 30 s auf dem Home-Bildschirm, wo nicht anders genannt.
+
+- **Lokale Builds von `27b572ab` aus dem Speicher**, normal und Debug: H.264 und HEVC 1080p60, mit dem normalen Build dazu HEVC
+  3840x2160 bei 60 fps. 1784 bis 1797 Bilder, je 0 fehlend, 59,94 fps, decodiert. Der Debug-Build schrieb je Öffnen ein Paar
+  Descriptor-Zeilen (`fallback 0`, Schritte 4004), der normale keine.
+- **Rumble und Knock mit dem normalen Build** in Astro's Playroom (Controller-Demo, Trigger gehalten): Jedes Halten von 1,5 s
+  blieb ein Stück, 1 und 3 Wechsel im Abstand von höchstens 10 ms je Lauf, kein Aus und wieder An. Knock bei 70 % 5, 4, 3, 3,
+  2, 1, 0, nach dem Entfernen des Schlüssels im laufenden Host 7 bis 1. `QUIT` mit offenem Kanal: `haptic Stop` und `Close`
+  mit `rc=0`, kein `haptic_blocked`.
+- **CI-Dateien installiert** (`SHA256SUMS` geprüft, App bei ShadowMountPlus neu registriert, „Restart host“ in der App):
+  `host version=0.6.7-beta.3 commit=27b572ab`, Host-Datei, Kopie im Autoload-Slot und ELF der App gleich (`d672d31b…`), die App
+  zeigt `v01.000.030` ohne „debug“. H.264 und HEVC 1080p60 und HEVC 4K60: 1795, 1794 und 1784 Bilder, je 0 fehlend, decodiert.
+  Ohne `haptic_mode` öffnet sich kein Haptik-Kanal (`vibration off at 100%`).
+
 ### Haptik als Rumble und Trigger-Knock (2026-11-22 und 23, 13.00, Debug-Builds `haptic01` bis `haptic03` aus dem Speicher, nicht veröffentlicht)
 
 Messweg: Testclient unter Linux (`run_smoke.sh`, `--network host`) in einer Variante, die R2 und L2 drücken und ein Pad wählen
