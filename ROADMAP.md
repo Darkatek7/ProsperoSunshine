@@ -23,8 +23,10 @@ nur ein erfolgreicher Build.
    - 10.x: ob Profil 175 dort neben 180 aufgeht. Schlägt es fehl, tritt das Gerät wie in 0.2.3 bei oder wird abgewiesen.
    Eine eigene Bitrate je Gerät auf demselben Kanal geht nicht, beide Kanäle teilen bei gleichem Codec und gleicher
    Auflösung den Encoder (`docs/status-archive.md`, „HDR-Metadaten, Slices, 120 fps, zweiter Kanal“).
-3. **120 fps:** `cfg+0x1c = 2` lehnt OpenVideo auf 13.00 mit 0x80c70004 ab (`slice_rate_probe`, `docs/status-archive.md`).
-   Weitere Spuren nur mit einem Titel, der 120 Hz ausgibt, und über die Prüfroutine in `docs/re/avcap2-exports.md`.
+3. **120 fps:** auf 13.00 nicht machbar, laut Code auch nicht auf der Pro. libSceVenc hat Presets nur für 29,97 und 59,94 fps;
+   Timing 2 heißt „Rate der Ausgabe“ und endet bei 120 Hz mit `0x80c70004`. Remote Play und Game Live Streaming nutzen nur
+   30 und 60 (`docs/re/encoder-options.md`, Abschnitt 4). Offen nur die Gegenprobe Timing 2 bei 60-Hz-Ausgabe (erwartet
+   59,94 fps). Bei jeder neuen Firmware die Preset-Tabelle von libSceVenc auf 119,88 fps (`0x2ed4`) durchsuchen.
 4. **Raumklang:** seit 0.3.1 hinter dem Schalter „Surround“, mit angenommener Reihenfolge (`docs/status-archive.md`, „Für
    0.3.1“). Offen ist, welcher der 12 Kanäle welcher Lautsprecher ist; das braucht eine Konsole, die 5.1 oder 7.1 ausgibt.
    Der Host loggt alle 30 s die Pegel der 12 Kanäle (`12-channel levels`); ein Bericht damit und mit dem, was aus welchem

@@ -108,7 +108,17 @@ Einzelheiten aus `0x14a00` (Öffnen):
 6. Code für 89,91 und 119,88 gibt es: `0x7960` rechnet 2997/5994/8991/11988 später in 30/60/90/120 um
    (`0x7b97..0x7be5`), die Helfer `0x87c0`, `0x8800`, `0xc210`, `0xc280` kennen `0x231f` und `0x2ed4`. Er ist aber erst
    nach der Preset-Suche erreichbar. **sicher.** Ein Preset für 90 oder 120 fps fehlt in dieser Firmware.
-7. Remote Play (`0x6f964`) lässt nur 30 und 60 durch. **sicher.**
+7. Remote Play (`0x6f964`) lässt nur 30 und 60 durch. **sicher.** Game Live Streaming setzt Timing nur auf 0 oder 1
+   (SceGameLiveStreaming `0x4d3d0`: `cfg+0x1c = (fps_flag == 1)`). **sicher.**
+8. PS5 Pro: `sceKernelHasTrinityMode` entscheidet in SceAvCapture nur über den 4K- und 1440p-Scan-in, nie über das Timing.
+   Die Preset-Tabelle `0x84d0` hat keinen Zweig für die Pro, 11988 scheitert dort genauso. **sicher** (Code), auf einer Pro
+   nicht gemessen.
+9. Bei 120-Hz-Ausgabe und Timing 1 nimmt der Scan-in vermutlich jedes zweite Bild: SceAvCapture `0x7f20` gibt einen Wert aus AvSetting
+   (`s-Egk+i6sAY` mit Timing und Ausgaberate) an `sceAvControlChangeScanInMode` weiter, bei Timing 2 fest 1. Kein Feld des
+   Datensatzes setzt ihn. **wahrscheinlich**, der NID ist unbenannt.
+10. Für neue Firmware: Der Code für 8991 und 11988 ist in libSceVenc schon da. Bekommt die Preset-Tabelle Einträge für `0x2ed4` (11988),
+    ginge Timing 2 bei 120-Hz-Ausgabe vermutlich ohne weitere Änderung. Bei jedem neuen Dump die erste Tabelle, die das
+    Gegenstück zu `0x7960` durchsucht, auf `0x2ed4` prüfen.
 
 Messung dazu (`docs/status-archive.md`, „HDR-Metadaten, Slices, 120 fps …“): Mario-64-Demo mit 120-Hz-Ausgabe, Timing 2
 → `0x80c70004` bei H.264 und HEVC. Das ist genau Schritt 3 und 4: Die Ausgabe meldet 120, Venc findet kein Preset.
