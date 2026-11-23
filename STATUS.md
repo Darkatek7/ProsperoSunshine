@@ -1,6 +1,6 @@
 # Arbeitsstand
 
-Stand: 22. November 2026, Beta 0.6.7-beta.2, dazu die Debug-Zeile zum Frame-Descriptor (noch nicht veröffentlicht). Hier steht nur, was live geprüft ist, mit dem Messweg. Was ausgeliefert ist:
+Stand: 23. November 2026, Beta 0.6.7-beta.3 (Haptik als Rumble, Trigger-Knock, Debug-Zeile zum Frame-Descriptor). Hier steht nur, was live geprüft ist, mit dem Messweg. Was ausgeliefert ist:
 `CHANGELOG.md`. Plan und Reihenfolge: `ROADMAP.md`. Architektur: `docs/adr/001-sunshine-port.md`.
 
 Die älteren Einträge (bis 4. November 2026) und die ersten Nachweise nach Roadmap stehen unverändert und mit denselben
