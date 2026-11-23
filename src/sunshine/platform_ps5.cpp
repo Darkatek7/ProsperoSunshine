@@ -44,6 +44,7 @@
 #include <cmath>
 #include <condition_variable>
 #include <cstring>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <mutex>
@@ -612,26 +613,32 @@ struct kbm_t {
 
 // Whether sunshine.conf changed since the last look, looked at no more often than every 2 s: the pads' settings
 // (input/pad_settings.hpp) take effect within seconds of saving, in a running stream too.
+// The size counts as well as the write time. Once in 17 saves over FTP (which truncates the file, then writes it) the host
+// kept the settings of a half-written file until the next save: the look came while the upload was still writing, and the
+// finished file showed the same write time, most likely because the console keeps it in whole seconds.
 class settings_watch_t {
 public:
     bool changed() {
         const auto now = std::chrono::steady_clock::now();
         if (now - checked_ < 2s) return false;
         checked_ = now;
-        const auto written = write_time();
-        if (!written || *written == written_) return false;
-        written_ = *written;
+        const auto seen = stamp();
+        if (!seen || *seen == seen_) return false;
+        seen_ = *seen;
         return true;
     }
 
 private:
-    static std::optional<std::filesystem::file_time_type> write_time() {
+    using stamp_t = std::pair<std::filesystem::file_time_type, std::uintmax_t>;
+    static std::optional<stamp_t> stamp() {
         std::error_code ec;
         const auto written = std::filesystem::last_write_time(config::sunshine.config_file, ec);
         if (ec) return std::nullopt;
-        return written;
+        const auto size = std::filesystem::file_size(config::sunshine.config_file, ec);
+        if (ec) return std::nullopt;
+        return stamp_t{written, size};
     }
-    std::filesystem::file_time_type written_ = write_time().value_or(std::filesystem::file_time_type{});
+    stamp_t seen_ = stamp().value_or(stamp_t{});
     std::chrono::steady_clock::time_point checked_ = std::chrono::steady_clock::now();
 };
 
