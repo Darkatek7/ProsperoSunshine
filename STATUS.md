@@ -76,7 +76,8 @@ Issue 36“) und ein Debug-Build in jedem Release („Debug-Build (PR 29) zusamm
    0.1.3). Mit offenem Spiel und laufendem Stream kam er nicht zurück, im ersten Test hing die Konsole. Moonlight kann die
    Konsole nicht wecken, Payloads stehen im Ruhemodus still (Archiv, „Stand 30. Oktober 2026“, „Wecken aus Moonlight“).
    Tests nur nach Rückfrage.
-8. **Haptik und Trigger:** Nur klassisches Rumble kommt an, die Haptik des DualSense nicht. Adaptive Trigger gehen nur mit
+8. **Haptik und Trigger:** Die Haptik des DualSense kommt nicht an. Mit `haptic_mode = rumble` (ab Werk aus) gibt der Host ihren
+   Pegel als Rumble an das Pad des Hosts, eine Annäherung („Haptik als Rumble und Trigger-Knock“). Adaptive Trigger gehen nur mit
    Moonlight am PC und bleiben nach dem Stream hart bis zum nächsten Verbinden (`docs/re/adaptive-triggers.md`).
 9. **HDR:** Avcap2 liefert keine Metadaten, der Host schickt feste HDR10-Werte. Geprüft an zwei echten Aufbauten: Moonlight
    am HDR-Fernseher und Moonlight unter Windows mit HDR-Bildschirm („Berichte eines Mitwirkenden“; Archiv, „HDR“).
@@ -92,6 +93,35 @@ Issue 36“) und ein Debug-Build in jedem Release („Debug-Build (PR 29) zusamm
     Store nicht eigens installiert worden.
 
 ## Neuere Nachweise
+
+### Haptik als Rumble und Trigger-Knock (2026-11-22 und 23, 13.00, Debug-Builds `haptic01` bis `haptic03` aus dem Speicher, nicht veröffentlicht)
+
+Messweg: Testclient unter Linux (`run_smoke.sh`, `--network host`) in einer Variante, die R2 und L2 drücken und ein Pad wählen
+kann, H.264 1080p60, wo nicht anders genannt. `sunshine.conf` per FTP geändert, auch im laufenden Stream. Gezählt aus den
+`rumble pad=…`- und `adaptive triggers`-Zeilen des Clients. Spiele: Teardown und Astro's Playroom (vom Dump des Besitzers
+installiert). `haptic03` ist `haptic02` mit dem Pegel, der je Paket fällt. Einzelheiten in `docs/re/haptics.md` und
+`docs/re/adaptive-triggers.md`.
+
+- **4K HEVC mit offenem Kanal:** 3840x2160 bei 80 Mbit/s vor einer Rauschseite im Browser (Ausgabe 60 Hz), je 90 s, zweimal mit
+  offenem und dreimal mit geschlossenem Kanal: 0 fehlende Bilder, kein `PS5 capture lost`.
+- **Nur das Pad des Hosts:** Teardown mit zwei Pads, der Feuerlöscher abwechselnd von beiden bedient: Rumble nur an Pad 0, an Pad 1
+  keine Zeile, auch während Teardown Pad 1 folgte. `haptic_strength` 50 und 200 galten im laufenden Stream. Klassische Motoren
+  setzt weder Teardown noch Astro (Astro mit `haptic_mode` aus: kein Rumble, keine `motors`-Zeile).
+- **Beenden mit offenem Kanal:** `QUIT` mit `rumble` und mit `haptic_mode` aus: Ton, Kanal und Aufnahme schlossen mit `rc=0`,
+  `exit_value=0`, kein `haptic_blocked`; der nächste Host streamte normal.
+- **Flackern:** Ein schwaches, anhaltendes Signal schaltete den Motor in `haptic02` alle 10 ms zwischen 0 und 16 (Teardown nach dem
+  ersten Sprühen). In Astro, je zwei Läufe je Build: gehaltener Trigger 2299 und 2287 Wechsel im Abstand von höchstens 10 ms in
+  `haptic02`, 1 und 1 in `haptic03`; Laufen 704 und 783 gegen 0 und 0. Schritte blieben Pulse von 41 ms, lange Klicks 273 bis 290 ms in
+  beiden Builds.
+- **Trigger-Knock:** Teardown schickt kein `0x26` (nur `0x05` und `0x21`). Astro schickt es auf der Seite „Adaptive Triggers“ der
+  Controller-Demo: bei 100 % unverändert (Werte 7 bis 1), bei 70 % 5, 4, 3, 3, 2, 1, 0, bei 0 % mit leerer Zonenmaske. Die neue
+  Einstellung galt im Stream nach etwa 1 s.
+- **Wächter für `sunshine.conf`** (Schreibzeit und Größe): 0 verpasste in 48 Speicherungen, darunter 8 mit einem Blick des Hosts
+  auf die halb geschriebene Datei. Verpasst werden weiter zwei gleich große Speicherungen in derselben Sekunde (3 von 3).
+- Alle 35 Streams mit diesen Builds ohne fehlende Bilder, `selfcheck … problems=0` in jedem Build.
+- **Nebenbefund:** Solange das virtuelle Pad eines Testwerkzeugs (RemoteEye) an der Konsole hing, fragte sie bei jedem Streamstart
+  „Who's using this controller?“ für das Pad des Hosts, und das Spiel bekam bis zur Antwort keine Eingabe. Ohne dieses Pad ordnete
+  sie das Pad des Hosts ohne Frage dem Nutzer zu.
 
 ### Der Ausgabegröße folgen (2026-11-22, 13.00, Debug-Builds `follow01` bis `follow03` aus dem Speicher, nicht veröffentlicht)
 

@@ -182,6 +182,11 @@ von P9.10.
   die Stärke 1 bis 8, gerundet; ergibt sie 0, fällt die Zone aus der Maske, also heißt 0 kein Klopfen. Uncharted schickt beim Schießen
   den Wert 7 in allen Zonen (Stärke 8 von 8), bei 70 % wird daraus Stärke 6; gemessen auf 9.60 mit Artemis und einem DualSense über
   Bluetooth. Der Host prüft alle 2 s, ob sich `sunshine.conf` geändert hat; ein neuer Wert gilt ab dem nächsten Effekt.
+- Auf 13.00 mit Astro's Playroom und dem Testclient nachgemessen (2026-11-23, Controller-Demo im Titelmenü, Seite „Adaptive
+  Triggers“): Ein Druck auf R2 oder L2 bringt `0x26` mit allen zehn Zonen, und das Spiel senkt den Wert alle 100 ms um eins, 7 bis 1;
+  in Ruhe liegt `0x25` an. Mit 70 % kamen 5, 4, 3, 3, 2, 1, 0 an, genau die gerundeten Stärken; mit 0 % blieb `0x26` mit leerer
+  Zonenmaske. `0x25` blieb in allen Fällen unverändert, Teardowns `0x21` bei 70 % ebenso. Ein in `sunshine.conf` gespeicherter Wert
+  galt im laufenden Stream nach etwa 1 s.
 - Beim Anlegen eines Pads geht der Ruhewert an beide Trigger, weil der Merker leer ist. Das löst auch einen Trigger, der von einer
   früheren Sitzung noch hart ist.
 
