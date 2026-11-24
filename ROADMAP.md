@@ -1,6 +1,6 @@
 # ProsperoSunshine Roadmap
 
-Stand: 8. November 2026, nach Release 0.5.0. Dieses Dokument sagt, was als Nächstes kommt. Was ausgeliefert ist, steht in
+Stand: 24. November 2026, nach 0.6.7-beta.3. Dieses Dokument sagt, was als Nächstes kommt. Was ausgeliefert ist, steht in
 `CHANGELOG.md`, was live geprüft ist, in `STATUS.md` (Kurzfassung und „Offen und bekannte Grenzen“). Ziel und Regeln für das
 PS5-Backend: `PLAN.md`. Bei Widersprüchen gilt für Fakten `STATUS.md`, für Reihenfolge und Abnahme dieses Dokument.
 
@@ -92,6 +92,10 @@ nur ein erfolgreicher Build.
 18. **Verlauf der letzten Streams auf der Webseite** (Wunsch aus Issue 63): je Stream Gerät, Modus, Dauer und verlorene
     Frames, um die Verbindung zu prüfen und Fehler einzugrenzen. Offen: wie viele Einträge, ob sie einen Neustart des Hosts
     überdauern, und woher die Zahl der verlorenen Frames kommt (der Host sieht nur, was Moonlight ihm über den Steuerkanal meldet).
+19. **Haptik als Rumble** (seit 0.6.7-beta.3, Issue 30, PR 35, `haptic_mode = rumble`): auf 13.00 mit dem Testclient in Teardown
+    und Astro's Playroom gemessen, von einem Mitwirkenden auf 9.60 (`STATUS.md`, „Haptik als Rumble und Trigger-Knock“). Offen:
+    echtes Moonlight mit einem DualSense und andere Firmware. Der Kanal gilt für die ganze Konsole, darum bekommt nur das Pad
+    des Hosts das Rumble.
 
 ## Bis 1.0
 
@@ -101,14 +105,15 @@ Spielen ohne Ausfall gelaufen ist, der Ruhemodus belegt oder klar ausgeschlossen
 Anleitung aus dem Store neu installiert hat.
 
 Erledigt seit 0.1.0: 60 fps, Moonlight-Discovery per mDNS, HEVC, HDR, 1440p und 4K, Modi unter 1080p, Rumble, Lichtleiste
-und adaptive Trigger, mehrere Spieler und ein eigener Modus je Gerät über den zweiten Aufnahmekanal, Tastatur und Maus.
+und adaptive Trigger, mehrere Spieler und ein eigener Modus je Gerät über den zweiten Aufnahmekanal, Tastatur und Maus, die
+Haptik von PS5-Spielen als Rumble (eine Annäherung, ab Werk aus) und ein abschwächbarer Trigger-Knock.
 
 Weiter offen: weitere Firmware-Versionen (Checkliste `docs/firmware-porting.md`; ResourceArbitrator per NID, Rest live zu
 prüfen).
 
-Bewusst nicht geplant: Haptik (Moonlight hat keinen Kanal dafür); harte Trigger nach dem Stream lassen sich nur in Moonlight
-beheben. AV1, Mikrofon und Internetzugriff durch den Host selbst (Moonlight über das Internet geht mit der eigenen
-Portfreigabe oder Tailscale).
+Bewusst nicht geplant: echte Haptik (Moonlight hat keinen Kanal dafür, der Host gibt nur ihren Pegel als Rumble weiter);
+harte Trigger nach dem Stream lassen sich nur in Moonlight beheben. AV1, Mikrofon und Internetzugriff durch den Host selbst
+(Moonlight über das Internet geht mit der eigenen Portfreigabe oder Tailscale).
 
 ## Risiken
 

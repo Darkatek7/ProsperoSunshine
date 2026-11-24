@@ -592,6 +592,9 @@ What the debug build adds:
 - **A stats line per stream every 5 seconds** in `sunshine.log`: the codec and mode delivered, the bit rate asked for and sent,
   the round-trip time, the recoveries and the frames the client reported missing, without who it is. The normal build writes
   it too with `min_log_level = debug`.
+- **Two lines on how evenly the capture delivers frames** in `sunshine.log`, after each open and every 5 minutes
+  (`PS5 video: channel 0 HEVC descriptor over 300 frames ...`). They help with streams that stutter on a firmware not
+  measured here. The normal build writes them too with `min_log_level = debug`.
 - **The home masked and floods held back:** in `host_diag.log`, `sunshine.log` and the kernel log, addresses become
   `<lan-1>`, `<tailscale-1>`, `<link-1>` or `<public-1>` and MAC addresses `<mac-1>` (see "What the files hide" below),
   host names in URLs and `Host` headers `<host-1>`, and the ids and the device name a client sends `<id-1>` and

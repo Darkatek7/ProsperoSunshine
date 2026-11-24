@@ -156,6 +156,9 @@ Toolchain: PS5 Payload SDK v0.45 in the Docker image `prosperosunshine-sdk:v0.45
   refused ports and starts the services anew in the same process.
 - Whether a game sends trigger effects: only some do (Teardown yes, GTA III not in the sessions measured), and among the official clients only
   Moonlight for PC passes them to a DualSense (a contributor reports R3VALATiON's Artemis fork on Android too, issue 30). See `docs/re/adaptive-triggers.md`.
+- The haptic channel (`haptic_mode = rumble`, `docs/re/haptics.md`) is one for the whole console. If the host stops while it is
+  open, or a call into it faults, the host leaves `haptic_blocked` in `/data/prosperosunshine/` and keeps the channel closed
+  until that file is deleted.
 - Autoload through the Payload Manager: `/data/pldmgr/autoload.txt`, slot `local/prospero-sunshine`.
 - A title may have no `/data` (9.60): then the app reaches the files listed in `src/control/file_bridge.cpp` through `FILE` and `INSTALL` on
   the control socket, while the host runs, and the host closes it through `/app0/app.quit`.

@@ -1,6 +1,7 @@
 # Firmware-Matrix
 
-Stand: 10. November 2026, Host 0.6.0; am 20. November 2026 ergänzt um 12.40 (Issue 62, Diagnosebericht mit Host 0.6.6).
+Stand: 10. November 2026, Host 0.6.0; am 20. November 2026 ergänzt um 12.40 (Issue 62, Diagnosebericht mit Host 0.6.6), am
+22. November um 11.40 (Issue 61, Diagnoseberichte mit Host 0.6.6 und Messungen des Nutzers).
 Was auf welcher Firmware nachgewiesen ist, mit dem Nachweis. Geprüft sind nur 13.00 und 10.20 (`STATUS.md`, „Kurzfassung“);
 alles andere sind Berichte anderer oder Vermutungen. Was am Host firmwareabhängig ist und wie eine neue Version geprüft wird:
 `docs/firmware-porting.md`. Die Sonde für eine unbekannte Firmware: `docs/firmware-probe.md`.

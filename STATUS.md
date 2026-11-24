@@ -12,7 +12,7 @@ hier fehlt (etwa in Code-Kommentaren), meinen diese Datei. „Archiv“ unten he
 **Der Host streamt.** Moonlight paart sich mit der PS5, startet „PS5 Screen“ oder ein installiertes Spiel und bekommt Bild,
 Spielton und Controller. Eine 30-Minuten-Sitzung und zehn Wiederverbindungen liefen fehlerfrei (Archiv, „Nachweise nach
 Roadmap“). Jedes Release seit 0.3.2 lief auf der Konsole mit 13.00 je 30 s in H.264 und HEVC 1080p60 und dekodierte
-fehlerfrei („Release 0.6.6 auf der Konsole“ und die Einträge davor).
+fehlerfrei („Beta 0.6.7-beta.3 auf der Konsole“ und die Einträge davor).
 
 **Firmware:** 13.00 und 10.20 (PS5 Pro) sind geprüft. Von 9.60, 10.40, 11.40, 13.40 und 13.60 gibt es Berichte von
 Nutzern und Mitwirkenden, gemessen ist dort hier nichts („Firmware-Sonde auf 9.60“, „Berichte nach 0.3.1“, „Belegter
@@ -31,12 +31,13 @@ auf Firmware 10.20“, „HDR“, „Quantisierer auf 10.x folgt der Bitrate“)
 „Für 0.3.1“).
 
 **Eingabe:** ein virtuelles DualSense je Moonlight-Controller, mit Touch und Bewegung (nur am Testclient gemessen),
-klassischem Rumble, Lichtleiste und adaptiven Triggern (Moonlight am PC). Tastatur und Maus gehen auf eine virtuelle
-Tastatur und Maus der Konsole. Ein Gerät ohne Controller spielt mit Tastatur und Maus als eigenes Pad, mit Profilen je
-Spiel: auf 10.20 vom Besitzer in GTA III gespielt, auf 13.00 nur am Testclient, ohne Spiel und Profile („Tastatur-Pad
-nach dem Review von PR 20“,
-„Release 0.3.3 auf der Konsole“; Archiv, „Tastatur und Maus“, „Tastatur und Maus als Controller“). Für Controller ohne
-Touchpad sind View und Menu zusammen der Touchpad-Klick („Touchpad ohne Touchpad und „Restart host“ im Stream“).
+klassischem Rumble, Lichtleiste und adaptiven Triggern (Moonlight am PC). Die Haptik von PS5-Spielen gibt der Host mit
+`haptic_mode = rumble` als Rumble an das Pad des Hosts, nur am Testclient gemessen („Haptik als Rumble und Trigger-Knock“).
+Tastatur und Maus gehen auf eine virtuelle Tastatur und Maus der Konsole. Ein Gerät ohne Controller spielt mit Tastatur und
+Maus als eigenes Pad, mit Profilen je Spiel: auf 10.20 vom Besitzer in GTA III gespielt, auf 13.00 nur am Testclient, ohne
+Spiel und Profile („Tastatur-Pad nach dem Review von PR 20“, „Release 0.3.3 auf der Konsole“; Archiv, „Tastatur und Maus“,
+„Tastatur und Maus als Controller“). Für Controller ohne Touchpad sind View und Menu zusammen der Touchpad-Klick („Touchpad
+ohne Touchpad und „Restart host“ im Stream“).
 
 **Mehrere Spieler:** Weitere Geräte treten einem laufenden Stream mit eigenem Pad bei. Ein Gerät mit anderem Codec,
 Dynamikbereich oder einer Auflösung bis 1080p bekommt einen zweiten Aufnahmekanal (13.00, Testclient). Ein Tester spielte
@@ -68,8 +69,9 @@ Issue 36“) und ein Debug-Build in jedem Release („Debug-Build (PR 29) zusamm
    die Hardware-Decoder unter Windows nehmen höchstens 32 und zeigen kein Bild; HEVC geht („Berichte nach 0.3.1“). Modi über
    1080p bietet der Host dort nur mit dem Experimental-Schalter an.
 5. **1440p und 4K im Spiel:** Bei manchen Titeln (Mario 64, Teardown) verweigert das System den großen Modus, der Stream
-   läuft dann in 1080p. 120 fps gibt es nicht, `OpenVideo` lehnt das Timing-Feld ab (Archiv, „1440p und 4K, H.264“,
-   „HDR-Metadaten, Slices, 120 fps, zweiter Kanal“).
+   läuft dann in 1080p. 120 fps gibt es nicht: libSceVenc hat Presets nur für 29,97 und 59,94 fps, `OpenVideo` lehnt das
+   Timing-Feld ab (`docs/re/encoder-options.md`, Abschnitt 4; Archiv, „1440p und 4K, H.264“, „HDR-Metadaten, Slices, 120 fps,
+   zweiter Kanal“).
 6. **Raumklang:** Welcher der 12 Kanäle welcher Lautsprecher ist, ist ungeprüft. Die Konsole im Test gibt Stereo aus, dann
    tragen nur vorne links und rechts Ton. Dafür braucht es eine Konsole mit 5.1- oder 7.1-Ausgabe („Raumklang auf 13.60“).
 7. **Ruhemodus:** Auf dem Startbildschirm ohne Spiel und Stream startet der Host seine Dienste danach neu (zwei Tests mit
