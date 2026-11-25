@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.6.7 (2026-11-25)
+
+The release of the three betas below. New since 0.6.7-beta.3:
+
+### Added
+
+- **Controller settings in the app and on the web page.** A new group, Controller, holds what was `sunshine.conf` only:
+  **Vibration** (`haptic_mode`, Off or Rumble), **Rumble level** (`haptic_strength`, 0 to 200 %) and **Trigger knock**
+  (`trigger_knock_strength`, 0 to 100 %). The host reads these three within seconds while it runs, so Save is enough;
+  Save's texts say so.
+- **Error correction for devices over the internet** (`internet_fec_percentage`, 0 to 80, unset by default). The share
+  of extra packets that rebuild lost ones was one number for every device, 20 %, taken out of the bitrate the picture
+  gets. A device over the internet (one that asks for Moonlight's small packets, as for the pacing of 0.6.5) can now
+  have its own; unset, it gets the value at home as before. The app and the web page show both in a new group, Error
+  correction, as **At home** and **Internet**, and the log names the share at each such stream's start. Measured on 13.00
+  with H.264 at 10 Mbit/s, moving content and packets dropped at random, three passes each: at 3, 5 and 10 % loss a
+  stream lost 36, 246 and 937 of about 1800 frames with a share of 10 %, 8, 40 and 359 with 20 %, and 0, 4 and 32 with
+  40 %, while the picture got 5.3, 4.8 and 3.8 Mbit/s. Loss in runs of 8 packets is helped less: at 10 % loss, 847, 688
+  and 572 frames. So 20 % stays the default, and 40 is worth trying on a path that loses packets (README, "Playing over
+  the internet").
+
+### Fixed
+
+- **`address_family = both` made the host IPv6 only** (issue 64). With that line in `sunshine.conf`, Moonlight over IPv4
+  no longer reached the host, on the LAN either: FreeBSD, and so the PS5, keeps an IPv6 socket to IPv6 unless told
+  otherwise, and Sunshine never told it (measured on 13.00 with 0.6.7-beta.3: the ports refused IPv4 and answered
+  IPv6). The sockets now take both. A second fault behind it ended every session at its start with `ENet couldn't open
+  UDP port 47999` on a console whose only IPv6 address is link-local; the control socket's address no longer goes
+  through a lookup. Measured on 13.00 inside the home network: with `both`, H.264 and HEVC over IPv4 without a missing
+  frame, and H.264 over the console's link-local IPv6 address likewise. A stream over IPv6 from outside is not tested;
+  the test console has no global IPv6 address (README, "Over IPv6").
+
+### Changed
+
+- The app's setting **Quit closes the game** is now **Quit closes game**, and **Error correction (%)** is **At home**
+  under Error correction, so that the first row of the Settings page fits the new group. The `sunshine.conf` keys are
+  the same.
+
 ## 0.6.7-beta.3 (2026-11-23, pre-release)
 
 ### Added

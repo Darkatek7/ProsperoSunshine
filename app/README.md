@@ -73,7 +73,8 @@ puts it back to the host's default (the key is then removed from the file). A ti
 UNSAVED; the bar under the tiles explains the focused one. **Save** writes the settings changed on the page and leaves the
 rest of the file as it is, so a setting changed meanwhile on the web page stays. The host reads the file only when it
 starts, so use **Save and restart host** (or Restart host later) to apply it.
-**Revert changes** goes back to what the file holds.
+**Revert changes** goes back to what the file holds. The three under **Controller** (Vibration, Rumble level, Trigger
+knock) are the exception: the host reads them within seconds while it runs, in a stream too, so **Save** is enough.
 
 | Setting | `sunshine.conf` key | Values | Without the key |
 | --- | --- | --- | --- |
@@ -83,6 +84,15 @@ starts, so use **Save and restart host** (or Restart host later) to apply it.
 | Encryption on the LAN | `lan_encryption_mode` | 0 off, 1 when the client supports it, 2 required | 0 |
 | Encryption over the internet | `wan_encryption_mode` | as above | 1 |
 | Base port | `port` | 1025 to 65514 | 47989 |
+| UPnP port forwarding | `upnp` | 1 on | off |
+| Pair over the internet | `pair_over_internet` | 1 on | off (pairing from the LAN and Tailscale only) |
+| Quit closes game | `close_game_on_quit` | 1 on | off |
+| PS for all players | `ps_button_all_players` | 1 on | off (only the host's controller has PS and Create) |
+| Error correction: At home | `fec_percentage` | 0 to 80 (%) | 20 |
+| Error correction: Internet | `internet_fec_percentage` | 0 to 80 (%) | the value at home |
+| Vibration | `haptic_mode` | off, rumble | off |
+| Rumble level | `haptic_strength` | 0 to 200 (%) | 100 |
+| Trigger knock | `trigger_knock_strength` | 0 to 100 (%) | 100 |
 | HEVC (8 bit) | `experimental_hevc` | 1 on | off |
 | HDR (10 bit) | `experimental_hdr` | 1 on | off |
 | 1440p and 4K | `experimental_large_modes` | 1 on | off |

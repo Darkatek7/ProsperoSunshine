@@ -118,12 +118,22 @@ Einzelheiten aus `0x14a00` (Öffnen):
    Datensatzes setzt ihn. **wahrscheinlich**, der NID ist unbenannt.
 10. Für neue Firmware: Der Code für 8991 und 11988 ist in libSceVenc schon da. Bekommt die Preset-Tabelle Einträge für `0x2ed4` (11988),
     ginge Timing 2 bei 120-Hz-Ausgabe vermutlich ohne weitere Änderung. Bei jedem neuen Dump die erste Tabelle, die das
-    Gegenstück zu `0x7960` durchsucht, auf `0x2ed4` prüfen.
+    Gegenstück zu `0x7960` durchsucht, auf `0x2ed4` prüfen. Nach der Messung unten kämen dann aber wohl nur 60 Bilder je
+    Sekunde an, als 119,88 beschriftet: Timing 2 halbiert die Bildfolge.
 
 Messung dazu (`docs/status-archive.md`, „HDR-Metadaten, Slices, 120 fps …“): Mario-64-Demo mit 120-Hz-Ausgabe, Timing 2
 → `0x80c70004` bei H.264 und HEVC. Das ist genau Schritt 3 und 4: Die Ausgabe meldet 120, Venc findet kein Preset.
 Der TSC-Stempel im Descriptor ergibt genau 59,94 fps (`docs/avcap2-descriptor.md`, w9), und frühere Smoke-Läufe zeigen
 `video_fps_avg 59.94`.
+
+Gegenprobe bei 60-Hz-Ausgabe (2026-11-25, 13.00, `slice_rate_probe.elf` auf dem Startbildschirm, Ausgabe `0x138`): Timing 2
+öffnet für H.264 und HEVC (720p, 1080p, 1440p), liefert aber **29,97 fps**, nicht 59,94: 89 bis 90 Bilder in 3 s, die
+TSC-Stempel gleichmäßig 33,37 ms auseinander, während die Läufe mit Timing 1 direkt davor und danach 181 Bilder und
+16,68 ms hatten. Die Köpfe der Streams nennen trotzdem 59,94 fps. Das passt zu Schritt 3 und 9 zusammen: Der Encoder
+bekommt die Rate der Ausgabe (60 → 5994, daher die Köpfe), der Scan-in bekommt bei Timing 2 fest den Wert 1 und nimmt
+damit jedes zweite Bild. Schritt 2 stimmt also für die Rate im Encoder, nicht für die Bildfolge. Timing 3 lehnt der
+Server weiter mit `0x81950001` ab. Für den Host ist Timing 2 damit ohne Nutzen: bei 60 Hz halbe Bildrate, bei 120 Hz
+kein Preset.
 
 `sceAvcap2GetVideoEncoderCapability` (Server `0x28d0` → libSceVenc `0xa4d0`, Export `39+oWg0ZObY`) liefert nur zwei
 Bits: Presets 100 und 200 je nach SDK-Version des Aufrufers (Schwelle `0x840f80`). Über Bildraten sagt sie nichts.
@@ -300,7 +310,7 @@ Nr. 1 braucht eine Probe oder einen Host-Schalter, Nr. 2 einen Testbau des Hosts
 | 4 | `cfg+0x138` = 0x50, `0x140` = 1, `0x144` = 1 (H.264 und HEVC) | Long-Term-Referenz als Ziel für RFI | öffnet, Bildgrößen kaum anders | `0x80c7xxxx`: Felder falsch gedeutet |
 | 5 | 10.x-Dump nach Abschnitt 7, dann Slice-Variante | H.264 auf 10.x unter Windows mit Hardware-Decoder | ≤ 30 Slices | Moonlight-Patch abwarten |
 | 6 | HEVC 1080p30, `cfg+0x2c4` = `0x37` gegen `0x6e` | richtige Werte für 30 fps | gleiches oder ruhigeres TSC-Raster | Feld lassen |
-| 7 | Timing 2 auf dem Startbildschirm (60 Hz) | bestätigt das Modell aus Abschnitt 4 | öffnet, 59,9 fps | Abschnitt 4 Schritt 2 neu lesen |
+| 7 | Timing 2 auf dem Startbildschirm (60 Hz) | bestätigt das Modell aus Abschnitt 4 | öffnet, 59,9 fps | Abschnitt 4 Schritt 2 neu lesen. **Gemessen 2026-11-25:** öffnet, aber 29,97 fps (Abschnitt 4, „Gegenprobe“) |
 | 8 | `B+6003nL0AI(h, 0)` und `(h, 1)` | vielleicht ein Latenzmodus | Änderung im Abstand w9 − Lesezeit | streichen |
 
 ## 11. Ausgeschlossen

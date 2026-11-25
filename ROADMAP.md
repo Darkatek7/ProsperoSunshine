@@ -1,6 +1,6 @@
 # ProsperoSunshine Roadmap
 
-Stand: 24. November 2026, nach 0.6.7-beta.3. Dieses Dokument sagt, was als Nächstes kommt. Was ausgeliefert ist, steht in
+Stand: 25. November 2026, nach Release 0.6.7. Dieses Dokument sagt, was als Nächstes kommt. Was ausgeliefert ist, steht in
 `CHANGELOG.md`, was live geprüft ist, in `STATUS.md` (Kurzfassung und „Offen und bekannte Grenzen“). Ziel und Regeln für das
 PS5-Backend: `PLAN.md`. Bei Widersprüchen gilt für Fakten `STATUS.md`, für Reihenfolge und Abnahme dieses Dokument.
 
@@ -25,8 +25,9 @@ nur ein erfolgreicher Build.
    Auflösung den Encoder (`docs/status-archive.md`, „HDR-Metadaten, Slices, 120 fps, zweiter Kanal“).
 3. **120 fps:** auf 13.00 nicht machbar, laut Code auch nicht auf der Pro. libSceVenc hat Presets nur für 29,97 und 59,94 fps;
    Timing 2 heißt „Rate der Ausgabe“ und endet bei 120 Hz mit `0x80c70004`. Remote Play und Game Live Streaming nutzen nur
-   30 und 60 (`docs/re/encoder-options.md`, Abschnitt 4). Offen nur die Gegenprobe Timing 2 bei 60-Hz-Ausgabe (erwartet
-   59,94 fps). Bei jeder neuen Firmware die Preset-Tabelle von libSceVenc auf 119,88 fps (`0x2ed4`) durchsuchen.
+   30 und 60 (`docs/re/encoder-options.md`, Abschnitt 4). Die Gegenprobe mit Timing 2 bei 60-Hz-Ausgabe ist gemessen: Es
+   öffnet, liefert aber nur 29,97 fps, weil der Scan-in dann jedes zweite Bild nimmt. Bei jeder neuen Firmware die
+   Preset-Tabelle von libSceVenc auf 119,88 fps (`0x2ed4`) durchsuchen.
 4. **Raumklang:** seit 0.3.1 hinter dem Schalter „Surround“, mit angenommener Reihenfolge (`docs/status-archive.md`, „Für
    0.3.1“). Offen ist, welcher der 12 Kanäle welcher Lautsprecher ist; das braucht eine Konsole, die 5.1 oder 7.1 ausgibt.
    Der Host loggt alle 30 s die Pegel der 12 Kanäle (`12-channel levels`); ein Bericht damit und mit dem, was aus welchem
@@ -96,6 +97,12 @@ nur ein erfolgreicher Build.
     und Astro's Playroom gemessen, von einem Mitwirkenden auf 9.60 (`STATUS.md`, „Haptik als Rumble und Trigger-Knock“). Offen:
     echtes Moonlight mit einem DualSense und andere Firmware. Der Kanal gilt für die ganze Konsole, darum bekommt nur das Pad
     des Hosts das Rumble.
+20. **IPv6** (Issue 64, `address_family = both`, seit 0.6.7 für IPv4 und IPv6): im Heimnetz über die link-lokale Adresse
+    gemessen. Offen: ein Stream von außen, echtes Moonlight über IPv6, und warum die Testkonsole keine weitere IPv6-Adresse
+    annimmt (ob die PS5 das überhaupt tut, entscheidet, ob der Weg für Nutzer ohne öffentliche IPv4-Adresse taugt).
+21. **Fehlerkorrektur über das Internet** (`internet_fec_percentage`, seit 0.6.7): mit künstlichem Verlust gemessen
+    (`STATUS.md`, „Fehlerkorrektur bei Verlust“). Offen: Berichte von echten Wegen (Mobilfunk, Tailscale), andere Bitraten,
+    und ob 40 % dort den kleineren Bildanteil wert sind. Davon hängt ab, ob der Wert ab Werk leer bleibt.
 
 ## Bis 1.0
 

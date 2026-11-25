@@ -1,6 +1,6 @@
 # Arbeitsstand
 
-Stand: 23. November 2026, Beta 0.6.7-beta.3 (Haptik als Rumble, Trigger-Knock, Debug-Zeile zum Frame-Descriptor). Hier steht nur, was live geprüft ist, mit dem Messweg. Was ausgeliefert ist:
+Stand: 25. November 2026, Release 0.6.7 (die drei Betas, dazu Controller- und Fehlerkorrektur-Einstellungen in der App und `address_family = both` für IPv4 und IPv6). Hier steht nur, was live geprüft ist, mit dem Messweg. Was ausgeliefert ist:
 `CHANGELOG.md`. Plan und Reihenfolge: `ROADMAP.md`. Architektur: `docs/adr/001-sunshine-port.md`.
 
 Die älteren Einträge (bis 4. November 2026) und die ersten Nachweise nach Roadmap stehen unverändert und mit denselben
@@ -12,7 +12,7 @@ hier fehlt (etwa in Code-Kommentaren), meinen diese Datei. „Archiv“ unten he
 **Der Host streamt.** Moonlight paart sich mit der PS5, startet „PS5 Screen“ oder ein installiertes Spiel und bekommt Bild,
 Spielton und Controller. Eine 30-Minuten-Sitzung und zehn Wiederverbindungen liefen fehlerfrei (Archiv, „Nachweise nach
 Roadmap“). Jedes Release seit 0.3.2 lief auf der Konsole mit 13.00 je 30 s in H.264 und HEVC 1080p60 und dekodierte
-fehlerfrei („Beta 0.6.7-beta.3 auf der Konsole“ und die Einträge davor).
+fehlerfrei („Release 0.6.7 auf der Konsole, lokale Builds“ und die Einträge davor).
 
 **Firmware:** 13.00 und 10.20 (PS5 Pro) sind geprüft. Von 9.60, 10.40, 11.40, 13.40 und 13.60 gibt es Berichte von
 Nutzern und Mitwirkenden, gemessen ist dort hier nichts („Firmware-Sonde auf 9.60“, „Berichte nach 0.3.1“, „Belegter
@@ -71,7 +71,8 @@ Issue 36“) und ein Debug-Build in jedem Release („Debug-Build (PR 29) zusamm
 5. **1440p und 4K im Spiel:** Bei manchen Titeln (Mario 64, Teardown) verweigert das System den großen Modus, der Stream
    läuft dann in 1080p. 120 fps gibt es nicht: libSceVenc hat Presets nur für 29,97 und 59,94 fps, `OpenVideo` lehnt das
    Timing-Feld ab (`docs/re/encoder-options.md`, Abschnitt 4; Archiv, „1440p und 4K, H.264“, „HDR-Metadaten, Slices, 120 fps,
-   zweiter Kanal“).
+   zweiter Kanal“). Timing 2 öffnet bei 60-Hz-Ausgabe, liefert aber 29,97 fps („Release 0.6.7 auf der Konsole, lokale
+   Builds“).
 6. **Raumklang:** Welcher der 12 Kanäle welcher Lautsprecher ist, ist ungeprüft. Die Konsole im Test gibt Stereo aus, dann
    tragen nur vorne links und rechts Ton. Dafür braucht es eine Konsole mit 5.1- oder 7.1-Ausgabe („Raumklang auf 13.60“).
 7. **Ruhemodus:** Auf dem Startbildschirm ohne Spiel und Stream startet der Host seine Dienste danach neu (zwei Tests mit
@@ -93,8 +94,64 @@ Issue 36“) und ein Debug-Build in jedem Release („Debug-Build (PR 29) zusamm
     Seite der Konsole (Archiv, „Stand 30. Oktober 2026“, Punkt 2 unter „Noch offen“).
 14. **Store:** Die Installation aus dem ProsperoStore klappte laut Nutzer einmal (2026-10-31); spätere Versionen sind aus dem
     Store nicht eigens installiert worden.
+15. **IPv6:** Mit `address_family = both` nur im Heimnetz über die link-lokale Adresse der Konsole gemessen. Die Testkonsole
+    nimmt keine andere IPv6-Adresse an, auch nicht aus dem ULA-Präfix des Netzes; ein Stream von außen über IPv6 ist
+    ungeprüft, ebenso echtes Moonlight über IPv6 („Release 0.6.7 auf der Konsole, lokale Builds“).
+16. **Fehlerkorrektur über das Internet:** `internet_fec_percentage` ist nur mit dem Testclient und künstlichem Verlust im LAN
+    gemessen (H.264, 10 Mbit/s). Welchen Verlust echte Wege haben und was der kleinere Bildanteil an Qualität kostet, ist offen.
 
 ## Neuere Nachweise
+
+### Release 0.6.7 auf der Konsole, lokale Builds (2026-11-25, 13.00)
+
+Zwei Runden mit lokalen Builds, installiert wie ein Release (App bei ShadowMountPlus neu registriert, „Restart host“ in der
+App; Host-Datei, Kopie im Autoload-Slot und ELF der App gleich): `20ed60b9` und danach `908b45f0`, der Stand des Releases
+bis auf Doku. Messweg: Testclient unter Linux (`run_smoke.sh`, `--network host`), je 30 s auf dem Home-Bildschirm, wo nicht
+anders genannt.
+
+- **Streams mit `908b45f0`:** normal H.264 und HEVC 1080p60 mit 1795 und 1793 Bildern, HEVC 3840x2160 bei 60 fps mit 1784,
+  Debug-Build aus dem Speicher H.264 und HEVC mit 1797 und 1792 Bildern. Je 0 fehlend, 59,94 fps, decodiert;
+  `selfcheck done … problems=0`. Die App zeigt `v01.000.031` ohne „debug“.
+- **Controller-Einstellungen in der App** (Gruppe „Controller“ rechts neben „Network“): Screenshot ohne Überlappung, das
+  Steuerkreuz erreicht die drei Kacheln von „Network“ und „Experimental“ aus und zurück. Vibration auf Rumble, Rumble level
+  150, Trigger knock 70 und „Save“ schrieben genau `haptic_mode = rumble`, `haptic_strength = 150` und
+  `trigger_knock_strength = 70`; der laufende Host meldete ohne Neustart `vibration rumble at 150%` und `trigger knock 70%`,
+  und im Stream danach öffnete der Haptik-Kanal. Quadrat auf jeder Kachel und „Save“: Datei wieder byte-gleich. Die Texte
+  bei „Save“ nennen die Ausnahme (`908b45f0`). Die Webseite ist dabei nicht geprüft (auf der Konsole ist ein Login gesetzt).
+- **Fehlerkorrektur für Geräte über das Internet** (Gruppe „Error correction“ mit „At home“ und „Internet“): „Internet“
+  auf 40 schrieb nur `internet_fec_percentage = 40`. Nach „Restart host“ meldete ein Stream mit 1024-Byte-Paketen (so fragt
+  Moonlight über das Internet) `error correction 40% (internet_fec_percentage)`, und der Encoder bekam 5308 statt 7308 kbit/s
+  von 10000 verlangten; mit 1392-Byte-Paketen (LAN) fehlt die Zeile. Ohne den Schlüssel: `error correction 20%
+  (fec_percentage)`.
+- **`address_family = both`:** Auf 0.6.7-beta.3 antworteten 47984, 47989, 47990 und 48010 damit nur noch über IPv6, über IPv4
+  kam „refused“. Mit `20ed60b9` antworteten sie auf beiden, aber jeder Stream endete bei ANNOUNCE mit `ENet couldn't open UDP
+  port 47999: Invalid argument (errno 22)`. Mit `908b45f0`: H.264 und HEVC über IPv4 mit 1796 und 1793 Bildern, H.264 20 s
+  über die link-lokale IPv6-Adresse der Konsole mit 1197 Bildern, je 0 fehlend; die bestehende Kopplung galt über IPv6.
+  `STREAMS` nennt das IPv6-Gerät mit `%eth0`, `sessionUrl0` trägt denselben Zusatz. Ohne die Zeile danach wieder nur IPv4.
+  Die Konsole hat nur die link-lokale Adresse, obwohl das Netz ein ULA-Präfix verteilt.
+- **Timing 2 bei 60-Hz-Ausgabe** (`slice_rate_probe.elf`, Ausgabe `0x138`): öffnet für H.264 und HEVC, 89 bis 90 Bilder in
+  3 s, TSC-Abstand 33,37 ms, also 29,97 fps; Timing 1 davor und danach 181 Bilder. Timing 3: `0x81950001`
+  (`docs/re/encoder-options.md`, Abschnitt 4).
+
+**Fehlerkorrektur bei Verlust** (`908b45f0`, `loss_matrix.sh`, H.264 10 Mbit/s bei 60 fps, 1024-Byte-Pakete, Mario-64-Demo vor
+jedem Durchgang neu gestartet, je 30 s, drei Durchgänge je Anteil im Wechsel, 0 % ein Durchgang). Fehlende Bilder von rund
+1800, Median (die drei Werte):
+
+| Verlust | Anteil 10 % | 20 % | 40 % |
+| --- | --- | --- | --- |
+| zufällig 1 % | 0 (8 / 0 / 0) | 0 (0 / 0 / 0) | 0 (0 / 0 / 0) |
+| zufällig 3 % | 36 (32 / 40 / –) | 8 (8 / 8 / 12) | 0 (4 / 0 / 0) |
+| zufällig 5 % | 246 (264 / – / 227) | 40 (40 / 40 / 60) | 4 (4 / 4 / 4) |
+| zufällig 10 % | 937 (937 / 953 / 904) | 359 (344 / 421 / 359) | 32 (48 / 32 / 28) |
+| Bündel 1 % | 106 (106 / 80 / 136) | 76 (66 / 76 / 91) | 68 (77 / 68 / 59) |
+| Bündel 3 % | 309 (259 / 320 / 309) | 232 (175 / 232 / 244) | 189 (189 / 211 / 166) |
+| Bündel 5 % | 433 (439 / 433 / 431) | 407 (449 / 407 / 372) | 322 (340 / 322 / 307) |
+| Bündel 10 % | 847 (821 / 847 / 946) | 688 (688 / 636 / 732) | 572 (604 / 568 / 572) |
+
+Bündel heißt Verlust in Läufen von im Mittel 8 Paketen. Ohne Fehlerkorrektur (0 %) fehlten schon bei 1 % zufälligem Verlust
+680 Bilder. Ohne Verlust bekam das Bild 5293, 4795 und 3769 kbit/s bei 10, 20 und 40 % (Encoder-Budget 8308, 7308 und 5308).
+Zwei Läufe fehlen, weil ein gekoppeltes Gerät des Besitzers kurz beitrat. Drei frühere Durchgänge liefen auf einem Standbild
+der Demo und zählen nicht. Nicht gemessen: echte Wege, andere Bitraten und Codecs, die Bildqualität je Bit.
 
 ### Beta 0.6.7-beta.3 auf der Konsole (2026-11-23, 13.00)
 

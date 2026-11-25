@@ -86,7 +86,7 @@ the game keeps running on the console. If another game is open, in front or behi
 and starts nothing: Moonlight says which title is open (error 409). Close it first, on the console or in a "PS5 Screen"
 stream, then pick the game again. Media apps aren't listed; start those through "PS5 Screen".
 
-**Closing the game from Moonlight:** with **Quit closes the game** on in the app's **Settings**
+**Closing the game from Moonlight:** with **Quit closes game** on in the app's **Settings**
 (`close_game_on_quit = 1` in `sunshine.conf`, off by default), the host behaves like Sunshine on a PC for the game the stream
 started, or the one already in front when you picked it. After the stream it stays listed as
 running while it is in front, so Moonlight offers to resume or quit it, and picking another game asks to quit it first.
@@ -230,7 +230,7 @@ On a device with profiles of its own:
 - Only a device with at least one chosen profile, or a [spectator](#profiles-per-device), gets **"PS5 Screen"** in its app
   list, and the host refuses to start it for any other device, as a client can ask for an app by its id without seeing it.
   A spectator only watches: it has no input to reach the menus with. Any device can start a game from its list,
-  and leave it with Quit when **Quit closes the game** is on.
+  and leave it with Quit when **Quit closes game** is on.
 - While no game is in front (the home screen, an app of the console's, a media app or homebrew), the
   controllers, keyboard and mouse of other profiles do nothing, and a press says why: "<profile> can't use the console's
   menus. Start a game from Moonlight". They play again once a game is back in front. A game left open behind the home
@@ -371,6 +371,14 @@ Tips:
   stream's bitrate, and `internet_burst_kb` (16 by default, 2 to 64) is how much of a frame leaves at once. A path that
   still freezes may take lower values, such as 150 and 8; a value out of range keeps the default. The host's log names
   both at each stream's start (`PS5 video: stream over the internet, ...`).
+- **A path that loses packets** (mobile data, a weak Wi-Fi far away): **Error correction** in the app's Settings has a
+  value of its own for devices over the internet, **Internet** (`internet_fec_percentage` in `sunshine.conf`, 0 to 80;
+  unset, they get the value **At home**, 20 %). It is the share of extra packets that rebuild lost ones, and it comes
+  out of the bitrate the picture gets. Measured on 13.00 with H.264 at 10 Mbit/s and packets dropped at random: with
+  20 % a stream that loses 3 % of its packets lost 8 of 1800 frames, at 5 % it lost 40 and at 10 % it lost 359; with
+  40 % it lost 0, 4 and 32, and the picture got a fifth fewer bits. With 10 % it lost 36, 246 and 937. So leave it
+  alone on a clean path, and try 40 where the picture breaks up; loss in bursts is helped less (at 10 % loss in runs
+  of 8 packets, 40 % still lost a third of the frames, 20 % a little more). The host reads it when it starts.
 
 ### Forwarding the ports by UPnP
 
@@ -427,6 +435,24 @@ A contributor tested this on a PS5 Pro on 10.20 with Moonlight on iOS, and with 
 tested here. Without a payload on the
 console, a PC or router at home acting as a Tailscale subnet router works too; the friend then adds the console's LAN
 address.
+
+### Over IPv6 (experimental)
+
+Where the provider gives no public IPv4 address, IPv6 may be a way in without a relay. Add `address_family = both` to
+`/data/prosperosunshine/sunshine.conf` and restart the host: it then listens on IPv6 as well as IPv4. (Up to
+0.6.7-beta.3 that line made the host IPv6 only, and Moonlight over IPv4 no longer reached it.)
+
+- Measured on 13.00 inside the home network only, over the console's link-local address: pairing held, and H.264 streamed
+  without a missing frame, while IPv4 clients streamed as before. A stream from outside is **not tested**.
+- The console needs a global IPv6 address for it. The test console had only a link-local one, in a network whose PC has
+  global ones, so check what yours has before you count on this.
+- There is no NAT in front of IPv6: the router's firewall has to let the stream ports through to the console (TCP 47984,
+  47989 and 48010, UDP 47998, 47999 and 48000) and nothing else. Not the web page (47990), the control socket (47995) or
+  the ELF loader (9021).
+- A device with a global IPv6 address counts as over the internet, at home too. Pair it over IPv4 at home first, or turn
+  on **Pair over the internet** for the pairing.
+
+If you try it from outside, an issue with `sunshine.log` and what happened helps, whichever way it went.
 
 ## Known limits
 
@@ -512,8 +538,8 @@ address.
 - The pad's touchpad and motion sensors are measured with the test client only, not yet with a real Moonlight client or in a game
   that uses them. Motion has no orientation, because Moonlight sends none.
 - Moonlight knows only the classic two-motor rumble. Games that drive the DualSense's haptics instead send nothing to your
-  controller, unless `haptic_mode = rumble` turns those haptics into a rough two-motor rumble (see below). Whether your device
-  vibrates also depends on the Moonlight client.
+  controller, unless **Vibration** in the app's Settings turns those haptics into a rough two-motor rumble (see below).
+  Whether your device vibrates also depends on the Moonlight client.
 - Rest mode is young. The host starts its services again after waking, which worked in two tests on the home screen, with no
   game open and no stream running. With a game open and a stream running, the console and the game came back in one test, but the
   host stayed unreachable until it was restarted. In an earlier test without this, the console hung after waking and had to be
@@ -521,12 +547,14 @@ address.
 - Adaptive triggers work with Moonlight on a PC and a DualSense; the other official clients ignore them. A user reports them
   working with R3VALATiON's Artemis fork on Android and a DualSense over Bluetooth. Only Teardown has been tested. If a stream
   ends during an effect, the trigger stays stiff until you connect again, because Moonlight doesn't reset it.
-  If a game's knock on firing is too hard, `trigger_knock_strength` in `sunshine.conf` turns it down (0 to 100, 100 unless
-  set, 0 for no knock; read within seconds while the host runs).
+  If a game's knock on firing is too hard, **Trigger knock** under Controller in the app's Settings turns it down
+  (`trigger_knock_strength` in `sunshine.conf`, 0 to 100, 100 unless set, 0 for no knock; read within seconds while the
+  host runs, so Save is enough).
 - PS5 games send their vibration through a haptic channel and leave the classic motors alone, so a client gets none.
-  `haptic_mode = rumble` in `sunshine.conf` (off unless set) passes the channel's level on as rumble during a stream, a rough
-  match for a DualSense on the console; `haptic_strength` (0 to 200, 100 unless set) sets the strength. Both are read within
-  seconds while the host runs. A game with rumble of its own keeps it. The channel is one for the whole console, so only the
+  **Vibration** set to Rumble under Controller in the app's Settings (`haptic_mode = rumble` in `sunshine.conf`, off unless
+  set) passes the channel's level on as rumble during a stream, a rough match for a DualSense on the console; **Rumble
+  level** (`haptic_strength`, 0 to 200, 100 unless set) sets the strength. Both are read within seconds while the host
+  runs, so Save is enough. A game with rumble of its own keeps it. The channel is one for the whole console, so only the
   host's controller gets this rumble, not a second player's. Measured on 9.60 and 13.00. With Artemis on Android, a DualSense
   over Bluetooth vibrates only with the client's rumble emulation on. If the host stops while the channel is open, or a call
   into it crashes, the host leaves `haptic_blocked` in `/data/prosperosunshine/` and keeps the channel closed from then on;
