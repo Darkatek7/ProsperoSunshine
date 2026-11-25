@@ -174,6 +174,9 @@ Toolchain: PS5 Payload SDK v0.45 in the Docker image `prosperosunshine-sdk:v0.45
   (launch fails with 0x80020016 / CE-100022-5).
 - The ProsperoStore catalog is cached on the console under `/data/prosperostore/cache/`; check a title ID
   against it before a release.
+- The app installs its bundled host when it starts: if `payloads/prospero_sunshine.elf` differs from the host file, it
+  copies it there and into the autoload slot (klog `[PSAPP] installed the bundled host`). So an app build tried on the
+  console brings its host with it; put the release's app back and start it once to undo that.
 - Close the app (write `/data/prosperosunshine/app.quit`) before uploading to it or starting another title. Once a title
   started while the app was still alive, and the app was started again later: from then on every title failed with `0x80940033`,
   ShadowMountPlus logging `launch mount unavailable ... Device busy`, until the console restarted (`docs/status-archive.md`, "Titelstarts blockiert").

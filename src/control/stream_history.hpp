@@ -5,8 +5,10 @@
 // they outlast a host restart. Portable (tests/stream_history_test.cpp, tests/fuzz/web_lines_fuzz.cpp).
 //
 // Where the numbers come from: `recoveries` are the client's requests for a new picture after a loss and `missing_frames`
-// the frames it reported lost with them (Sunshine patches 0015 and 0025). The host sees nothing else of the path: a
-// client that asks for a whole new picture each time names no frames, so its missing_frames stay 0 while recoveries rise.
+// the frames it reported lost with them (Sunshine patches 0015 and 0025). The host sees nothing else of the path. The
+// host offers no reference frame invalidation, so today's Moonlight asks for a whole new picture each time and names no
+// frames: missing_frames stays 0 while recoveries rise (measured: 29 frames lost at the client, recoveries 9, one of
+// them the request every stream starts with). So the page counts the requests.
 #pragma once
 #include "control/stream_list.hpp"
 #include <algorithm>

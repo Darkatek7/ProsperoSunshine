@@ -102,6 +102,42 @@ Issue 36“) und ein Debug-Build in jedem Release („Debug-Build (PR 29) zusamm
 
 ## Neuere Nachweise
 
+### Stream-Verlauf, Zahleneditor und aufgeteilte Dateien, aus dem Speicher (2026-11-25, 13.00)
+
+Unveröffentlichter Stand nach 0.6.7 (`c167da10`: Verlauf der beendeten Streams, Schritte im Zahleneditor der App,
+`platform_ps5.cpp` und `screen.cpp` als reine Verschiebung aufgeteilt), Host aus dem Speicher gestartet, installiert blieb
+0.6.7. Messweg wie in den Einträgen darunter; der Text der Verlaufskarte auf der Webseite ist nach dieser Runde noch
+geändert worden (sie zählt jetzt die Anforderungen neuer Bilder, siehe unten).
+
+- **Verlauf (`HISTORY`, `stream_history.txt`):** vor dem ersten Stream leer und ohne Datei. Je Stream eine Zeile, die neueste
+  zuerst: H.264 1080p60 30 s (`secs=29`, `kbps=4148` wie die Aufnahme, `internet=1`), HEVC mit 1392-Byte-Paketen
+  (`internet=0`), `ENDSTREAM` nach 12,5 s (`secs=12`), `QUIT` mitten im Stream (`secs=10`, nach dem Neustart des Hosts samt
+  allen früheren Zeilen noch da), zwei Geräte zugleich (das beigetretene mit dem Modus der Aufnahme) und HEVC 3840x2160
+  (`mode=3840x2160@60`, `kbps=62988`). `sunshine.log` hat je Stream `Stream ended:` mit denselben Zahlen ohne Gerät.
+  `sent_kbps` zählt die Fehlerkorrektur mit (1556 gegen 540 kbit/s Nutzdaten am Client auf dem ruhigen Home-Bildschirm).
+  Die Uhr der Konsole ging 68 s vor.
+- **Was der Host vom Verlust sieht:** Bei 10 % zufälligem Verlust (H.264 10 Mbit/s, 30 s) fehlten dem Client 29 Bilder in 7
+  Lücken, er verlangte 8-mal ein neues Bild; der Host zählte `recoveries=9` (eines verlangt jeder Stream beim Start) und
+  `missing_frames=0`. Der Host bietet keine Referenzbild-Invalidierung an, also schickt moonlight-common-c nur die Bitte
+  um ein ganzes Bild und nennt keine Bilder. Bei 3 % fehlte auf dem Home-Bildschirm nichts. Gleich mit dem Stand vor dem
+  Aufteilen.
+- **Webseite ohne Anmeldung:** `/`, `app.js` und `style.css` kommen und enthalten die Karte „Recent streams“,
+  `/api/overview` antwortet 401. Die angemeldete Ansicht ist nicht geprüft (das Login des Besitzers blieb unangetastet).
+- **Eingabe, Ton, Vibration nach dem Aufteilen:** Steuerkreuz 14 von 14 Drücken im Bild sichtbar (93 ms), der Klick im Ton 9
+  von 14 (106 ms), 5800 Audio-Pakete decodiert; Pfeiltasten der Tastatur bewegen den Fokus; mit `haptic_mode = rumble` öffnet
+  und schließt der Haptik-Kanal sauber, kein `haptic_blocked`. Mausbewegungen ohne sichtbare Wirkung auf dem
+  Home-Bildschirm. Profile und Plätze nicht geprüft (brauchen eine zweite Person).
+- **Debug-Build:** `0.6.7-debug commit=c167da10`, `selfcheck done … problems=0`, H.264 und HEVC mit 1795 und 1791 Bildern, 0
+  fehlend.
+- **App:** die drei Seiten wie zuvor; im Zahleneditor „At home“ mit R1 von 20 auf 40, 60, 80 und dort Schluss, hoch/runter 5,
+  links/rechts 1; „Rumble level“ 50 / 10 / 5, „Trigger knock“ mit L1 von 100 auf 75 und 50, „Base port“ mit R1 plus 100.
+  Jedes Blatt mit Kreis verlassen, `sunshine.conf` byte-gleich. Die Blätter Devices, Streams und Web page öffnen und
+  schließen.
+- **Nebenbefund:** Die App installiert beim Start ihren mitgelieferten Host in die Host-Datei und den Autoload-Slot, wenn
+  er abweicht. Die Test-App brachte so den Kandidaten für rund 5 Minuten dorthin; die Release-App danach wieder 0.6.7.
+- **kstuff:** Die Konsole startete mit einem Test-Build von kstuff („Kstuff Lite 1.15-dr-test2a“) als erstem
+  Autoload-Eintrag; alle 8 Einträge luden, der Host war oben, in 49 Minuten Klog kein Absturz.
+
 ### Release 0.6.7, CI-Dateien auf der Konsole (2026-11-25, 13.00)
 
 Die Dateien, die CI aus `d6b40488` gebaut hat (`SHA256SUMS` stimmt, das ELF der App gleich dem des Archivs), installiert wie

@@ -88,8 +88,8 @@ nur ein erfolgreicher Build.
 16. **Große Dateien aufteilen:** `src/sunshine/platform_ps5.cpp` (jetzt `platform_ps5.cpp`, `audio_ps5.cpp`, `input_ps5.cpp`,
     `input_seats_ps5.cpp`, `input_pads_ps5.cpp`, `input_kbm_ps5.cpp`, `input_ps5_internal.hpp`) und `app/src/psapp/screen.cpp`
     (jetzt `screen.cpp`, `screen_sheets.cpp`, `screen_sheets_draw.cpp`, `screen_draw.cpp`, `screen_internal.hpp`) sind als
-    reine Verschiebung aufgeteilt, Zeile für Zeile verglichen; noch nicht veröffentlicht, der Stream auf der Konsole dazu
-    steht aus. `src/platform/ps5/capture.c` bleibt eine Datei: ein Zustandsautomat mit gemeinsamem Zustand, an dem die
+    reine Verschiebung aufgeteilt, Zeile für Zeile verglichen; noch nicht veröffentlicht, auf 13.00 aus dem Speicher geprüft
+    (`STATUS.md`, „Stream-Verlauf“). `src/platform/ps5/capture.c` bleibt eine Datei: ein Zustandsautomat mit gemeinsamem Zustand, an dem die
     Tests direkt hängen. Beim Aufteilen aufgefallen, offen: `profiles_changed` setzt beim Wegnehmen eines Pads nicht alles
     zurück, was `free_gamepad` zurücksetzt (Motorwahl, Kombos, letzter Zustand, gehaltene PS-Taste der Tastatur); und ein
     langer Text über `unicode` hält die Rückmeldungen aller Pads auf, solange er läuft.
@@ -97,10 +97,12 @@ nur ein erfolgreicher Build.
     liegen im Repo, abgestimmt auf den bestehenden Stil: Mit clang-format 18 weichen rund 10 % der alten C++-Zeilen im Host und
     6 % in der App ab, deshalb nur über `git clang-format` für geänderte Zeilen, nie für ganze Dateien. Die C-Dateien sind
     ausgenommen. Offen: ob CI geänderte Zeilen prüfen soll.
-18. **Verlauf der letzten Streams auf der Webseite** (Wunsch aus Issue 63): gebaut nach 0.6.7, noch nicht veröffentlicht und
-    noch nicht auf der Konsole geprüft. Die letzten 20 beendeten Streams mit Gerät, Modus, Dauer, gesendeter Rate, Round-Trip
-    und dem, was das Gerät als verloren gemeldet hat; die Liste überdauert einen Neustart des Hosts
-    (`src/control/stream_history.hpp`). Offen: der Lauf auf der Konsole, und ob die App den Verlauf auch zeigen soll.
+18. **Verlauf der letzten Streams auf der Webseite** (Wunsch aus Issue 63): gebaut nach 0.6.7, noch nicht veröffentlicht, auf
+    13.00 aus dem Speicher geprüft (`STATUS.md`, „Stream-Verlauf“). Die letzten 20 beendeten Streams mit Gerät, Modus, Dauer,
+    gesendeter Rate, Round-Trip und wie oft das Gerät ein neues Bild verlangt hat; die Liste überdauert einen Neustart des
+    Hosts (`src/control/stream_history.hpp`). Offen: die angemeldete Ansicht der Seite auf der Konsole, ob die App den Verlauf
+    auch zeigen soll, und eine Zahl verlorener Bilder: Moonlight nennt dem Host keine, solange der Host keine
+    Referenzbild-Invalidierung anbietet.
 19. **Haptik als Rumble** (seit 0.6.7-beta.3, Issue 30, PR 35, `haptic_mode = rumble`): auf 13.00 mit dem Testclient in Teardown
     und Astro's Playroom gemessen, von einem Mitwirkenden auf 9.60 (`STATUS.md`, „Haptik als Rumble und Trigger-Knock“). Offen:
     echtes Moonlight mit einem DualSense und andere Firmware. Der Kanal gilt für die ganze Konsole, darum bekommt nur das Pad

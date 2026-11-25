@@ -161,9 +161,10 @@ It is off until you set a login, and nothing listens on its port before that.
   logged with the address, never the password. The password is kept only as a salted PBKDF2-SHA256 hash in
   `/data/prosperosunshine/web_login`.
 - **Recent streams** on the page's first tab lists the last 20 streams that ended: the device, when it ended and how long
-  it ran, the codec and mode, the bitrate asked for and the video sent on average, the round trip, whether the device came
-  over the internet, and the frames it reported lost with how often it asked for a new picture. That is what the device
-  tells the host; Moonlight's own statistics on the device know more. The list is kept in
+  it ran, the codec and mode, the bitrate asked for and the video sent on average (error correction included), the round
+  trip, whether the device came over the internet, and how often it asked for a new picture, which it does when it lost
+  part of one. Moonlight doesn't tell the host which frames it lost, so its own statistics on the device stay the place
+  for a count of frames. The list is kept in
   `/data/prosperosunshine/stream_history.txt` and outlasts a host restart, and `sunshine.log` gets a `Stream ended:` line
   with the same numbers, without the device.
 - Settings changed on the page apply when the host starts again. After **Save** the page offers to restart it, and until

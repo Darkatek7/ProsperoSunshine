@@ -420,19 +420,20 @@ function endedAt(unix) {
   return ['Ended ', el('time', { datetime: at.toISOString(), text })];
 }
 
-// What the device reported lost, as a share of the frames the stream had: its length times the mode's frame rate.
+// How the path did: a device asks for a new picture when it lost part of one, so the count says how often the picture
+// broke. Today's Moonlight asks for a whole new picture and names no frames (the host offers no reference frame
+// invalidation), so a count of lost frames comes only from a client that reports them; it shows when there is one.
 function lossLine(h) {
   const missing = Number(h.missing_frames) || 0, asks = Number(h.recoveries) || 0, secs = Number(h.secs) || 0;
-  const fps = Number((h.mode || '').split('@')[1]) || 0;
-  const askText = `${asks} request${asks === 1 ? '' : 's'} for a new picture`;
   // A stream asks for a picture once or twice as it starts; that is no loss.
-  if (!missing && asks <= 2) return el('div', { class: 'sub', text: 'No lost frames reported.' });
-  const frames = secs * fps, share = frames > 0 ? missing / frames : 0;
+  if (!missing && asks <= 2) return el('div', { class: 'sub', text: 'No losses reported.' });
   const perMinute = secs >= 30 ? asks / (secs / 60) : 0;
-  const rating = share >= 0.01 || perMinute >= 8 ? 'poor' : share >= 0.001 || perMinute >= 1 ? 'fair' : 'plain';
-  const percent = share >= 0.0005 ? ` (${(share * 100).toFixed(share < 0.01 ? 2 : 1)} %)` : '';
-  const text = missing ? `${missing} lost frame${missing === 1 ? '' : 's'}${percent}, ${askText}` : askText;
-  return el('div', { class: 'sub' }, el('span', { class: `rate ${rating}`, text: rating === 'poor' ? `${text} (many)` : text }));
+  // As the running stream's health line: a loss about every 7 s or oftener is trouble.
+  const rating = perMinute >= 8 ? 'poor' : perMinute >= 1 ? 'fair' : 'plain';
+  const rate = perMinute >= 1 ? `, about ${perMinute >= 10 ? Math.round(perMinute) : perMinute.toFixed(1)} a minute` : '';
+  const lost = missing ? `; ${missing} frame${missing === 1 ? '' : 's'} reported lost` : '';
+  const text = `Asked for a new picture ${asks} time${asks === 1 ? '' : 's'}${rate}${lost}`;
+  return el('div', { class: 'sub' }, el('span', { class: `rate ${rating}`, text: rating === 'poor' ? `${text} (often)` : text }));
 }
 
 function renderHistory(history) {

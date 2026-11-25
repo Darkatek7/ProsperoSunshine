@@ -6,7 +6,8 @@
 
 - **Recent streams on the web page** (issue 63). The first tab lists the last 20 streams that ended: the device, when it
   ended and how long it ran, the codec and mode, the bitrate asked for and the video sent on average, the round trip,
-  whether the device came over the internet, and the frames it reported lost with how often it asked for a new picture.
+  whether the device came over the internet, and how often it asked for a new picture, which it does when it lost part of
+  one (Moonlight doesn't tell the host which frames it lost).
   The host keeps the list in `stream_history.txt`, so it outlasts a restart; `HISTORY` on the control socket gives it, and
   `sunshine.log` gets a `Stream ended:` line per stream with the same numbers, without the device.
 
