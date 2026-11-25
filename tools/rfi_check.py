@@ -9,6 +9,10 @@ frame is where a client could go on. If it is no keyframe, the call worked. The 
 probe called nothing (the control): there the pictures must stay different until the next keyframe, or the picture
 didn't move enough for the test to say anything.
 
+Measured on 13.00 (2026-11-25): HEVC goes on at the very next frame after the call, which references the newest
+picture before the loss, as long as fewer than 8 pictures are missing (the stream's picture order count has 4 bits).
+H.264 keeps one reference frame and the call changes nothing.
+
 Needs ffmpeg on the PATH. Usage: rfi_check.py <folder> [--trace]
 --trace also writes <variant>.trace.txt (ffmpeg's trace_headers: every field of every slice header) and prints the
 reference fields of the frames around each call.
@@ -31,8 +35,10 @@ def decode_md5(stream, codec):
     with tempfile.NamedTemporaryFile(suffix="." + codec) as f:
         f.write(stream)
         f.flush()
-        run = subprocess.run(["ffmpeg", "-v", "warning", "-nostdin", "-f", codec, "-i", f.name, "-f", "framemd5", "-"],
-                             capture_output=True, text=True)
+        # output_corrupt, as Moonlight's decoder is set up: without it ffmpeg keeps back every picture whose reference
+        # set names a missing one, also when the picture itself uses none of them (HEVC after an invalidation).
+        run = subprocess.run(["ffmpeg", "-v", "warning", "-nostdin", "-flags", "+output_corrupt", "-f", codec, "-i", f.name,
+                              "-f", "framemd5", "-"], capture_output=True, text=True)
     md5 = [line.rsplit(",", 1)[1].strip() for line in run.stdout.splitlines() if line and not line.startswith("#")]
     return md5, len([line for line in run.stderr.splitlines() if line.strip()])
 

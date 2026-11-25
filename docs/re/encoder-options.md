@@ -17,7 +17,7 @@ enthält dieses Dokument nicht.
 |---|---|---|
 | 120 oder 90 fps über Avcap2? | Nein. libSceVenc hat Presets nur für 29,97 und 59,94 fps; jede andere Rate endet in `0x80c70004`. | sicher (Code), passt zur Messung |
 | 24, 25, 48, 50 fps? | Nein, aus demselben Grund. Avcap2 kodiert mit 29,97 oder 59,94 fps. | sicher |
-| Verlust ohne IDR beheben? | Ja, über `sceAvcap2SetInvalidFrame` (RFI, so wie Remote Play). Long-Term-Referenzen über `cfg+0x138` erreichbar. Kein Intra-Refresh gefunden. | RFI-Pfad sicher, Wirkung ungetestet |
+| Verlust ohne IDR beheben? | Bei HEVC ja, über `sceAvcap2SetInvalidFrame` (RFI, so wie Remote Play), solange weniger als 8 Bilder fehlen; bei H.264 nein (ein Referenzbild). Der Long-Term-Block `cfg+0x138` ist falsch gedeutet. Kein Intra-Refresh gefunden. | gemessen (13.00, Abschnitt 5) |
 | IDR-Größe begrenzen? | Keine „max frame size“. Hebel: QP-Grenzen `cfg+0xd4`/`+0xd8` (13.00), IDR-QP `cfg+0xc4` (10.x), weniger IDRs (RFI). | wahrscheinlich |
 | Slices? | Beim Öffnen `cfg+0x38`-Block, zur Laufzeit Slice-Size-Control `cfg+0xe0` (nur H.264). 10.x-Feld weiter offen. | sicher (13.00), offen (10.x) |
 | AV1? | Gibt es nicht, in keinem der Module. Der dritte Venc-Codec ist wahrscheinlich VP9. | sicher (AV1), wahrscheinlich (VP9) |
@@ -145,7 +145,7 @@ Schritt 2 falsch gelesen (dann den AvSetting-Pfad neu ansehen).
 
 ## 5. Verlust ohne Keyframe (B.2)
 
-**RFI (sicher erreichbar, Wirkung ungetestet).** `sceAvcap2SetInvalidFrame(h, u32)` → Server-Vtable +0xC0 (`0x3890`) →
+**RFI (erreichbar; bei HEVC wirksam, bei H.264 nicht, siehe „Gemessen“ unten).** `sceAvcap2SetInvalidFrame(h, u32)` → Server-Vtable +0xC0 (`0x3890`) →
 `sceVencSetReferenceFrameInvalidationConfig` mit dem Bildzähler. Remote Play ruft das bei Verlust mit dem kleinsten
 verlorenen Encoder-Bildzähler, begrenzt auf den des letzten IDR (`docs/re/avcap2-exports.md`, Abschnitt 4, Punkt 5).
 Der Zähler ist `desc+0x20` (w4, 1-basiert, `docs/avcap2-descriptor.md`). Was der Encoder danach als Referenz nimmt (ein
@@ -178,7 +178,7 @@ dekodiert der Client, wenn der Host das Bild als „nach Invalidierung“ (Typ 5
 ohne die Bilder ab `k` bis zum Aufruf (`-err_detect explode`): fehlerfrei heißt, das Bild nach dem Aufruf referenziert
 nur Bilder vor `k`, so wie Remote Play den Wert verwendet (erstes verlorenes Bild).
 
-**Die Probe dazu (geschrieben, noch nicht gelaufen):** `src/probes/rfi_probe.cpp` (`out/rfi_probe.elf`) öffnet je Variante
+**Die Probe dazu:** `src/probes/rfi_probe.cpp` (`out/rfi_probe.elf`) öffnet je Variante
 einen frischen Kanal in 1080p, liest 400 Bilder und ruft nach Bild 100, 200 und 300 `SetInvalidFrame`, als wären die
 letzten 1, 3 und 8 Bilder verloren (Varianten: H.264 und HEVC; ohne Zusatz, mit Fach +0x08 = 2 und mit dem
 Long-Term-Block aus Test 4; dazu je ein Lauf mit `RequestKeyFrame` zum Größenvergleich). Sie speichert den Strom und je
@@ -190,6 +190,40 @@ Slice-Header daneben (`trace_headers` von FFmpeg), also ob der Encoder eine Refe
 schickt. Das Bild muss sich bewegen (Spiel oder Video im Vordergrund), sonst dekodiert ein Bild ohne seine Referenz
 ohnehin gleich. Das Skript ist an künstlichen Strömen von x264 und x265 geprüft (Erholung an erzwungenen Keyframes,
 keine Erholung ohne).
+
+**Gemessen 2026-11-25 (13.00, `rfi_probe` mit dem Mario-64-Demo, 1080p, 16 Mbit/s, je Variante 400 Bilder):**
+
+| Variante | Ergebnis |
+|---|---|
+| HEVC, `SetInvalidFrame` | `rc == 0`. **Schon das nächste gelesene Bild** referenziert das neueste Bild vor dem Verlust: 101→99 (1 Bild verloren), 201→197 (3), 301→292 (8); alle weiteren hängen daran. Es ist ein P-Bild gewöhnlicher Größe (28 bis 33 kB neben 21 bis 28 kB; IDR 37 bis 38 kB). Im Descriptor markiert es nichts. |
+| H.264, `SetInvalidFrame` | `rc == 0`, **keine Wirkung**: `max_num_ref_frames = 1`, das nächste Bild ist ein gewöhnliches P-Bild auf das verlorene. Zweimal gleich gemessen. |
+| Fach +0x08 = 2 (`cfg+0x190 = 1`, `0x194 = 2`) | ändert weder Slices noch Referenzen, bei beiden Codecs. Die Deutung „Zahl der Referenzbilder oder Slices“ aus Abschnitt 3 trifft so nicht zu. |
+| Long-Term-Block (`cfg+0x138 = 0x50`, `0x140 = 1`, `0x144 = 1`) | H.264: `Start` scheitert mit `0x80c78000`. HEVC: öffnet, aber der Strom ist nicht dekodierbar. Die Felder sind falsch gedeutet; nicht verwenden. |
+| `RequestKeyFrame` | IDR zwei Bilder nach dem Aufruf, bei beiden Codecs. |
+
+Bei HEVC hält der Encoder also mehrere Referenzbilder (das Referenzbild-Set im Slice-Header nennt bis zu 9) und weicht
+nach dem Aufruf auf das letzte gute aus. Was ein Decoder daraus macht:
+
+* Das Bild nach dem Aufruf **nennt** die verlorenen Bilder weiter in seinem Referenzbild-Set, als „behalten, nicht benutzt“.
+  FFmpeg legt dafür Platzhalter an, meldet `Could not find ref with POC …` und hält jedes solche Bild zurück, außer der
+  Decoder läuft mit `AV_CODEC_FLAG_OUTPUT_CORRUPT`. Mit dem Flag sind alle Bilder nach dem Verlust bitgleich zum
+  ungestörten Strom (1 und 3 verlorene Bilder: 300 von 300 und 200 von 200 Bildern gleich, auch mit `err_detect explode`).
+  `tools/rfi_check.py` dekodiert deshalb mit dem Flag.
+* **Höchstens 7 fehlende Bilder am Stück.** Der Strom zählt die Bildreihenfolge mit 4 Bit
+  (`log2_max_pic_order_cnt_lsb_minus4 = 0`); fehlen 8 oder mehr, ordnet der Decoder die Bilder danach falsch ein
+  (`Duplicate POC in a sequence`) und nichts dekodiert mehr bis zum nächsten IDR. Zu den fehlenden zählen die verlorenen
+  und alle, die der Client bis zum ersten Bild nach dem Aufruf verwirft.
+* Das erste Bild nach dem Aufruf erkennt der Host nur am Slice-Header: Es ist das erste, dessen benutzte Referenz nicht
+  das Bild direkt davor ist. In der Probe kam es sofort, weil sie nach jedem Bild liest; ein Host, der hinterherliest,
+  muss damit rechnen, dass noch ein Bild auf die alte Referenz dazwischen liegt.
+
+**Was das für den Host heißt (Plan, nichts davon gebaut):** `refPicInvalidation` anbieten, bei einer Invalidierung eines
+HEVC-Streams den Encoder-Zähler des ersten verlorenen Bildes an `ps_capture_invalidate_frame` geben und das erste Bild mit
+der neuen Referenz als „nach Invalidierung“ (Typ 5) markieren; ein IDR verlangen, wenn dann 8 oder mehr Bilder fehlen
+würden, wenn das Bild nicht innerhalb weniger Bilder kommt, und immer bei H.264. Offen: ob die Hardware-Decoder der
+Clients (über FFmpeg mit hwaccel, MediaCodec, VideoToolbox) das Referenzbild-Set mit fehlenden Bildern annehmen wie
+FFmpegs Software-Decoder; das zeigt erst echtes Moonlight. Mehrere Geräte auf einem Kanal teilen den Encoder: Ein
+Ausweichen für eines stört die anderen nicht, sie haben alle Bilder.
 
 ## 6. IDR-Größe (B.3)
 
@@ -317,10 +351,10 @@ Nr. 1 braucht eine Probe oder einen Host-Schalter, Nr. 2 einen Testbau des Hosts
 
 | # | Test | Schaltet frei | Erwartet | Sonst |
 |---|---|---|---|---|
-| 1 | `SetInvalidFrame` nach 100, 200 und 300 Bildern (`rfi_probe`, Abschnitt 5), offline dekodieren mit `tools/rfi_check.py` | Verlust ohne IDR: kleinere Spitzen, keine HEVC-Lücken nach Verlust | `rc == 0`, kein IDR, Folgebild dekodiert ohne die verlorenen Bilder | IDR wie heute; RFI nicht anbieten |
+| 1 | `SetInvalidFrame` nach 100, 200 und 300 Bildern (`rfi_probe`, Abschnitt 5), offline dekodieren mit `tools/rfi_check.py` | Verlust ohne IDR: kleinere Spitzen, keine HEVC-Lücken nach Verlust | `rc == 0`, kein IDR, Folgebild dekodiert ohne die verlorenen Bilder | IDR wie heute; RFI nicht anbieten **Gemessen 2026-11-25:** HEVC wirkt ab dem nächsten Bild, H.264 nicht (Abschnitt 5) |
 | 2 | 10.x: IDR-QP = P-QP, HEVC 8 Bit wieder mit 21 bei 20 Mbit/s (Testbau, `encoder_qp.h`) | kleinere IDRs auf 10.x; zeigt, ob der Kanalverlust von Issue 50 am IDR liegt | IDR-Bytes etwa −30 bis −40 %, P-Bilder gleich; 25/25 hält, wo 21/25 verlor | zurück auf idr + 4 und 24/28 |
 | 3 | 13.00: `cfg+0xd4` = 35/41/46/51 bei HEVC 1080p, 16 Mbit/s, bewegtes Bild | IDR-Größe steuerbar, Lücken nach IDR weg | IDR kleiner mit steigendem Wert | Feld ist kein QP-Deckel: Deutung streichen |
-| 4 | `cfg+0x138` = 0x50, `0x140` = 1, `0x144` = 1 (H.264 und HEVC) | Long-Term-Referenz als Ziel für RFI | öffnet, Bildgrößen kaum anders | `0x80c7xxxx`: Felder falsch gedeutet |
+| 4 | `cfg+0x138` = 0x50, `0x140` = 1, `0x144` = 1 (H.264 und HEVC) | Long-Term-Referenz als Ziel für RFI | öffnet, Bildgrößen kaum anders | `0x80c7xxxx`: Felder falsch gedeutet **Gemessen 2026-11-25:** H.264 `Start` `0x80c78000`, HEVC nicht dekodierbar: falsch gedeutet |
 | 5 | 10.x-Dump nach Abschnitt 7, dann Slice-Variante | H.264 auf 10.x unter Windows mit Hardware-Decoder | ≤ 30 Slices | Moonlight-Patch abwarten |
 | 6 | HEVC 1080p30, `cfg+0x2c4` = `0x37` gegen `0x6e` | richtige Werte für 30 fps | gleiches oder ruhigeres TSC-Raster | Feld lassen |
 | 7 | Timing 2 auf dem Startbildschirm (60 Hz) | bestätigt das Modell aus Abschnitt 4 | öffnet, 59,9 fps | Abschnitt 4 Schritt 2 neu lesen. **Gemessen 2026-11-25:** öffnet, aber 29,97 fps (Abschnitt 4, „Gegenprobe“) |
