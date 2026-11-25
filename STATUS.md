@@ -1,6 +1,6 @@
 # Arbeitsstand
 
-Stand: 25. November 2026, Release 0.6.7 (die drei Betas, dazu Controller- und Fehlerkorrektur-Einstellungen in der App und `address_family = both` für IPv4 und IPv6). Hier steht nur, was live geprüft ist, mit dem Messweg. Was ausgeliefert ist:
+Stand: 25. November 2026, Release 0.6.8 (Verlauf der letzten Streams auf der Webseite, Text im Hintergrund, `reference_frame_invalidation` als Versuch). Hier steht nur, was live geprüft ist, mit dem Messweg. Was ausgeliefert ist:
 `CHANGELOG.md`. Plan und Reihenfolge: `ROADMAP.md`. Architektur: `docs/adr/001-sunshine-port.md`.
 
 Die älteren Einträge (bis 4. November 2026) und die ersten Nachweise nach Roadmap stehen unverändert und mit denselben
@@ -102,7 +102,7 @@ Issue 36“) und ein Debug-Build in jedem Release („Debug-Build (PR 29) zusamm
     wenn sie in seiner Konfiguration steht („Verlust ohne Keyframe, Text im Hintergrund und echtes Moonlight“).
 16. **Fehlerkorrektur über das Internet:** `internet_fec_percentage` ist nur mit dem Testclient und künstlichem Verlust im LAN
     gemessen (H.264, 10 Mbit/s). Welchen Verlust echte Wege haben und was der kleinere Bildanteil an Qualität kostet, ist offen.
-17. **Verlust ohne Keyframe (`reference_frame_invalidation`, ab Werk aus, unveröffentlicht):** nur HEVC, nur mit dem
+17. **Verlust ohne Keyframe (`reference_frame_invalidation`, ab Werk aus, seit 0.6.8):** nur HEVC, nur mit dem
     Testclient und Moonlight für Linux mit Software-Decoder gemessen, im LAN. Ob die Hardware-Decoder der Geräte (Windows,
     Android, iOS, Fernseher) das Bild nach der Invalidierung annehmen, ist offen, ebenso 4K und ein Weg mit langer Laufzeit
     (ab etwa 70 ms hin und zurück fehlen mehr als 7 Bilder, dann kommt ein IDR wie bisher).
@@ -111,7 +111,7 @@ Issue 36“) und ein Debug-Build in jedem Release („Debug-Build (PR 29) zusamm
 
 ### Verlust ohne Keyframe, Text im Hintergrund und echtes Moonlight, aus dem Speicher (2026-11-25, 13.00)
 
-Unveröffentlichter Stand nach 0.6.7 (Zweig `work/after-0.6.7`, zuletzt `654afd61`), Host aus dem Speicher gestartet,
+Stand nach 0.6.7, vor dem Release 0.6.8 (Zweig `work/after-0.6.7`, zuletzt `654afd61`), Host aus dem Speicher gestartet,
 installiert blieb 0.6.7. Drei Runden am selben Abend; das Mario-64-Demo lief für ein bewegtes Bild (es bewegt sich nur
 einige Minuten nach dem Start, danach repariert die Fehlerkorrektur auf dem stehenden Titelbild jeden Verlust, also vor
 jeder Messreihe neu gestartet). Verlust: `tools/moonlight/loss_test.sh` verwirft im Container des Clients einen Anteil der

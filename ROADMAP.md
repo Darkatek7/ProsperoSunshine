@@ -88,7 +88,7 @@ nur ein erfolgreicher Build.
 16. **Große Dateien aufteilen:** `src/sunshine/platform_ps5.cpp` (jetzt `platform_ps5.cpp`, `audio_ps5.cpp`, `input_ps5.cpp`,
     `input_seats_ps5.cpp`, `input_pads_ps5.cpp`, `input_kbm_ps5.cpp`, `input_ps5_internal.hpp`) und `app/src/psapp/screen.cpp`
     (jetzt `screen.cpp`, `screen_sheets.cpp`, `screen_sheets_draw.cpp`, `screen_draw.cpp`, `screen_internal.hpp`) sind als
-    reine Verschiebung aufgeteilt, Zeile für Zeile verglichen; noch nicht veröffentlicht, auf 13.00 aus dem Speicher geprüft
+    reine Verschiebung aufgeteilt, Zeile für Zeile verglichen; seit 0.6.8, auf 13.00 aus dem Speicher geprüft
     (`STATUS.md`, „Stream-Verlauf“). `src/platform/ps5/capture.c` bleibt eine Datei: ein Zustandsautomat mit gemeinsamem Zustand, an dem die
     Tests direkt hängen. Beim Aufteilen aufgefallen und danach behoben, auf 13.00 aus dem Speicher geprüft (`STATUS.md`,
     „Verlust ohne Keyframe, Text im Hintergrund und echtes Moonlight“): `profiles_changed` setzte beim Wegnehmen eines Pads nicht
@@ -99,7 +99,7 @@ nur ein erfolgreicher Build.
     liegen im Repo, abgestimmt auf den bestehenden Stil: Mit clang-format 18 weichen rund 10 % der alten C++-Zeilen im Host und
     6 % in der App ab, deshalb nur über `git clang-format` für geänderte Zeilen, nie für ganze Dateien. Die C-Dateien sind
     ausgenommen. Offen: ob CI geänderte Zeilen prüfen soll.
-18. **Verlauf der letzten Streams auf der Webseite** (Wunsch aus Issue 63): gebaut nach 0.6.7, noch nicht veröffentlicht, auf
+18. **Verlauf der letzten Streams auf der Webseite** (Wunsch aus Issue 63): seit 0.6.8, auf
     13.00 aus dem Speicher geprüft (`STATUS.md`, „Stream-Verlauf“). Die letzten 20 beendeten Streams mit Gerät, Modus, Dauer,
     gesendeter Rate, Round-Trip und wie oft das Gerät ein neues Bild verlangt hat; die Liste überdauert einen Neustart des
     Hosts (`src/control/stream_history.hpp`). Die angemeldete Ansicht ist am PC in Chrome geprüft, gegen einen Nachbau der
@@ -118,14 +118,13 @@ nur ein erfolgreicher Build.
 21. **Fehlerkorrektur über das Internet** (`internet_fec_percentage`, seit 0.6.7): mit künstlichem Verlust gemessen
     (`STATUS.md`, „Fehlerkorrektur bei Verlust“). Offen: Berichte von echten Wegen (Mobilfunk, Tailscale), andere Bitraten,
     und ob 40 % dort den kleineren Bildanteil wert sind. Davon hängt ab, ob der Wert ab Werk leer bleibt.
-22. **Verlust ohne Keyframe** (`reference_frame_invalidation` in `sunshine.conf`, ab Werk aus; gebaut nach 0.6.7, noch nicht
-    veröffentlicht): Bei HEVC nennt der Client die verlorenen Bilder, und der Encoder macht mit einem P-Bild weiter, das an
-    einem Bild vor dem Verlust hängt, statt mit einem IDR (`docs/re/encoder-options.md`, Abschnitt 5;
-    `src/video/loss_recovery.hpp`). Auf 13.00 mit dem Testclient und Moonlight für Linux gemessen: bei 6 % Paketverlust
-    4 bis 5 IDRs je 30 s statt 17 bis 21, längste Lücke 67 bis 69 ms statt 97 bis 104 ms (`STATUS.md`,
-    „Verlust ohne Keyframe, Text im Hintergrund und echtes Moonlight“). Offen, und der Grund für „aus“: die
-    Hardware-Decoder der Geräte (Windows, Android, iOS, Fernseher), 4K, andere Firmware, ein Weg mit langer Laufzeit.
-    Danach: ob der Schalter in App und Webseite gehört und ob er ab Werk an sein kann.
+22. **Verlust ohne Keyframe** (`reference_frame_invalidation` in `sunshine.conf`, ab Werk aus; seit 0.6.8): Bei HEVC nennt der
+    Client die verlorenen Bilder, und der Encoder macht mit einem P-Bild weiter, das an einem Bild vor dem Verlust hängt,
+    statt mit einem IDR (`docs/re/encoder-options.md`, Abschnitt 5; `src/video/loss_recovery.hpp`). Auf 13.00 mit dem
+    Testclient und Moonlight für Linux gemessen: bei 6 % Paketverlust 4 bis 5 IDRs je 30 s statt 17 bis 21, längste Lücke 67
+    bis 69 ms statt 97 bis 104 ms (`STATUS.md`, „Verlust ohne Keyframe, Text im Hintergrund und echtes Moonlight“). Offen, und
+    der Grund für „aus“: die Hardware-Decoder der Geräte (Windows, Android, iOS, Fernseher), 4K, andere Firmware, ein Weg mit
+    langer Laufzeit. Danach: ob der Schalter in App und Webseite gehört und ob er ab Werk an sein kann.
 
 ## Bis 1.0
 
