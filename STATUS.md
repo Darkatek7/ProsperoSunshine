@@ -1,6 +1,6 @@
 # Arbeitsstand
 
-Stand: 25. November 2026, Release 0.6.8 (Verlauf der letzten Streams auf der Webseite, Text im Hintergrund, `reference_frame_invalidation` als Versuch). Hier steht nur, was live geprüft ist, mit dem Messweg. Was ausgeliefert ist:
+Stand: 26. November 2026, Release 0.6.8 (Verlauf der letzten Streams auf der Webseite, Text im Hintergrund, `reference_frame_invalidation` als Versuch). Hier steht nur, was live geprüft ist, mit dem Messweg. Was ausgeliefert ist:
 `CHANGELOG.md`. Plan und Reihenfolge: `ROADMAP.md`. Architektur: `docs/adr/001-sunshine-port.md`.
 
 Die älteren Einträge (bis 4. November 2026) und die ersten Nachweise nach Roadmap stehen unverändert und mit denselben
@@ -108,6 +108,27 @@ Issue 36“) und ein Debug-Build in jedem Release („Debug-Build (PR 29) zusamm
     (ab etwa 70 ms hin und zurück fehlen mehr als 7 Bilder, dann kommt ein IDR wie bisher).
 
 ## Neuere Nachweise
+
+### Release 0.6.8 auf der Konsole, lokale Builds (2026-11-26, 13.00)
+
+Lokale Builds von `74d3742d`, der normale installiert wie ein Release (App `v01.000.032`, Host-Datei, Kopie im Autoload-Slot
+und ELF der App gleich), danach ein Kaltstart der Konsole: Der Autoload startete `0.6.8 commit=74d3742d`. Messweg wie in den
+Einträgen darunter.
+
+- **Streams:** H.264 und HEVC 1080p60 mit 1795 und 1794 Bildern, HEVC 3840x2160 bei 60 fps mit 1784, je 0 fehlend,
+  59,94 fps, decodiert, kein `PS5 capture lost`, keine `Error`-Zeile. Nach dem Kaltstart noch einmal 1796 und 1793, 0 fehlend.
+- **Ab Werk:** keine Zeile zur Referenzbild-Invalidierung; ein HEVC-Stream, dessen Client sie könnte (`--rfi`), läuft wie
+  jeder andere (1195 Bilder in 20 s, 0 fehlend). `HISTORY` nennt die Streams wie die `Stream ended:`-Zeilen im Log.
+- **`reference_frame_invalidation = 1` am installierten Host (HEVC 1080p60, 6 % verworfene Pakete, zweimal 30 s):** 19 von 19
+  und 17 von 17 Verlusten gingen ab einem markierten P-Bild weiter, längste Lücke 67 und 68 ms, 4 IDRs je Lauf,
+  `rfi_verify.py` ohne Befund. Die Zeilen, die die Verluste zusammenfassen, ergeben zusammen genau die Zahl des Clients,
+  auch mit der neuen Zeile am Stream-Ende. H.264 mit dem Schalter: 11 Verluste, 11 IDRs.
+- **Text mit 600 Zeichen:** zweimal genau 512 getippt, je eine Info-Zeile dazu.
+- **Debug-Build aus dem Speicher:** `0.6.8-debug commit=74d3742d`, `selfcheck done … problems=0`, H.264 und HEVC mit 1796 und
+  1793 Bildern, 0 fehlend. Zwei `Error`-Zeilen `RTSP: handle_read_plaintext(): Couldn't read from tcp socket: End of file` am
+  Stream-Anfang (ein Client schließt eine RTSP-Verbindung), ohne Folge für den Stream.
+- **Nebenbefund:** Nach einem Kaltstart bleibt die Karte „Autoload Done“ des Payload Managers offen, bis man sie schließt;
+  ein Stream vom Startbildschirm zeigt dann sie.
 
 ### Verlust ohne Keyframe, Text im Hintergrund und echtes Moonlight, aus dem Speicher (2026-11-25, 13.00)
 
