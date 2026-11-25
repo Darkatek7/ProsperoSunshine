@@ -36,6 +36,7 @@ declare -A sources=(
     [titles]="src/apps/titles.cpp"
     [log]=""
     [input]=""
+    [hevc_refs]=""
     [app_diag]="app/src/psapp/diag.cpp app/src/psapp/autoload.cpp"
     [sws_parse]=""
     [sws_server]=""
@@ -44,7 +45,7 @@ declare -A sources=(
 declare -A needs_deps=([sws_parse]=1 [sws_server]=1)
 # Longest input a target uses; mDNS packets and the files are short, a param.sfo can be longer.
 declare -A max_len=([mdns]=600 [titles]=1500 [web_plain]=1500 [file_bridge]=600 [web_auth]=1500 [log]=1500 [app_diag]=1500 [input]=1500 [sws_parse]=1500 [sws_server]=1500)
-all=(mdns upnp web_plain http_guard web_lines web_auth device_files file_bridge conf title_profile titles log app_diag input sws_parse sws_server)
+all=(mdns upnp web_plain http_guard web_lines web_auth device_files file_bridge conf title_profile titles log app_diag input hevc_refs sws_parse sws_server)
 targets=("$@")
 [ ${#targets[@]} -gt 0 ] || targets=("${all[@]}")
 for t in "${targets[@]}"; do
