@@ -12,7 +12,7 @@ hier fehlt (etwa in Code-Kommentaren), meinen diese Datei. „Archiv“ unten he
 **Der Host streamt.** Moonlight paart sich mit der PS5, startet „PS5 Screen“ oder ein installiertes Spiel und bekommt Bild,
 Spielton und Controller. Eine 30-Minuten-Sitzung und zehn Wiederverbindungen liefen fehlerfrei (Archiv, „Nachweise nach
 Roadmap“). Jedes Release seit 0.3.2 lief auf der Konsole mit 13.00 je 30 s in H.264 und HEVC 1080p60 und dekodierte
-fehlerfrei („Release 0.6.7 auf der Konsole, lokale Builds“ und die Einträge davor).
+fehlerfrei („Release 0.6.7, CI-Dateien auf der Konsole“ und die Einträge davor).
 
 **Firmware:** 13.00 und 10.20 (PS5 Pro) sind geprüft. Von 9.60, 10.40, 11.40, 13.40 und 13.60 gibt es Berichte von
 Nutzern und Mitwirkenden, gemessen ist dort hier nichts („Firmware-Sonde auf 9.60“, „Berichte nach 0.3.1“, „Belegter
@@ -101,6 +101,23 @@ Issue 36“) und ein Debug-Build in jedem Release („Debug-Build (PR 29) zusamm
     gemessen (H.264, 10 Mbit/s). Welchen Verlust echte Wege haben und was der kleinere Bildanteil an Qualität kostet, ist offen.
 
 ## Neuere Nachweise
+
+### Release 0.6.7, CI-Dateien auf der Konsole (2026-11-25, 13.00)
+
+Die Dateien, die CI aus `d6b40488` gebaut hat (`SHA256SUMS` stimmt, das ELF der App gleich dem des Archivs), installiert wie
+ein Release; die App zeigt `v01.000.031`, Host-Datei, Kopie im Autoload-Slot und ELF der App sind gleich. Messweg wie im
+Eintrag darunter.
+
+- **Streams:** H.264 und HEVC 1080p60 mit 1795 und 1793 Bildern, HEVC 3840x2160 bei 60 fps mit 1784, je 0 fehlend,
+  59,94 fps, decodiert, kein `PS5 capture lost`.
+- **Ab Werk:** `vibration off at 100%`, kein Haptik-Kanal, jeder Stream meldet `error correction 20% (fec_percentage)`.
+- **`address_family = both`:** H.264 je 20 s über IPv4 und über die link-lokale IPv6-Adresse mit 1195 und 1197 Bildern, 0
+  fehlend. Ohne die Zeile danach lehnt die Konsole IPv6 wieder ab.
+- **Debug-Datei aus dem Speicher:** `0.6.7-debug commit=d6b40488`, `selfcheck done … problems=0`, H.264 mit 1796 Bildern, 0
+  fehlend.
+- **Nebenbefund:** ShadowMountPlus lehnte das Abmelden der App dreimal mit `runtime_busy` ab; sein Log stand seit den
+  Neustarts der Mario-64-Demo in der Runde davor auf „awaiting sandbox removal“. Die App einmal starten und schließen löste
+  es, danach liefen Abmelden und Scan. Titelstarts waren nicht betroffen.
 
 ### Release 0.6.7 auf der Konsole, lokale Builds (2026-11-25, 13.00)
 
