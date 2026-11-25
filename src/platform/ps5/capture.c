@@ -58,6 +58,7 @@ struct ps_capture {
     // Optional calls (docs/re/avcap2-exports.md), resolved once at open: kernel_dynlib_dlsym is not
     // safe to call from several threads at once, and the video, audio and control threads all use these.
     handle_fn request_keyframe, start;
+    int (*set_invalid_frame)(intptr_t, uint32_t);
     int (*set_bitrate)(intptr_t, void *);
     int (*open_audio)(intptr_t *, const void *, uint8_t);
     int (*read_audio)(intptr_t, void *, size_t, void *, uint32_t);
@@ -770,6 +771,7 @@ static int open_slot(int slot, ps_capture **out)
     s->read = (void *)SYM("sceAvcap2ReadVideo");
     s->read2 = (void *)SYM("sceAvcap2ReadVideo2");
     s->request_keyframe = (void *)SYM("sceAvcap2RequestKeyFrame");
+    s->set_invalid_frame = (void *)SYM("sceAvcap2SetInvalidFrame");
     s->set_bitrate = (void *)SYM("sceAvcap2SetVideoBitrate");
     s->open_audio = (void *)SYM("sceAvcap2OpenAudio");
     s->read_audio = (void *)SYM("sceAvcap2ReadAudio");
@@ -1412,6 +1414,14 @@ int ps_capture_request_keyframe(ps_capture *s)
     int rc = s->request_keyframe(s->handle);
     if (rc < 0) { SLOG(s->slot, "RequestKeyFrame rc=%#x\n", rc); return PS_CAPTURE_ERROR; }
     return 0;
+}
+
+int ps_capture_invalidate_frame(ps_capture *s, uint32_t frame)
+{
+    if (!s || !s->started || !s->set_invalid_frame) return PS_CAPTURE_ERROR;
+    int rc = s->set_invalid_frame(s->handle, frame);
+    if (rc < 0) SLOG(s->slot, "SetInvalidFrame(%u) rc=%#x\n", frame, rc);
+    return rc;
 }
 
 int ps_capture_set_bitrate(ps_capture *s, uint32_t average, uint32_t peak)

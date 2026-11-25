@@ -178,6 +178,19 @@ dekodiert der Client, wenn der Host das Bild als „nach Invalidierung“ (Typ 5
 ohne die Bilder ab `k` bis zum Aufruf (`-err_detect explode`): fehlerfrei heißt, das Bild nach dem Aufruf referenziert
 nur Bilder vor `k`, so wie Remote Play den Wert verwendet (erstes verlorenes Bild).
 
+**Die Probe dazu (geschrieben, noch nicht gelaufen):** `src/probes/rfi_probe.cpp` (`out/rfi_probe.elf`) öffnet je Variante
+einen frischen Kanal in 1080p, liest 400 Bilder und ruft nach Bild 100, 200 und 300 `SetInvalidFrame`, als wären die
+letzten 1, 3 und 8 Bilder verloren (Varianten: H.264 und HEVC; ohne Zusatz, mit Fach +0x08 = 2 und mit dem
+Long-Term-Block aus Test 4; dazu je ein Lauf mit `RequestKeyFrame` zum Größenvergleich). Sie speichert den Strom und je
+Bild Größe und Descriptor. `tools/rfi_check.py` wertet am PC aus: Es nimmt die „verlorenen“ Bilder heraus und danach
+ein Bild nach dem anderen, bis die dekodierten Bilder des Rests denen des ganzen Stroms gleichen (MD5 je Bild, FFmpeg).
+Dieses erste Bild ist das, ab dem ein Client weiterkäme; ist es kein IDR, wirkt der Aufruf. Dasselbe an Bild 50, wo
+niemand etwas rief, als Gegenprobe: Dort darf nichts sauber dekodieren. Mit `--trace` stehen die Referenzfelder der
+Slice-Header daneben (`trace_headers` von FFmpeg), also ob der Encoder eine Referenzliste umbaut oder ein I-Bild
+schickt. Das Bild muss sich bewegen (Spiel oder Video im Vordergrund), sonst dekodiert ein Bild ohne seine Referenz
+ohnehin gleich. Das Skript ist an künstlichen Strömen von x264 und x265 geprüft (Erholung an erzwungenen Keyframes,
+keine Erholung ohne).
+
 ## 6. IDR-Größe (B.3)
 
 **Kein direkter Deckel (wahrscheinlich).** Weder in den Venc-Teilkonfigurationen, die der Server füllt, noch in den
@@ -304,7 +317,7 @@ Nr. 1 braucht eine Probe oder einen Host-Schalter, Nr. 2 einen Testbau des Hosts
 
 | # | Test | Schaltet frei | Erwartet | Sonst |
 |---|---|---|---|---|
-| 1 | `SetInvalidFrame` nach 100 Bildern (neue Probe oder Host-Schalter), offline dekodieren | Verlust ohne IDR: kleinere Spitzen, keine HEVC-Lücken nach Verlust | `rc == 0`, kein IDR, Folgebild dekodiert ohne die verlorenen Bilder | IDR wie heute; RFI nicht anbieten |
+| 1 | `SetInvalidFrame` nach 100, 200 und 300 Bildern (`rfi_probe`, Abschnitt 5), offline dekodieren mit `tools/rfi_check.py` | Verlust ohne IDR: kleinere Spitzen, keine HEVC-Lücken nach Verlust | `rc == 0`, kein IDR, Folgebild dekodiert ohne die verlorenen Bilder | IDR wie heute; RFI nicht anbieten |
 | 2 | 10.x: IDR-QP = P-QP, HEVC 8 Bit wieder mit 21 bei 20 Mbit/s (Testbau, `encoder_qp.h`) | kleinere IDRs auf 10.x; zeigt, ob der Kanalverlust von Issue 50 am IDR liegt | IDR-Bytes etwa −30 bis −40 %, P-Bilder gleich; 25/25 hält, wo 21/25 verlor | zurück auf idr + 4 und 24/28 |
 | 3 | 13.00: `cfg+0xd4` = 35/41/46/51 bei HEVC 1080p, 16 Mbit/s, bewegtes Bild | IDR-Größe steuerbar, Lücken nach IDR weg | IDR kleiner mit steigendem Wert | Feld ist kein QP-Deckel: Deutung streichen |
 | 4 | `cfg+0x138` = 0x50, `0x140` = 1, `0x144` = 1 (H.264 und HEVC) | Long-Term-Referenz als Ziel für RFI | öffnet, Bildgrößen kaum anders | `0x80c7xxxx`: Felder falsch gedeutet |

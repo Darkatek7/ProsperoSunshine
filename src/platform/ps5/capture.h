@@ -166,6 +166,10 @@ int ps_capture_close(ps_capture *session);
 
 // Ask the encoder for an IDR as soon as possible (sceAvcap2RequestKeyFrame). 0 or error.
 int ps_capture_request_keyframe(ps_capture *session);
+// Research (rfi_probe): tells the encoder that the client lost the frames from this one on (sceAvcap2SetInvalidFrame;
+// `frame` is the read descriptor's frame counter, docs/re/encoder-options.md section 5). The raw code, or
+// PS_CAPTURE_ERROR without the call. The host doesn't use it yet.
+int ps_capture_invalidate_frame(ps_capture *session, uint32_t frame);
 // Change target and peak bitrate in bit/s at runtime; 0 keeps a value. 0 or error.
 int ps_capture_set_bitrate(ps_capture *session, uint32_t average, uint32_t peak);
 // Game audio over the same session. encoder: 0 raw PCM, 2 Opus (48 kHz stereo, bitrate in bit/s,
