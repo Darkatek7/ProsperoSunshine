@@ -53,6 +53,18 @@ int main() {
     odd.uuid = "two words";
     assert(history_line(odd).find(" uuid=- ") != std::string::npos);
 
+    // A line break ends the line wherever it stands (found by fuzzing: a word with one in it wrote two lines), and a mode
+    // or uuid that is no single word is written as unknown.
+    const auto broken = parse_history_line("ended=1 secs=2 mode=12\n80x720@60 uuid=A name=x");
+    assert(!broken);  // the first line has no name
+    const auto cut = parse_history_line("ended=1 secs=2 mode=1280x720@60 uuid=A name=first\rsecond\n");
+    assert(cut && cut->name == "first" && history_line(*cut).find_first_of("\r\n") == std::string::npos);
+    StreamRecord breaks = bare;
+    breaks.mode = "1280\nx720";
+    breaks.uuid = "U\rU";
+    assert(history_line(breaks).find_first_of("\r\n") == std::string::npos);
+    assert(history_line(breaks).find(" mode=- ") != std::string::npos && history_line(breaks).find(" uuid=- ") != std::string::npos);
+
     // What is no record.
     assert(!parse_history_line(""));
     assert(!parse_history_line("garbage"));

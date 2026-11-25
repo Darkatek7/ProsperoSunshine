@@ -49,10 +49,12 @@ inline std::optional<long long> number(std::string_view text) {
     return value;
 }
 inline int clamped(long long value) { return value > 2147483647LL ? 2147483647 : static_cast<int>(value); }
+// A value that stays one word of one line.
+inline bool one_word(std::string_view text) { return text.find_first_of(" \n\r") == std::string_view::npos; }
 // The record's words without who it was.
 inline std::string facts(const StreamRecord &r) {
     return "secs=" + std::to_string(std::max(0LL, r.seconds)) + " codec=" + codec_name(r.video_format) +
-           " hdr=" + (r.hdr ? "1" : "0") + " mode=" + (r.mode.empty() ? "-" : r.mode) + " kbps=" + std::to_string(std::max(0, r.kbps)) +
+           " hdr=" + (r.hdr ? "1" : "0") + " mode=" + (r.mode.empty() || !one_word(r.mode) ? "-" : r.mode) + " kbps=" + std::to_string(std::max(0, r.kbps)) +
            " sent_kbps=" + (r.sent_kbps < 0 ? std::string("-") : std::to_string(r.sent_kbps)) +
            " rtt_ms=" + (r.rtt_ms < 0 ? std::string("-") : std::to_string(r.rtt_ms)) +
            " recoveries=" + std::to_string(std::max(0, r.recoveries)) +
@@ -67,7 +69,7 @@ inline std::string history_line(const StreamRecord &r) {
     std::string name = r.name;
     std::replace_if(name.begin(), name.end(), [](char c) { return c == '\n' || c == '\r'; }, ' ');
     std::string uuid = r.uuid;
-    if (uuid.empty() || uuid.find_first_of(" \n\r") != std::string::npos) uuid = "-";
+    if (uuid.empty() || !history_detail::one_word(uuid)) uuid = "-";
     return "ended=" + std::to_string(std::max(0LL, r.ended)) + ' ' + history_detail::facts(r) + " uuid=" + uuid + " name=" + name;
 }
 
@@ -75,8 +77,9 @@ inline std::string history_line(const StreamRecord &r) {
 inline std::string ended_line(const StreamRecord &r) { return "Stream ended: " + history_detail::facts(r); }
 
 // A line as history_line writes it; nothing for a line that isn't one (a damaged file loses that record, not the rest).
+// Of a text with line breaks only the first line is read, so no word of a record holds one.
 inline std::optional<StreamRecord> parse_history_line(std::string_view line) {
-    while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) line.remove_suffix(1);
+    line = line.substr(0, line.find_first_of("\r\n"));
     std::map<std::string, std::string, std::less<>> words;
     std::string_view rest = line;
     bool named = false;
