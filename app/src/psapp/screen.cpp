@@ -1021,13 +1021,14 @@ void Screen::handle_sheet(const hui::InputFrame &input, hui::ui::Feedback &feedb
     }
     if (sheet_ == Sheet::number && spec != nullptr)
     {
+        const NumberSteps steps = number_steps(*spec);
         long step = 0;
         if (input.nav == Direction::left || input.nav == Direction::right)
-            step = spec->step * (input.nav == Direction::left ? -1 : 1);
+            step = steps.small * (input.nav == Direction::left ? -1 : 1);
         if (input.nav == Direction::up || input.nav == Direction::down)
-            step = spec->step * 10 * (input.nav == Direction::down ? -1 : 1);
+            step = steps.medium * (input.nav == Direction::down ? -1 : 1);
         if (input.is_pressed(InputAction::page_prev) || input.is_pressed(InputAction::page_next))
-            step = spec->step * 100 * (input.is_pressed(InputAction::page_prev) ? -1 : 1);
+            step = steps.large * (input.is_pressed(InputAction::page_prev) ? -1 : 1);
         if (step != 0)
         {
             const long next = std::clamp(number_default_ ? spec->fallback + step : number_ + step, spec->min, spec->max);

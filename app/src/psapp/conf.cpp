@@ -123,6 +123,20 @@ const std::vector<OptionSpec> &option_specs()
     return specs;
 }
 
+NumberSteps number_steps(const OptionSpec &spec)
+{
+    const long step = std::max(1L, spec.step);
+    const long steps = std::max(0L, spec.max - spec.min) / step; // how many small steps the range holds
+    // The largest of these factors that fits `times` times, and no larger than `most`.
+    const auto factor = [steps](long most, long times) {
+        for (const long f : {100L, 50L, 20L, 10L, 5L, 2L})
+            if (f <= most && f * times <= steps)
+                return f;
+        return 1L;
+    };
+    return {step, step * factor(10, 10), step * factor(100, 4)};
+}
+
 const OptionSpec *find_option(std::string_view key)
 {
     for (const OptionSpec &spec : option_specs())

@@ -106,6 +106,33 @@ static void conf_tests()
     CHECK(validate(*fec, "81"));
     CHECK(validate(*fec, "-1"));
     CHECK(option_value(Config::parse("fec_percentage = 35\n"), *fec) == std::optional<std::string>("35"));
+    // The number editor's steps fit the range: L1 and R1 took a hundred steps whatever the range, which threw both
+    // error correction tiles from one end to the other.
+    const auto steps_of = [](const char *key) {
+        const OptionSpec *spec = find_option(key);
+        return spec != nullptr ? number_steps(*spec) : NumberSteps{0, 0, 0};
+    };
+    const auto same = [](const NumberSteps &steps, long small, long medium, long large) {
+        return steps.small == small && steps.medium == medium && steps.large == large;
+    };
+    CHECK(same(steps_of("port"), 1, 10, 100));
+    CHECK(same(steps_of("fec_percentage"), 1, 5, 20));
+    CHECK(same(steps_of("internet_fec_percentage"), 1, 5, 20));
+    CHECK(same(steps_of("haptic_strength"), 5, 10, 50));
+    CHECK(same(steps_of("trigger_knock_strength"), 5, 10, 25));
+    for (const OptionSpec &spec : option_specs())
+    {
+        if (spec.kind != OptionKind::number)
+            continue;
+        const NumberSteps steps = number_steps(spec);
+        CHECK(steps.small == spec.step && steps.medium >= steps.small && steps.large >= steps.medium);
+        CHECK(steps.medium % steps.small == 0 && steps.large % steps.small == 0);
+        CHECK(steps.large * 4 <= spec.max - spec.min); // never from one end to the other
+    }
+    // A range narrower than a step still gives a step.
+    OptionSpec narrow;
+    narrow.min = 0, narrow.max = 3, narrow.step = 5;
+    CHECK(same(number_steps(narrow), 5, 5, 5));
     CHECK(std::string_view(fec->unit) == "%");
     CHECK(std::string_view(find_option("ping_timeout")->unit) == "ms");
     // Other options stay as they are in the file.

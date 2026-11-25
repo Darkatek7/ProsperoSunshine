@@ -59,6 +59,15 @@ struct OptionSpec
     const char *unit = ""; // after a number's value on its tile
 };
 
+// What the number editor's buttons add or take: left and right `small`, up and down `medium`, L1 and R1 `large`. Ten
+// and a hundred steps where the range is wide (a port); in a narrow one the larger two shrink, so that `large` fits
+// the range at least four times and `medium` ten times, and neither jumps from one end to the other.
+struct NumberSteps
+{
+    long small = 1, medium = 1, large = 1;
+};
+NumberSteps number_steps(const OptionSpec &spec);
+
 // The options the app offers, group by group in the settings page's order.
 const std::vector<OptionSpec> &option_specs();
 const OptionSpec *find_option(std::string_view key);
