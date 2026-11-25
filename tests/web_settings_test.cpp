@@ -8,9 +8,9 @@ using namespace prospero::web;
 int main() {
     // The groups: the app's captions in its reading order, once each, every option's group among them.
     const auto groups = settings_groups();
-    assert(groups.size() == 4);
+    assert(groups.size() == 5);
     assert(groups[0].caption == "HOST" && groups[1].caption == "PLAYING" && groups[2].caption == "NETWORK" &&
-           groups[3].caption == "EXPERIMENTAL");
+           groups[3].caption == "CONTROLLER" && groups[4].caption == "EXPERIMENTAL");
     std::set<int> ids;
     for (const auto &g : groups) ids.insert(g.id);
     assert(ids.size() == groups.size());
@@ -21,6 +21,16 @@ int main() {
     assert(fec && fec->kind == psapp::OptionKind::number && fec->min == 0 && fec->max == 80 && fec->step == 1);
     assert(std::string(fec->help) == "Rebuilds lost video. More survives more packet loss but costs bitrate.");
     assert(fec->group == psapp::OptionGroup::playing);
+    // The Controller group: the three the host reads itself (src/input/pad_settings.hpp), with its values and ranges.
+    const psapp::OptionSpec *mode = psapp::find_option("haptic_mode");
+    assert(mode && mode->group == psapp::OptionGroup::controller && mode->kind == psapp::OptionKind::choice);
+    assert(!psapp::validate(*mode, "rumble") && !psapp::validate(*mode, "off") && psapp::validate(*mode, "1"));
+    const psapp::OptionSpec *level = psapp::find_option("haptic_strength");
+    assert(level && level->group == psapp::OptionGroup::controller && level->min == 0 && level->max == 200);
+    assert(!psapp::validate(*level, "200") && psapp::validate(*level, "201"));
+    const psapp::OptionSpec *knock = psapp::find_option("trigger_knock_strength");
+    assert(knock && knock->group == psapp::OptionGroup::controller && knock->min == 0 && knock->max == 100);
+    assert(!psapp::validate(*knock, "0") && psapp::validate(*knock, "101") && psapp::validate(*knock, "70%"));
 
     const auto state = [](const char *key, std::uint32_t firmware, const std::string &value = "") {
         return switch_state(*psapp::find_option(key), firmware, firmware == 0x13000040u ? "13.00" : "10.20", value);
