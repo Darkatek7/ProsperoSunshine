@@ -5,6 +5,7 @@
 #include "apps/titles.hpp"
 #include "control/file_bridge.hpp"
 #include "control/menu_access.hpp"
+#include "control/stream_history.hpp"
 #include "control/stream_list.hpp"
 #include "control/http_guard.hpp"
 #include "control/uuid_lines.hpp"
@@ -12,6 +13,7 @@
 #include "net/exposure.hpp"
 #include "sunshine/platform_ps5.hpp"
 #include "sunshine/video_ps5.hpp"
+#include "video/frame_pacing.hpp"
 #include "web/web_login.hpp"
 #include "platform/ps5/console_users.h"
 #include "src/config.h"
@@ -68,6 +70,17 @@ long long seconds_since(std::chrono::steady_clock::time_point start, std::chrono
     if (start.time_since_epoch().count() == 0) return 0;  // not recorded yet
     return std::chrono::duration_cast<std::chrono::seconds>(now - start).count();
 }
+
+// The capture channels that run, as stream_list.hpp reads them.
+std::vector<CaptureFacts> capture_facts() {
+    std::vector<CaptureFacts> captures;
+    for (const auto &running : video::running_captures())
+        captures.push_back(CaptureFacts{running.channel, running.cert, running.joined, running.width, running.height, running.fps,
+                                        static_cast<int>(running.average / 1000), running.video_format, running.hdr});
+    return captures;
+}
+
+std::filesystem::path history_file() { return platf::appdata() / "stream_history.txt"; }
 }
 
 ControlServer::ControlServer(std::shared_ptr<safe::event_t<bool>> shutdown)
@@ -76,6 +89,8 @@ ControlServer::ControlServer(std::shared_ptr<safe::event_t<bool>> shutdown)
     nvhttp::set_launch_listener([this](const nvhttp::launch_client_t &client) {
         modes_.remember(client.uuid, format_mode(client.width, client.height, client.fps));
     });
+    std::ifstream file(history_file());
+    history_.load(std::string(std::istreambuf_iterator<char>(file), {}));
 }
 
 ControlServer::~ControlServer() {
@@ -85,6 +100,59 @@ ControlServer::~ControlServer() {
 std::string ControlServer::handle(const std::string &line, Caller caller) {
     std::lock_guard lock(mutex_);
     return handle_locked(line, caller);
+}
+
+void ControlServer::note_streams(bool stopping) {
+    std::vector<StreamHistory::Live> live;
+    const auto sessions = stopping ? std::vector<rtsp_stream::session_info_t>{} : rtsp_stream::session_infos();
+    if (!sessions.empty()) {
+        const auto devices = devices_by_cert();
+        const auto captures = capture_facts();
+        const auto now = std::chrono::steady_clock::now();
+        for (const auto &session : sessions) {
+            // Without a start it isn't told from the device's next stream yet; it has one within the second.
+            if (session.client_cert.empty() || session.started.time_since_epoch().count() == 0) continue;
+            const StreamFacts facts{session.client_cert, {}, session.width, session.height, session.fps, session.bitrate,
+                                    session.video_format, session.dynamic_range > 0, seconds_since(session.started, now)};
+            const Shown show = shown(facts, captures);
+            StreamHistory::Live stream;
+            // The same device's next stream has another start, so it is another record.
+            stream.key = session.client_cert + '@' + std::to_string(session.started.time_since_epoch().count());
+            StreamRecord &record = stream.now;
+            record.seconds = facts.seconds;
+            if (const auto device = devices.find(session.client_cert); device != devices.end()) {
+                record.uuid = device->second.first;
+                record.name = device->second.second;
+            }
+            record.mode = show.mode;
+            record.video_format = show.video_format;
+            record.hdr = show.hdr;
+            record.kbps = show.kbps;
+            record.sent_kbps = sent_rate_kbps(session.video_bytes, std::chrono::duration<double>(now - session.started).count());
+            record.rtt_ms = session.rtt_ms > 0 ? static_cast<int>(session.rtt_ms) : -1;
+            record.recoveries = static_cast<int>(session.recoveries);
+            record.missing_frames = static_cast<int>(session.missing_frames);
+            record.internet = remote_packet_size(session.packet_size);
+            live.push_back(std::move(stream));
+        }
+    }
+    const long long wall =
+        std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    std::lock_guard lock(mutex_);
+    const auto ended = history_.observe(live, wall);
+    if (ended.empty()) return;
+    // What sunshine.log keeps of a stream: how long it ran and how the path did, without who it was.
+    for (const StreamRecord &record : ended) BOOST_LOG(info) << ended_line(record);
+    // Through a temporary file: a host stopped in the middle leaves the old list, not half of one.
+    auto temporary = history_file();
+    temporary += ".new";
+    {
+        std::ofstream out(temporary, std::ios::trunc);
+        out << history_.text();
+        if (!out.flush()) return;
+    }
+    std::error_code ec;
+    std::filesystem::rename(temporary, history_file(), ec);
 }
 
 // Once, on the first version with profiles: every device already paired keeps playing as it did, with the console asking
@@ -187,11 +255,7 @@ std::string ControlServer::handle_locked(const std::string &line, Caller caller)
     }
     if (command == "STREAMS") {
         const auto devices = devices_by_cert();
-        std::vector<CaptureFacts> captures;
-        for (const auto &running : video::running_captures()) {
-            captures.push_back(CaptureFacts{running.channel, running.cert, running.joined, running.width, running.height, running.fps,
-                                            static_cast<int>(running.average / 1000), running.video_format, running.hdr});
-        }
+        const auto captures = capture_facts();
         const auto now = std::chrono::steady_clock::now();
         std::string out;
         std::map<std::string, SentSample> sent;
@@ -217,6 +281,12 @@ std::string ControlServer::handle_locked(const std::string &line, Caller caller)
                    '\n';
         }
         baseline = std::move(sent);  // sessions that ended drop out
+        return out + "END";
+    }
+    if (command == "HISTORY") {
+        std::string out;
+        for (auto record = history_.records().rbegin(); record != history_.records().rend(); ++record)
+            out += "OK " + history_line(*record) + '\n';
         return out + "END";
     }
     if (command == "ENDSTREAM") {

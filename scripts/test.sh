@@ -54,6 +54,7 @@ run_test device_follow_size_test
 run_test profile_rules_test
 run_test menu_access_test
 run_test stream_list_test
+run_test stream_history_test
 run_test capture_mode_test
 run_test channel_choice_test
 run_test frame_pacing_test

@@ -134,8 +134,8 @@ frames it reads and, when it has to, waits less than one refresh before it start
 ## Web page
 
 The host can serve a small web page, so a phone or PC in your network can do what the app does without leaving the game:
-see the host's status, version and firmware, enter the PIN of a pending pairing, end a device's stream, rename or remove
-paired devices, choose the console profiles each device plays as and which of them reach the console's menus, let a device
+see the host's status, version and firmware, enter the PIN of a pending pairing, end a device's stream, look at the last
+streams that ended, rename or remove paired devices, choose the console profiles each device plays as and which of them reach the console's menus, let a device
 follow the console's output size (a 4K stream goes on at 1080p when a game switches to 120 Hz, see
 [Known limits](#known-limits)), [hide apps](#hiding-apps) from devices you don't trust, change the settings, read or download the end of `sunshine.log` and `host_diag.log`, get the same
 diagnostic report as the app's (ready to paste into an issue), and restart the host.
@@ -160,6 +160,12 @@ It is off until you set a login, and nothing listens on its port before that.
   20 from all addresses together, every address waits the same way until the next good sign-in. Failed sign-ins are
   logged with the address, never the password. The password is kept only as a salted PBKDF2-SHA256 hash in
   `/data/prosperosunshine/web_login`.
+- **Recent streams** on the page's first tab lists the last 20 streams that ended: the device, when it ended and how long
+  it ran, the codec and mode, the bitrate asked for and the video sent on average, the round trip, whether the device came
+  over the internet, and the frames it reported lost with how often it asked for a new picture. That is what the device
+  tells the host; Moonlight's own statistics on the device know more. The list is kept in
+  `/data/prosperosunshine/stream_history.txt` and outlasts a host restart, and `sunshine.log` gets a `Stream ended:` line
+  with the same numbers, without the device.
 - Settings changed on the page apply when the host starts again. After **Save** the page offers to restart it, and until
   then a banner says the saved settings aren't applied yet. The Experimental switches stay in the app, where they are
   checked against the firmware.

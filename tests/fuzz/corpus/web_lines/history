@@ -1,0 +1,2 @@
+ended=1795600000 secs=754 codec=HEVC hdr=1 mode=1920x1080@60 kbps=20000 sent_kbps=14200 rtt_ms=3 recoveries=2 missing_frames=5 internet=1 uuid=0123ABCD name=Living room PC
+ended=7 secs=0 codec=H.264 hdr=0 mode=- kbps=0 sent_kbps=- rtt_ms=- recoveries=0 missing_frames=0 internet=0 uuid=- name=

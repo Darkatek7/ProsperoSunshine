@@ -30,6 +30,7 @@
 #include "src/process.h"
 #include "src/rtsp.h"
 #include "src/stream.h"
+#include "src/utility.h"
 #include "src/video.h"
 #include <algorithm>
 #include <array>
@@ -147,9 +148,10 @@ bool wait_or_ports_lost(const std::shared_ptr<safe::event_t<bool>> &shutdown_eve
     return false;
 }
 
+// Every second: the running streams, for the history of those that ended (ControlServer::note_streams).
 // While the log level is debug, every 5 s: one line per running stream with what reaches the network (stats_line in
 // control/stream_list.hpp, without who it is), the rate since the last line. At most one line per stream every 5 s.
-void log_stream_stats(std::stop_token stop) {
+void log_stream_stats(std::stop_token stop, prospero::ControlServer &control) {
     struct Last {
         uint64_t bytes = 0;
         std::chrono::steady_clock::time_point at;
@@ -159,9 +161,16 @@ void log_stream_stats(std::stop_token stop) {
     prospero::load::ThreadLoad load;
     bool load_unavailable = false;
     auto next = std::chrono::steady_clock::now() + 5s;
+    auto next_note = std::chrono::steady_clock::now() + 1s;
+    // The services stop, and every stream with them: they go into the history as they last showed.
+    const auto on_exit = util::fail_guard([&control]() { control.note_streams(true); });
     while (!stop.stop_requested()) {
         std::this_thread::sleep_for(250ms);
         const auto now = std::chrono::steady_clock::now();
+        if (now >= next_note) {
+            next_note = now + 1s;
+            control.note_streams();
+        }
         if (now < next) continue;
         next = now + 5s;
         // What the host costs the console: its threads' CPU, wakeups and page faults since the last line, and its memory
@@ -368,7 +377,7 @@ int main(int argc, char *argv[]) {
         std::jthread mdns_thread([name = config::nvhttp.sunshine_name](std::stop_token stop) {
             prospero::mdns::run_responder(stop, name, net::map_port(nvhttp::PORT_HTTP));
         });
-        std::jthread stats_thread(log_stream_stats);
+        std::jthread stats_thread([&control](std::stop_token stop) { log_stream_stats(stop, control); });
         // Optional UPnP port mapping (upnp in sunshine.conf, off by default; src/net/upnp.hpp).
         std::jthread upnp_thread;
         if (config::sunshine.flags[config::flag::UPNP]) {

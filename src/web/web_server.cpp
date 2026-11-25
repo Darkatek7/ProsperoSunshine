@@ -688,6 +688,7 @@ void routes(Server &server, State &state, ControlServer &control, const std::sha
                                  {"risk_ack", uuid_list("web_risk_ack.txt")},
                                  {"menus", menus},
                                  {"streams", streams_json(ok_lines(control.handle("STREAMS", Caller::web)), state.stream_health)},
+                                 {"history", records(ok_lines(control.handle("HISTORY", Caller::web)), stream_record)},
                                  {"upnp", upnp_json()}});
     });
     // The console's profiles, for choosing which ones a device may play as. Names are shown only here, signed in.

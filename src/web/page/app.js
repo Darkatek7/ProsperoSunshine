@@ -169,6 +169,7 @@ async function refresh() {
     renderPairings(data.pairings);
     renderStreams(data.streams);
     lastDevices = data.devices;
+    renderHistory(data.history || []);
     lastMenus = data.menus ?? null;
     const trusted = data.trusted || [];
     renderRisk(data.devices, trusted, data.risk_ack || []);
@@ -396,6 +397,75 @@ function sending(s) {
   const rating = share > 1.5 ? 'plain' : share >= 0.85 ? 'good' : share >= 0.6 ? 'fair' : 'poor';
   return el('span', { class: `rate ${rating}`, text: rating === 'poor' ? `${text} (low)` : text,
     title: `${Math.round(share * 100)} % of the ${asked} kbps asked for. A still picture needs less, so a low share there is no fault.` });
+}
+
+// The streams that ended lately (the host's HISTORY, newest first; src/control/stream_history.hpp). The first few show, a
+// button shows the rest. Drawn again only when something changed, so that a button in it keeps the focus across the polls.
+const historyShort = 5;
+let historyAll = false, historyDrawn = '', lastHistory = [];
+$('history-more').addEventListener('click', () => {
+  historyAll = !historyAll;
+  renderHistory(lastHistory);
+});
+
+// When a stream ended, in the browser's time zone: the time alone for today, else with the date. The console's clock gave
+// it; one that was never set gives a year long gone.
+function endedAt(unix) {
+  const seconds = Number(unix);
+  if (!(seconds > 1e9)) return ['End time unknown'];
+  const at = new Date(seconds * 1000), now = new Date();
+  const sameDay = at.toDateString() === now.toDateString();
+  const text = sameDay ? `today ${at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+    : at.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+  return ['Ended ', el('time', { datetime: at.toISOString(), text })];
+}
+
+// What the device reported lost, as a share of the frames the stream had: its length times the mode's frame rate.
+function lossLine(h) {
+  const missing = Number(h.missing_frames) || 0, asks = Number(h.recoveries) || 0, secs = Number(h.secs) || 0;
+  const fps = Number((h.mode || '').split('@')[1]) || 0;
+  const askText = `${asks} request${asks === 1 ? '' : 's'} for a new picture`;
+  // A stream asks for a picture once or twice as it starts; that is no loss.
+  if (!missing && asks <= 2) return el('div', { class: 'sub', text: 'No lost frames reported.' });
+  const frames = secs * fps, share = frames > 0 ? missing / frames : 0;
+  const perMinute = secs >= 30 ? asks / (secs / 60) : 0;
+  const rating = share >= 0.01 || perMinute >= 8 ? 'poor' : share >= 0.001 || perMinute >= 1 ? 'fair' : 'plain';
+  const percent = share >= 0.0005 ? ` (${(share * 100).toFixed(share < 0.01 ? 2 : 1)} %)` : '';
+  const text = missing ? `${missing} lost frame${missing === 1 ? '' : 's'}${percent}, ${askText}` : askText;
+  return el('div', { class: 'sub' }, el('span', { class: `rate ${rating}`, text: rating === 'poor' ? `${text} (many)` : text }));
+}
+
+function renderHistory(history) {
+  lastHistory = history;
+  const drawn = JSON.stringify([history, historyAll, lastDevices.map((d) => d.uuid), new Date().toDateString()]);
+  if (drawn === historyDrawn) return;
+  historyDrawn = drawn;
+  const list = $('history'), more = $('history-more');
+  more.hidden = history.length <= historyShort;
+  more.textContent = historyAll ? 'Show fewer' : `Show all ${history.length}`;
+  more.setAttribute('aria-expanded', String(historyAll));
+  if (!history.length) {
+    list.replaceChildren(el('li', { class: 'empty', text: 'No stream has ended yet.' }));
+    return;
+  }
+  list.replaceChildren(...history.slice(0, historyAll ? history.length : historyShort).map((h) => {
+    // A device that is still paired leads to its page in Devices; one unpaired since keeps the name it had.
+    const paired = h.uuid && h.uuid !== '-' && lastDevices.some((d) => d.uuid === h.uuid);
+    const who = h.name || 'Unknown device';
+    const title = paired
+      ? el('button', { type: 'button', class: 'title link', text: who, title: 'Show this device in Devices',
+        onclick: () => showDevice(h.uuid) })
+      : el('div', { class: 'title', text: who });
+    const sent = h.sent_kbps && h.sent_kbps !== '-' ? `${h.sent_kbps} kbps sent on average` : null;
+    const rtt = h.rtt_ms && h.rtt_ms !== '-' ? `round trip ${h.rtt_ms} ms` : null;
+    const parts = [duration(h.secs), h.codec, h.hdr === '1' ? 'HDR' : null, h.mode !== '-' ? h.mode : null,
+      Number(h.kbps) > 0 ? `${h.kbps} kbps asked` : null, sent, rtt, h.internet === '1' ? 'over the internet' : null].filter(Boolean);
+    return el('li', {},
+      el('div', { class: 'grow' },
+        title,
+        el('div', { class: 'sub' }, ...endedAt(h.ended), ...parts.flatMap((part) => [' · ', part])),
+        lossLine(h)));
+  }));
 }
 
 function duration(secs) {

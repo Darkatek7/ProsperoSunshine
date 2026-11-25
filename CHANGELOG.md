@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Recent streams on the web page** (issue 63). The first tab lists the last 20 streams that ended: the device, when it
+  ended and how long it ran, the codec and mode, the bitrate asked for and the video sent on average, the round trip,
+  whether the device came over the internet, and the frames it reported lost with how often it asked for a new picture.
+  The host keeps the list in `stream_history.txt`, so it outlasts a restart; `HISTORY` on the control socket gives it, and
+  `sunshine.log` gets a `Stream ended:` line per stream with the same numbers, without the device.
+
+### Fixed
+
+- **L1 and R1 in the app's number editor** took a hundred steps whatever the range, which threw Error correction, Rumble
+  level and Trigger knock from one end to the other. The larger steps now fit the range: 1, 5 and 20 for error
+  correction, 5, 10 and 50 for the rumble level; a port still moves by 1, 10 and 100.
+
 ## 0.6.7 (2026-11-25)
 
 The release of the three betas below. New since 0.6.7-beta.3:

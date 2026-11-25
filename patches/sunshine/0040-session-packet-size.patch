@@ -1,0 +1,26 @@
+ProsperoSunshine: a session's description names the packet size it asked for
+
+The host keeps the last streams that ended (control/stream_history.hpp, for the web page) and says of each whether the
+device came over the internet, which is one that asks for Moonlight's small packets (prospero::remote_packet_size). The
+size is set before the session is listed and never changes, as the rest of what describe() reads from the config.
+
+--- a/src/rtsp.h
++++ b/src/rtsp.h
+@@ -163,6 +163,7 @@
+     std::uint32_t recoveries = 0;  ///< Times the client asked for an IDR or to invalidate reference frames.
+     std::uint32_t rtt_ms = 0;  ///< Round-trip time of the control connection, 0 until known.
+     std::uint32_t missing_frames = 0;  ///< Frames the client reported lost (the ranges it asked to invalidate).
++    int packet_size = 0;  ///< Packet size the client asked for; Moonlight asks for a small one over the internet.
+   };
+ 
+   /**
+--- a/src/stream.cpp
++++ b/src/stream.cpp
+@@ -2392,6 +2392,7 @@
+       result.recoveries = session.info_recoveries.load(std::memory_order_relaxed);
+       result.rtt_ms = session.info_rtt_ms.load(std::memory_order_relaxed);
+       result.missing_frames = session.info_missing_frames.load(std::memory_order_relaxed);
++      result.packet_size = session.config.packetsize;
+       return result;
+     }
+ 

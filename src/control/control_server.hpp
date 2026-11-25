@@ -13,6 +13,10 @@
 //                                  mode=<WxH@fps> kbps=<n> secs=<n> pads=<n> role=<capture|joined|starting> channel=<0|1|->
 //                                  sent_kbps=<n|-> rtt_ms=<n|-> recoveries=<n> name=<name>", then "END" (stream_list.hpp;
 //                                  "-" for an unknown value; sent_kbps since the last STREAMS, or since the start)
+//   HISTORY                     -> per stream that ended lately, newest first, "OK ended=<unix s> secs=<n> codec=... hdr=<0|1>
+//                                  mode=<WxH@fps|-> kbps=<n> sent_kbps=<n|-> rtt_ms=<n|-> recoveries=<n> missing_frames=<n>
+//                                  internet=<0|1> uuid=<uuid|-> name=<name>", then "END" (stream_history.hpp; the last 20,
+//                                  kept in <appdata>/stream_history.txt)
 //   ENDSTREAM <uuid>            -> ends that device's stream; the game and the others' streams go on ("OK ended" / "ERR ...")
 //   RENAME <uuid> <name>      -> gives a paired device another name ("OK renamed" / "ERR ...")
 //   UNPAIR <uuid>               -> removes a paired device and ends its stream ("OK removed" / "ERR ..."); its profiles go
@@ -55,6 +59,7 @@
 #include "control/device_follow_size.hpp"
 #include "control/device_modes.hpp"
 #include "control/device_profiles.hpp"
+#include "control/stream_history.hpp"
 #include "src/thread_safe.h"
 #include <atomic>
 #include <chrono>
@@ -79,6 +84,9 @@ public:
     enum class Caller { app, web };
     // Handles one request line; the web page's thread and the socket's call it.
     std::string handle(const std::string &line, Caller caller = Caller::app);
+    // Looks at the running streams, for the history of those that ended (stream_history.hpp). The host calls it every
+    // second, and with `stopping` when its services stop, which ends every stream.
+    void note_streams(bool stopping = false);
     // Whether RELISTEN was asked for since the last call.
     bool take_relisten() { return relisten_.exchange(false); }
 
@@ -108,6 +116,7 @@ private:
         std::chrono::steady_clock::time_point at;
     };
     std::map<std::string, SentSample> sent_[2];
+    StreamHistory history_;
 };
 
 }

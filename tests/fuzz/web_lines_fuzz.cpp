@@ -2,6 +2,7 @@
 // The web page turns the control socket's answer lines into records (src/web/web_lines.hpp). The answers carry device names
 // that a client chose, so the host's own line formats must come back through the readers intact.
 #include "fuzz_common.hpp"
+#include "control/stream_history.hpp"
 #include "control/stream_list.hpp"
 #include "web/web_lines.hpp"
 
@@ -79,6 +80,31 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
             if (c == '\n' || c == '\r') c = ' ';
         FUZZ_CHECK(record.at("name") == clean);
         FUZZ_CHECK(record.at("uuid") == "uuid-1" && record.at("address") == "192.168.1.20");
+    }
+    // The history file (control/stream_history.hpp): any text reads without a fault, a line that reads writes back to a
+    // line that reads the same, and a name of any bytes comes out whole.
+    {
+        prospero::StreamHistory history;
+        history.load(text);
+        FUZZ_CHECK(history.records().size() <= prospero::StreamHistory::kKeep);
+        const std::string written = history.text();
+        prospero::StreamHistory again;
+        again.load(written);
+        FUZZ_CHECK(again.text() == written);
+        if (const auto record = prospero::parse_history_line(answer)) {
+            const std::string line = prospero::history_line(*record);
+            FUZZ_CHECK(line.find('\n') == std::string::npos);
+            const auto back = prospero::parse_history_line(line);
+            FUZZ_CHECK(back && prospero::history_line(*back) == line);
+        }
+        prospero::StreamRecord named;
+        named.name = text.substr(0, 60);
+        named.uuid = last;
+        const auto back = prospero::parse_history_line(prospero::history_line(named));
+        std::string clean = named.name;
+        for (char &c : clean)
+            if (c == '\n' || c == '\r') c = ' ';
+        FUZZ_CHECK(back && back->name == clean);
     }
     return 0;
 }

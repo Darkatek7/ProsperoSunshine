@@ -88,11 +88,14 @@ nur ein erfolgreicher Build.
 16. **Große Dateien aufteilen,** sobald die offenen PRs gemergt sind: `src/sunshine/platform_ps5.cpp`,
     `app/src/psapp/screen.cpp` und `src/platform/ps5/capture.c` in kleinere Module. Verhalten bleibt gleich; beide
     Testsuiten und ein Stream auf der Konsole vor dem Merge.
-17. **Formatierung für neuen Code:** eine `.clang-format` und eine `.editorconfig`, passend zum bestehenden Stil, nur für neuen
-    oder geänderten Code, damit die Diffs alter Dateien klein bleiben.
-18. **Verlauf der letzten Streams auf der Webseite** (Wunsch aus Issue 63): je Stream Gerät, Modus, Dauer und verlorene
-    Frames, um die Verbindung zu prüfen und Fehler einzugrenzen. Offen: wie viele Einträge, ob sie einen Neustart des Hosts
-    überdauern, und woher die Zahl der verlorenen Frames kommt (der Host sieht nur, was Moonlight ihm über den Steuerkanal meldet).
+17. **Formatierung für neuen Code:** `.clang-format` (Host und Tests; die App hat ihre eigene in `app/`) und `.editorconfig`
+    liegen im Repo, abgestimmt auf den bestehenden Stil: Mit clang-format 18 weichen rund 10 % der alten C++-Zeilen im Host und
+    6 % in der App ab, deshalb nur über `git clang-format` für geänderte Zeilen, nie für ganze Dateien. Die C-Dateien sind
+    ausgenommen. Offen: ob CI geänderte Zeilen prüfen soll.
+18. **Verlauf der letzten Streams auf der Webseite** (Wunsch aus Issue 63): gebaut nach 0.6.7, noch nicht veröffentlicht und
+    noch nicht auf der Konsole geprüft. Die letzten 20 beendeten Streams mit Gerät, Modus, Dauer, gesendeter Rate, Round-Trip
+    und dem, was das Gerät als verloren gemeldet hat; die Liste überdauert einen Neustart des Hosts
+    (`src/control/stream_history.hpp`). Offen: der Lauf auf der Konsole, und ob die App den Verlauf auch zeigen soll.
 19. **Haptik als Rumble** (seit 0.6.7-beta.3, Issue 30, PR 35, `haptic_mode = rumble`): auf 13.00 mit dem Testclient in Teardown
     und Astro's Playroom gemessen, von einem Mitwirkenden auf 9.60 (`STATUS.md`, „Haptik als Rumble und Trigger-Knock“). Offen:
     echtes Moonlight mit einem DualSense und andere Firmware. Der Kanal gilt für die ganze Konsole, darum bekommt nur das Pad
