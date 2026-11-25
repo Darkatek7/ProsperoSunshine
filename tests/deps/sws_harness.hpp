@@ -52,9 +52,11 @@ class Instance {
 public:
     // The host's timeouts are 5 s for a head (the library's default) and 300 s for a body (the page: 10 s and 60 s); tests
     // pass short ones so that "waits for the rest of the request" takes seconds, not minutes.
-    explicit Instance(Profile profile, long request_timeout_s = 1, long content_timeout_s = 3) : profile_(profile) {
+    // address: "::" is what the host binds with address_family = both.
+    explicit Instance(Profile profile, long request_timeout_s = 1, long content_timeout_s = 3, const char *address = "127.0.0.1")
+        : profile_(profile) {
         auto &c = server.config;
-        c.address = "127.0.0.1";
+        c.address = address;
         c.port = 0;  // the system picks
         c.timeout_request = request_timeout_s;
         c.timeout_content = content_timeout_s;

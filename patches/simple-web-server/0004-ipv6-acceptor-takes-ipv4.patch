@@ -1,0 +1,22 @@
+ProsperoSunshine: an IPv6 acceptor takes IPv4 too
+
+A server whose address is "::" (Sunshine's address_family = both) opens an IPv6 acceptor. Linux and Windows let it take
+IPv4 as well; FreeBSD, and so the PS5, keep it to IPv6 unless IPV6_V6ONLY is cleared, and the GameStream servers and the
+web page would no longer have answered IPv4. The option is cleared between open and bind; a refusal is ignored and leaves
+the acceptor IPv6 only (issue 64, Sunshine patch 0038).
+
+--- a/server_http.hpp
++++ b/server_http.hpp
+@@ -465,6 +465,12 @@
+         else
+           throw;
+       }
++      if(endpoint.protocol() == asio::ip::tcp::v6()) {
++        // ProsperoSunshine: an IPv6 acceptor takes IPv4 too, as on Linux and Windows. FreeBSD, and so the PS5, keep it to
++        // IPv6 unless told, and a server bound to "::" would no longer answer IPv4. A refusal leaves it IPv6 only.
++        error_code v6_ec;
++        acceptor->set_option(asio::ip::v6_only(false), v6_ec);
++      }
+       acceptor->set_option(asio::socket_base::reuse_address(config.reuse_address));
+       if(config.fast_open) {
+ #if defined(__linux__) && defined(TCP_FASTOPEN)

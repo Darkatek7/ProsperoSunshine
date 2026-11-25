@@ -1,0 +1,69 @@
+ProsperoSunshine: with address_family = both the IPv6 sockets take IPv4 too
+
+"both" opens the RTSP acceptor and the video and audio sockets for IPv6 and binds them to "::". Linux and Windows let such
+a socket take IPv4 as well unless told otherwise, so Sunshine never says so. FreeBSD doesn't (net.inet6.ip6.v6only is 1 by
+default), and the PS5's system is built on it: there "both" would have meant IPv6 only for these three, while ENet's control
+socket, which clears IPV6_V6ONLY itself, still took IPv4. With the HTTP servers IPv6 only as well, Moonlight over IPv4, the
+LAN included, could no longer reach the host. net::take_ipv4_too clears the option between open and bind; a system that refuses
+it leaves the socket IPv6 only, and the log says so (issue 64). The HTTP and HTTPS servers get the same in
+Simple-Web-Server (patches/simple-web-server/0004).
+
+--- a/src/network.h
++++ b/src/network.h
+@@ -127,6 +127,24 @@
+   std::string get_bind_address(af_e af);
+ 
+   /**
++   * @brief ProsperoSunshine: lets a socket opened for IPv6 take IPv4 too, which is what address_family = both means.
++   * Linux and Windows do that unless told otherwise; FreeBSD, and so the PS5, keep an IPv6 socket to IPv6, and
++   * Moonlight over IPv4 could no longer reach the host. Call it between open and bind.
++   * @param socket An open acceptor or socket.
++   * @param af The family it was opened for; an IPv4 socket is left alone.
++   * @return false when the system refused: the socket then takes IPv6 only.
++   */
++  template<class Socket>
++  bool take_ipv4_too(Socket &socket, af_e af) {
++    if (af == IPV4) {
++      return true;
++    }
++    boost::system::error_code ec;
++    socket.set_option(boost::asio::ip::v6_only(false), ec);
++    return !ec;
++  }
++
++  /**
+    * @brief Get the configured bind address formatted as a URL host.
+    * @details IPv6 addresses are enclosed in brackets. An empty bind address is represented as `localhost`.
+    * @return URL host for links to services bound by Sunshine.
+--- a/src/rtsp.cpp
++++ b/src/rtsp.cpp
+@@ -443,6 +443,9 @@
+       if (ec) {
+         return -1;
+       }
++      if (!net::take_ipv4_too(acceptor, af)) {
++        BOOST_LOG(warning) << "The RTSP port takes IPv6 only: this system doesn't let an IPv6 socket take IPv4 too"sv;
++      }
+ 
+       acceptor.set_option(boost::asio::socket_base::reuse_address {true});
+ 
+--- a/src/stream.cpp
++++ b/src/stream.cpp
+@@ -2128,6 +2128,9 @@
+ 
+       return -1;
+     }
++    if (!net::take_ipv4_too(ctx.video_sock, address_family)) {
++      BOOST_LOG(warning) << "The video and audio ports take IPv6 only: this system doesn't let an IPv6 socket take IPv4 too"sv;
++    }
+ 
+     // Set video socket send buffer size (SO_SENDBUF) to 1MB
+     try {
+@@ -2157,6 +2160,7 @@
+ 
+       return -1;
+     }
++    net::take_ipv4_too(ctx.audio_sock, address_family);
+ 
+     platf::trace_call("bind the audio port UDP " + std::to_string(audio_port));
+     ctx.audio_sock.bind(udp::endpoint(bind_addr, audio_port), ec);

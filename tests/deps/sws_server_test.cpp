@@ -475,6 +475,21 @@ void chunk_size_wraps() {
     }
 }
 
+// 8. A server bound to "::", as the host binds with address_family = both, answers a client on IPv4 too
+// (patches/simple-web-server/0004). Linux does that without the patch, so here the case only keeps the patch from breaking
+// it; FreeBSD and the PS5 are where the option matters (STATUS.md). A machine without IPv6 can't bind "::" and skips it.
+void ipv6_takes_ipv4() {
+    section = "ipv6 takes ipv4";
+    for (Profile p : {Profile::gamestream, Profile::page}) {
+        Instance s(p, 1, 3, "::");
+        if (s.port() == 0) {
+            std::printf("skipped: no IPv6 here (%s)\n", s.failure().c_str());
+            return;
+        }
+        survived(s, "bound to ::, asked over 127.0.0.1");
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -485,6 +500,7 @@ int main() {
     many_connections();
     keep_alive();
     chunk_size_wraps();
+    ipv6_takes_ipv4();
     if (failures) {
         std::fprintf(stderr, "FAIL: %d checks failed\n", failures);
         return 1;
