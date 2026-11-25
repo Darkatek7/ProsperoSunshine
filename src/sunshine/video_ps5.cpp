@@ -207,9 +207,10 @@ prospero::KeyframePolicy::Client keyframe_client(stream::session_t *session, con
     return client;
 }
 
-// About what an IDR of `bytes` takes on the wire: Sunshine's FEC share and some 4% of packet headers.
+// About what an IDR of `bytes` takes on the wire: Sunshine's FEC share (the larger one when clients over the internet have
+// their own) and some 4% of packet headers.
 std::size_t wire_bytes(std::size_t bytes) {
-    const int fec = std::clamp(config::stream.fec_percentage, 0, 255);
+    const int fec = std::clamp(std::max(config::stream.fec_percentage, config::ps5.internet_fec_percentage), 0, 255);
     return bytes + bytes * static_cast<std::size_t>(fec) / 100 + bytes / 25;
 }
 
@@ -830,7 +831,9 @@ void capture(safe::mail_t mail, config_t config, stream::session_t *channel_data
                 const auto pacing = asked.pacing;
                 BOOST_LOG(info) << "PS5 video: stream over the internet, up to "sv << pacing.burst_kb
                                 << " kB of a frame at once, the rest at "sv << pacing.pace_percent
-                                << "% of the stream's rate (internet_burst_kb, internet_pace_percent)"sv;
+                                << "% of the stream's rate (internet_burst_kb, internet_pace_percent), error correction "sv
+                                << prospero::fec_share(config::stream.fec_percentage, config::ps5.internet_fec_percentage, true)
+                                << (config::ps5.internet_fec_percentage >= 0 ? "% (internet_fec_percentage)"sv : "% (fec_percentage)"sv);
             }
         }
         prospero::EncodedFrame frame;

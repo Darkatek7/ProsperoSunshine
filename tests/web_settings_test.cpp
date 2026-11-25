@@ -8,9 +8,9 @@ using namespace prospero::web;
 int main() {
     // The groups: the app's captions in its reading order, once each, every option's group among them.
     const auto groups = settings_groups();
-    assert(groups.size() == 5);
-    assert(groups[0].caption == "HOST" && groups[1].caption == "PLAYING" && groups[2].caption == "NETWORK" &&
-           groups[3].caption == "CONTROLLER" && groups[4].caption == "EXPERIMENTAL");
+    assert(groups.size() == 6);
+    assert(groups[0].caption == "HOST" && groups[1].caption == "PLAYING" && groups[2].caption == "ERROR CORRECTION" &&
+           groups[3].caption == "NETWORK" && groups[4].caption == "CONTROLLER" && groups[5].caption == "EXPERIMENTAL");
     std::set<int> ids;
     for (const auto &g : groups) ids.insert(g.id);
     assert(ids.size() == groups.size());
@@ -20,7 +20,11 @@ int main() {
     const psapp::OptionSpec *fec = psapp::find_option("fec_percentage");
     assert(fec && fec->kind == psapp::OptionKind::number && fec->min == 0 && fec->max == 80 && fec->step == 1);
     assert(std::string(fec->help) == "Rebuilds lost video. More survives more packet loss but costs bitrate.");
-    assert(fec->group == psapp::OptionGroup::playing);
+    assert(fec->group == psapp::OptionGroup::correction && std::string(fec->label) == "At home");
+    // The share for devices over the internet (Sunshine patch 0039), unset by default: then they get fec_percentage.
+    const psapp::OptionSpec *internet = psapp::find_option("internet_fec_percentage");
+    assert(internet && internet->group == psapp::OptionGroup::correction && internet->kind == psapp::OptionKind::number);
+    assert(internet->min == 0 && internet->max == 80 && std::string(internet->default_label) == "As at home");
     // The Controller group: the three the host reads itself (src/input/pad_settings.hpp), with its values and ranges.
     const psapp::OptionSpec *mode = psapp::find_option("haptic_mode");
     assert(mode && mode->group == psapp::OptionGroup::controller && mode->kind == psapp::OptionKind::choice);

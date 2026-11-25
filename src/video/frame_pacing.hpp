@@ -81,6 +81,10 @@ struct PacingSettings {
 inline constexpr double remote_burst_bytes = PacingSettings::default_burst_kb * 1024.0;
 // Moonlight's packet size on a LAN is 1392 (1360 with video encryption), over the internet 1024 or 1184 (less 32).
 inline constexpr bool remote_packet_size(int packet_size) { return packet_size > 0 && packet_size < 1300; }
+// The share of error correction a stream gets, in percent of its video packets: fec_percentage, or for a client over the
+// internet internet_fec_percentage when sunshine.conf sets it (below 0: not set). Sunshine patch 0039 asks this where it
+// sets the encoder's bitrate and where it adds the packets.
+inline constexpr int fec_share(int home, int internet, bool remote) { return remote && internet >= 0 ? internet : home; }
 inline constexpr std::chrono::milliseconds max_frame_delay{100};
 // Sunshine's own limit for all streams together: 80% of 1 Gbit/s, in steps of about 1 ms (stream.cpp).
 inline constexpr double wire_bytes_per_second = 100e6;

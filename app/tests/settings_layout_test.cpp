@@ -48,6 +48,8 @@ Move opposite(Move move)
 // nearer one back. These are the round trips that don't, for today's list (option key or action, the first move).
 // A change of the option list may change them: look at the SVG, and update this list when the new paths make sense.
 const std::set<std::pair<std::string, std::string>> kOneWay = {
+    // Host, Playing and Error correction's six tiles over Network's three and Controller's two.
+    {"min_log_level", "down"}, // to upnp, whose up is quit closes game
     // Controller's two tiles over its third.
     {"haptic_strength", "down"}, // to trigger_knock_strength, whose up is vibration
     // Network's three and Controller's one over the Experimental six.
@@ -313,8 +315,8 @@ void group_tests()
     const Layout layout = build(specs);
     CHECK(layout.error.find("orphan") != std::string::npos);
     CHECK(layout.tiles.back().w == 0.0f);
-    for (OptionGroup group : {OptionGroup::host, OptionGroup::network, OptionGroup::playing, OptionGroup::controller,
-                              OptionGroup::experimental})
+    for (OptionGroup group : {OptionGroup::host, OptionGroup::network, OptionGroup::playing, OptionGroup::correction,
+                              OptionGroup::controller, OptionGroup::experimental})
         CHECK(std::string(caption(group)).size() > 0);
     // Another network option takes a third row of Network, and the page no longer fits above the actions.
     std::vector<OptionSpec> more = option_specs();

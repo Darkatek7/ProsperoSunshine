@@ -4,7 +4,7 @@
 // here or in screen.cpp; the app's tests check that it still fits. Pure code, tested on the PC (app/tests), which also
 // draws it as an SVG for a look without the console.
 //
-// The page, top to bottom: a band with Host and Playing side by side, a band with Network in rows of three and Controller
+// The page, top to bottom: a band with Host, Playing and Error correction side by side, a band with Network in rows of three and Controller
 // in rows of two beside it, the Experimental switches in one row, then Save, Save and restart, Revert and (at the right end) the web page, and the help bar. Each group has
 // a caption line over its tiles, as the Experimental row had alone before.
 #pragma once

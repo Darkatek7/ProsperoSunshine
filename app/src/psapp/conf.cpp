@@ -36,7 +36,7 @@ const std::vector<Choice> kEncryption = {
 
 // Names, ranges and defaults from Sunshine a679b059 src/config.cpp; ping_timeout's default is the
 // host's own (src/sunshine/main_ps5.cpp sets 2 s before the file is read). The order is the settings page's: Host,
-// Network, Playing, Controller, Experimental (settings_layout.cpp lays the groups out; the app's tests check every option has a tile).
+// Network, Playing, Error correction, Controller, Experimental (settings_layout.cpp lays the groups out; the app's tests check every option has a tile).
 const std::vector<OptionSpec> &option_specs()
 {
     using G = OptionGroup;
@@ -76,7 +76,7 @@ const std::vector<OptionSpec> &option_specs()
          "Ends a stream whose client went silent.",
          OptionKind::number, "2000 ms", {}, 500, 60000, 500, 2000, "ms"},
         // Sunshine reads this one (patch 0010), as it does the options above.
-        {G::playing, I::home, "close_game_on_quit", "Quit closes the game",
+        {G::playing, I::home, "close_game_on_quit", "Quit closes game",
          "On: quitting in Moonlight also closes the game the stream started or found in front, and unsaved progress is lost.",
          OptionKind::toggle, "Off", {}, 0, 0, 1, 0},
         // The host reads this one (src/sunshine/platform_ps5.cpp). Off, only the host's controller has PS and Create.
@@ -86,9 +86,14 @@ const std::vector<OptionSpec> &option_specs()
         // Sunshine's own key (src/config.cpp, 0 to 100, default 20), which the host leaves alone: stream.cpp adds that many
         // Reed-Solomon packets per 100 video packets, and rtsp.cpp lowers the encoder's bitrate to make room for them, up to
         // 80. Above 80 it stops lowering it and the stream outgrows the bitrate the client asked for, so the app stops there.
-        {G::playing, I::check, "fec_percentage", "Error correction (%)",
+        {G::correction, I::check, "fec_percentage", "At home",
          "Rebuilds lost video. More survives more packet loss but costs bitrate.",
          OptionKind::number, "20 %", {}, 0, 80, 1, 20, "%"},
+        // The host's own key (Sunshine patch 0039): the same share for a client over the internet, one that asks for
+        // Moonlight's small packets. Without the key such a client gets fec_percentage.
+        {G::correction, I::globe, "internet_fec_percentage", "Internet",
+         "The same for devices over the internet, where more gets lost.",
+         OptionKind::number, "As at home", {}, 0, 80, 1, 20, "%"},
         // The next three the host reads itself, within seconds and in a running stream too (src/input/pad_settings.hpp).
         // haptic_mode: the haptics of a PS5 game as two-motor rumble, on the host's controller only (docs/re/haptics.md).
         {G::controller, I::sliders, "haptic_mode", "Vibration",

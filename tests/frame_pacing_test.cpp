@@ -204,6 +204,10 @@ int main() {
     {
         assert(remote_packet_size(1024) && remote_packet_size(992) && remote_packet_size(1184) && remote_packet_size(1152));
         assert(!remote_packet_size(1392) && !remote_packet_size(1360) && !remote_packet_size(0));
+        // The share of error correction: the one for the internet only for a client over the internet, and only when set.
+        static_assert(fec_share(20, -1, false) == 20 && fec_share(20, -1, true) == 20);
+        static_assert(fec_share(20, 40, false) == 20 && fec_share(20, 40, true) == 40);
+        static_assert(fec_share(20, 0, true) == 0 && fec_share(10, 0, false) == 10);
         for (const std::uint32_t kbps : {1300u, 3428u, 7308u, 8908u, 14988u, 50'000u}) {
             FramePacer pacer;
             pacer.configure(kbps, 30, true);

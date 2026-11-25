@@ -11,8 +11,9 @@ namespace
 {
 
 // The groups in the page's order. Groups with the same band share its rows side by side, each with its tile width in
-// proportion to its weight; `columns` 0 puts a group in one row, else it wraps after that many tiles. Host's tiles are
-// a little narrower than Playing's: their labels are short, Playing's the longest of the page ("Quit closes the game").
+// proportion to its weight; `columns` 0 puts a group in one row, else it wraps after that many tiles. The first band's
+// weights are its tiles' widths in pixels, each as narrow as its longest text allows: Host by "network name", Playing by
+// "Quit closes game", Error correction by "As at home". Controller's tiles are narrower than Network's for the same reason.
 struct GroupPlan
 {
     OptionGroup group;
@@ -23,8 +24,9 @@ struct GroupPlan
 };
 
 constexpr GroupPlan kPlan[] = {
-    {OptionGroup::host, "HOST", 0, 0, 280.0f},
-    {OptionGroup::playing, "PLAYING", 0, 0, 360.0f},
+    {OptionGroup::host, "HOST", 0, 0, 248.0f},
+    {OptionGroup::playing, "PLAYING", 0, 0, 304.0f},
+    {OptionGroup::correction, "ERROR CORRECTION", 0, 0, 242.0f},
     {OptionGroup::network, "NETWORK", 1, 3, 1.0f},
     {OptionGroup::controller, "CONTROLLER", 1, 2, 0.745f},
     {OptionGroup::experimental, "EXPERIMENTAL", 2, 0, 1.0f},

@@ -1,0 +1,72 @@
+ProsperoSunshine: sunshine.conf sets the error correction for clients over the internet apart
+
+fec_percentage is one number for every client: the share of Reed-Solomon packets added to the video, which rtsp.cpp takes
+out of the bitrate the client asked for. A wired client at home loses next to nothing and would rather have the bitrate;
+a phone on mobile data loses more. internet_fec_percentage (0 to 100, unset by default) is the share for a client over
+the internet, which is one that asks for Moonlight's small packets (prospero::remote_packet_size, as the pacing of patch
+0026 has it); unset, or out of range, such a client gets fec_percentage as before. Both places that use the share ask
+prospero::fec_share (video/frame_pacing.hpp): the encoder's bitrate in rtsp.cpp and the shards in stream.cpp.
+
+--- a/src/config.h
++++ b/src/config.h
+@@ -424,6 +424,7 @@
+     int internet_pace_percent;  ///< Clients over the internet: the rest of a large frame leaves at this percent of the stream's rate.
+     int internet_burst_kb;  ///< Clients over the internet: the most of a frame that leaves at once, in kB.
+     bool follow_output_size;  ///< Default for devices without their own line in device_follow_size.txt (off by default).
++    int internet_fec_percentage;  ///< Clients over the internet: their share of error correction; -1 (unset) is fec_percentage.
+   };
+ 
+   extern ps5_t ps5;
+--- a/src/config.cpp
++++ b/src/config.cpp
+@@ -912,6 +912,7 @@
+     200,  // internet_pace_percent (video/frame_pacing.hpp)
+     16,  // internet_burst_kb
+     false,  // follow_output_size (control/device_follow_size.hpp)
++    -1,  // internet_fec_percentage: as fec_percentage (video/frame_pacing.hpp, fec_share)
+   };
+ #endif
+ 
+@@ -1778,6 +1779,7 @@
+     int_between_f(vars, "internet_pace_percent", ps5.internet_pace_percent, {125, 800});
+     int_between_f(vars, "internet_burst_kb", ps5.internet_burst_kb, {2, 64});
+     bool_f(vars, "follow_output_size", ps5.follow_output_size);
++    int_between_f(vars, "internet_fec_percentage", ps5.internet_fec_percentage, {0, 100});
+ #endif
+     generic_f(vars, "dd_mode_remapping", video.dd.mode_remapping, dd::mode_remapping_from_view);
+     {
+--- a/src/stream.cpp
++++ b/src/stream.cpp
+@@ -1662,7 +1662,8 @@
+         frame_header.frame_processing_latency = 0;
+       }
+ 
+-      auto fecPercentage = config::stream.fec_percentage;
++      // ProsperoSunshine: a client over the internet has a share of its own when sunshine.conf sets one (internet_fec_percentage).
++      auto fecPercentage = prospero::fec_share(config::stream.fec_percentage, config::ps5.internet_fec_percentage, prospero::remote_packet_size(session->config.packetsize));
+ 
+       // Insert space for packet headers
+       auto blocksize = session->config.packetsize + MAX_RTP_HEADER_SIZE;
+--- a/src/rtsp.cpp
++++ b/src/rtsp.cpp
+@@ -32,6 +32,7 @@
+ #include "stream.h"
+ #include "sync.h"
+ #include "video.h"
++#include "video/frame_pacing.hpp"
+ 
+ namespace asio = boost::asio;
+ 
+@@ -1279,8 +1280,10 @@
+ 
+       // If the FEC percentage isn't too high, adjust the configured bitrate to ensure video
+       // traffic doesn't exceed the user's selected bitrate when the FEC shards are included.
+-      if (config::stream.fec_percentage <= 80) {
+-        configuredBitrateKbps /= 100.f / (100 - config::stream.fec_percentage);
++      // ProsperoSunshine: the share this client gets (stream.cpp), internet_fec_percentage for a client over the internet if set.
++      const int fec_percentage = prospero::fec_share(config::stream.fec_percentage, config::ps5.internet_fec_percentage, prospero::remote_packet_size(config.packetsize));
++      if (fec_percentage <= 80) {
++        configuredBitrateKbps /= 100.f / (100 - fec_percentage);
+       }
+ 
+       // Adjust the bitrate to account for audio traffic bandwidth usage (capped at 20% reduction).
