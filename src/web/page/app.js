@@ -415,7 +415,7 @@ function endedAt(unix) {
   if (!(seconds > 1e9)) return ['End time unknown'];
   const at = new Date(seconds * 1000), now = new Date();
   const sameDay = at.toDateString() === now.toDateString();
-  const text = sameDay ? `today ${at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+  const text = sameDay ? `today ${at.toLocaleTimeString([], { timeStyle: 'short' })}`
     : at.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
   return ['Ended ', el('time', { datetime: at.toISOString(), text })];
 }
@@ -427,9 +427,11 @@ function lossLine(h) {
   const missing = Number(h.missing_frames) || 0, asks = Number(h.recoveries) || 0, secs = Number(h.secs) || 0;
   // A stream asks for a picture once or twice as it starts; that is no loss.
   if (!missing && asks <= 2) return el('div', { class: 'sub', text: 'No losses reported.' });
-  const perMinute = secs >= 30 ? asks / (secs / 60) : 0;
-  // As the running stream's health line: a loss about every 7 s or oftener is trouble.
-  const rating = perMinute >= 8 ? 'poor' : perMinute >= 1 ? 'fair' : 'plain';
+  // A stream of 30 s is recorded with 29, so the rate counts from 20 s on.
+  const perMinute = secs >= 20 ? asks / (secs / 60) : 0;
+  // As the running stream's health line: a loss about every 7 s or oftener is trouble, from five requests on (a short
+  // stream's two at its start and one loss are no trouble).
+  const rating = perMinute >= 8 && asks >= 5 ? 'poor' : perMinute >= 1 ? 'fair' : 'plain';
   const rate = perMinute >= 1 ? `, about ${perMinute >= 10 ? Math.round(perMinute) : perMinute.toFixed(1)} a minute` : '';
   const lost = missing ? `; ${missing} frame${missing === 1 ? '' : 's'} reported lost` : '';
   const text = `Asked for a new picture ${asks} time${asks === 1 ? '' : 's'}${rate}${lost}`;

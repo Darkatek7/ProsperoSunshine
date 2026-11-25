@@ -178,7 +178,7 @@ void Screen::draw_sheet(hui::gfx::DrawList &list, std::uint32_t glass) const
         }
         if (buffer_.empty())
             hui::ui::text(list, fonts_.regular,
-                          spec != nullptr                  ? std::string("Default (network name)")
+                          spec != nullptr                  ? std::string("Default (") + spec->default_label + ")"
                           : web_step_ == WebStep::user     ? std::string("User name")
                           : web_step_ == WebStep::password ? std::string("Password")
                                                            : pair_suggestion_,
