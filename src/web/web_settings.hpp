@@ -4,8 +4,8 @@
 //
 // The groups come from the app's layout (app/src/psapp/settings_layout.cpp: the captions of the page in reading order), so a
 // new group there shows on the web page without a line here. The words for a firmware switch that can't change anything on this
-// firmware are the app's (screen.cpp, value_text and the help bar): "Verified here" / the list's own "No effect here" and the
-// help sentences. They are written out here once for the page; the app has its own copy of the two sentences in screen.cpp.
+// firmware are the app's (screen.cpp's value_text, screen_draw.cpp's help bar): "Verified here" / the list's own "No effect here" and the
+// help sentences. They are written out here once for the page; the app has its own copy of the two sentences in screen.cpp and screen_draw.cpp.
 #pragma once
 #include "app/psapp/conf.hpp"
 #include "app/psapp/experimental_list.h"

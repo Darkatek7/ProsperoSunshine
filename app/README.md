@@ -254,7 +254,7 @@ docker run --rm -v "${PWD}:/repo" prosperosunshine-app:2 bash app/tests/run.sh
 | File | What it is |
 | --- | --- |
 | `src/main.cpp` | The frame loop: display, fonts, pad, sound, the screen. Ends itself when `/data/prosperosunshine/app.quit` appears (for unattended tests). |
-| `src/psapp/screen.*` | The three pages, the sheets, the motion. Drawn in three layers: the light behind the page, the page (frosted cards over the first layer), the sheet (over the frosted page). |
+| `src/psapp/screen*` | The three pages, the sheets, the motion. Drawn in three layers: the light behind the page, the page (frosted cards over the first layer), the sheet (over the frosted page). `screen.cpp` has the state, the update and the pages' input, `screen_sheets.cpp` the sheets and their input, `screen_draw.cpp` and `screen_sheets_draw.cpp` the drawing, `screen_internal.hpp` the colours and helpers they share. |
 | `src/psapp/icons.*` | Line icons and the sun, from the kit's shapes. |
 | `src/psapp/host.*` | The worker thread: polls the control socket, starts and stops the host, saves the settings, switches autoload. The screen reads a snapshot of its state every frame and never waits. |
 | `src/psapp/conf.*` | `sunshine.conf`: the offered options, their checks, line-preserving edits. |

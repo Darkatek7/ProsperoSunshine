@@ -152,7 +152,7 @@ void text_tests(const Layout &layout)
         if (label > room * 0.98f)
             std::printf("  label of %s: %.0f px for %.0f\n", spec.key, label, room);
         CHECK(label <= room * 0.98f);
-        // The value line: the default and its tag, or a switch's track (screen.cpp draws both the same way).
+        // The value line: the default and its tag, or a switch's track (screen_draw.cpp draws both the same way).
         const bool toggle = spec.kind == OptionKind::toggle;
         const float value_room = room - (toggle ? 84.0f - kTextRight + 12.0f : 0.0f);
         CHECK(text_width(kInterSemiBold, spec.default_label, kValueSize) <= value_room);
@@ -164,7 +164,7 @@ void text_tests(const Layout &layout)
         if (help > bar_room)
             std::printf("  help of %s: %.0f px for %.0f\n", spec.key, help, bar_room);
         CHECK(help <= bar_room);
-        // The editors (screen.cpp, draw_sheet): one line of help under the title, 880 wide for numbers and choices,
+        // The editors (screen_sheets_draw.cpp, draw_sheet): one line of help under the title, 880 wide for numbers and choices,
         // 1120 for text with " Leave it empty for the default." after it.
         if (spec.kind == OptionKind::number || spec.kind == OptionKind::choice)
             CHECK(text_width(kInterRegular, spec.help, 24.0f) <= 880.0f - 60.0f);
@@ -360,7 +360,7 @@ void settings_layout_tests()
     group_tests();
 }
 
-// The settings page as the layout places it, with the options' default values; colours as in screen.cpp.
+// The settings page as the layout places it, with the options' default values; colours as in screen_internal.hpp.
 bool write_settings_svg(const char *path)
 {
     const Layout &layout = page();

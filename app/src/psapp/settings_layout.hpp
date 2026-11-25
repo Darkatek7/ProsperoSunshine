@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Where the settings page puts its tiles and buttons, and where the D-pad goes from each, in the 1920x1080 canvas.
 // Computed from the option list (each OptionSpec names its group), so a new option in conf.cpp needs no number changed
-// here or in screen.cpp; the app's tests check that it still fits. Pure code, tested on the PC (app/tests), which also
-// draws it as an SVG for a look without the console.
+// here or in screen_draw.cpp; the app's tests check that it still fits. Pure code, tested on the PC (app/tests), which
+// also draws it as an SVG for a look without the console.
 //
 // The page, top to bottom: a band with Host, Playing and Error correction side by side, a band with Network in rows of three and Controller
 // in rows of two beside it, the Experimental switches in one row, then Save, Save and restart, Revert and (at the right end) the web page, and the help bar. Each group has

@@ -212,7 +212,7 @@ static void boot_start_tests()
     CHECK(std::string(autoload::boot_chip(BootStart::unknown)) == "Boot start unknown");
     CHECK(std::string(autoload::boot_unknown_hint(false)).find("Start the host to see") == 0);
     CHECK(std::string(autoload::boot_unknown_hint(true)).find("Reload") != std::string::npos);
-    // The chips' row on the home page (screen.cpp draw_home: from x 96, each chip its text at 22 px SemiBold plus 74, 14 apart)
+    // The chips' row on the home page (screen_draw.cpp draw_home: from x 96, each chip its text at 22 px SemiBold plus 74, 14 apart)
     // with the longest of each: it has to end before the sun's rays, which reach no further left than x 1316 (the emblem at
     // 1500, its rays 1.64 times its radius of 112).
     for (const BootStart state : {BootStart::on, BootStart::off, BootStart::unknown})
