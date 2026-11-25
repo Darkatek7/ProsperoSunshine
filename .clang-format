@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# For new and changed C++ code only (clang-format 18): `git clang-format` formats the lines a change touches. Don't run it
+# over whole files, about a tenth of the existing lines would move and the diffs of old code should stay small. The app has
+# its own style in app/.clang-format; the C files keep theirs by hand (.clang-format-ignore).
+BasedOnStyle: LLVM
+IndentWidth: 4
+ColumnLimit: 132
+AccessModifierOffset: -4
+PointerAlignment: Right
+AllowShortFunctionsOnASingleLine: All
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLoopsOnASingleLine: true
+AllowShortLambdasOnASingleLine: All
+AllowShortBlocksOnASingleLine: Empty
+AllowShortCaseLabelsOnASingleLine: true
+NamespaceIndentation: None
+SpacesBeforeTrailingComments: 2
+SortIncludes: Never
+ReflowComments: false
+Cpp11BracedListStyle: true
+AlwaysBreakTemplateDeclarations: Yes
+BinPackArguments: true
+BinPackParameters: true
+AlignAfterOpenBracket: Align
+AlignTrailingComments:
+  Kind: Leave
+InsertNewlineAtEOF: true
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 1

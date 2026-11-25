@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# The app's C++ puts braces on their own lines and keeps `if` and loops off their statement's line; the rest is the
+# repository's style (../.clang-format).
+BasedOnStyle: InheritParentConfig
+BreakBeforeBraces: Allman
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false

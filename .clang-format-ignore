@@ -1,0 +1,12 @@
+# The C sources and their headers put a function's brace on its own line and are formatted by hand. clang-format 18's
+# `*` stops at a slash and it has no `**`, so each depth has its line.
+*.c
+*/*.c
+*/*/*.c
+*/*/*/*.c
+*/*/*/*/*.c
+*.h
+*/*.h
+*/*/*.h
+*/*/*/*.h
+*/*/*/*/*.h
