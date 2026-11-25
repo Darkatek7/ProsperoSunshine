@@ -82,6 +82,10 @@ With `--network host` on Linux there is no NAT in between, but whether large bur
 yet; `tools/moonlight/udp_burst.py` against `udp_burst_spike.elf` checks it (`tools/moonlight/README.md`). `loss_test.sh`
 always uses the container client. The home screen is too quiet to load the encoder; the Mario 64 demo moves without input.
 
+The web page without a console: `python3 tools/web_mock.py [port] [busy|quiet|empty]` serves `src/web/page` with a stand-in
+for the host's API and made-up data, signed in, for looking at a change to the page in a browser on the PC. It follows
+`src/web/web_server.cpp` by hand: a new field there needs one in the mock, and the real page on the console stays the check.
+
 Release archive from an existing build: `bash scripts/package.sh [version]` (on the host) -> `dist/`.
 
 Toolchain: PS5 Payload SDK v0.45 in the Docker image `prosperosunshine-sdk:v0.45` (clang 18, target
