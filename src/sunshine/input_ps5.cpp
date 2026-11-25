@@ -352,7 +352,7 @@ static void poll_haptics(std::stop_token stop, input_raw_t *input) {
 // So a device to be seated in a profile is added only bus_settle after the host's last removal; keep_owners covers the
 // rest.
 constexpr auto bus_settle = 250ms;
-std::atomic<std::chrono::steady_clock::rep> last_removal{0};  // steady_clock ticks; 0 while nothing was removed
+static std::atomic<std::chrono::steady_clock::rep> last_removal{0};  // steady_clock ticks; 0 while nothing was removed
 
 void removed_device() {
     last_removal = std::chrono::steady_clock::now().time_since_epoch().count();

@@ -315,6 +315,11 @@ void Screen::handle_sheet(const hui::InputFrame &input, hui::ui::Feedback &feedb
     {
         if (input.is_pressed(InputAction::confirm))
         {
+            if (busy())
+            {
+                feedback.play(hui::audio::Cue::error);
+                return;
+            }
             host_.end_stream(target_, target_name_);
             feedback.play(hui::audio::Cue::select);
             open_streams();
@@ -370,6 +375,11 @@ void Screen::handle_sheet(const hui::InputFrame &input, hui::ui::Feedback &feedb
     {
         if (input.is_pressed(InputAction::confirm))
         {
+            if (busy())
+            {
+                feedback.play(hui::audio::Cue::error);
+                return;
+            }
             host_.remove_device(target_, target_name_);
             feedback.play(hui::audio::Cue::select);
             open_devices();
@@ -454,7 +464,7 @@ void Screen::handle_sheet(const hui::InputFrame &input, hui::ui::Feedback &feedb
         return;
     }
 
-    // The keyboard: the PIN and the host name.
+    // The keyboard: the PIN, the host name, a device's new name and the web page's user name and password.
     if (web_step_ == WebStep::password && input.is_pressed(InputAction::r3))
     {
         show_password_ = !show_password_;
