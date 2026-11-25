@@ -16,7 +16,7 @@ Am selben Tag live gemessen: Teardown sendet Effekte an das virtuelle Pad, sie k
 
 ## 1. Protokoll
 
-**Trigger: vorhanden.** Der Host ruft es in `set_triggers` auf (`src/sunshine/platform_ps5.cpp`).
+**Trigger: vorhanden.** Der Host ruft es in `set_triggers` auf (`src/sunshine/input_ps5.cpp`).
 
 - Sunshine: `gamepad_feedback_e::set_adaptive_triggers` und `make_adaptive_triggers` (`.cache/deps/src/sunshine/src/platform/common.h:124,224`),
   Versand als Typ `0x5503` (`src/stream.cpp:74,262-275,1105-1120`). Kein Patch in `patches/sunshine/` berührt das.
@@ -176,7 +176,7 @@ von P9.10.
 ## Umsetzung
 
 - `map_trigger_effects` in `src/input/gamepad_map.hpp` setzt die Flags nur für den Trigger, dessen Block sich geändert hat (Test in
-  `tests/gamepad_map_test.cpp`). `set_triggers` in `src/sunshine/platform_ps5.cpp` stellt die Meldung in Sunshines Warteschlange.
+  `tests/gamepad_map_test.cpp`). `set_triggers` in `src/sunshine/input_ps5.cpp` stellt die Meldung in Sunshines Warteschlange.
 - `soften_knock` in derselben Datei skaliert die Stärken der zehn Zonen von Effekt `0x26` mit `trigger_knock_strength` (Vorgabe 100,
   also unverändert). Bytes 0 und 1 sind die Zonenmaske, Bytes 2 bis 5 je Zone 3 Bit, die Stärke minus eins wie bei `0x21`. Skaliert wird
   die Stärke 1 bis 8, gerundet; ergibt sie 0, fällt die Zone aus der Maske, also heißt 0 kein Klopfen. Uncharted schickt beim Schießen

@@ -3,7 +3,7 @@
 Spiele für die PS5 steuern den DualSense über einen Audio-ähnlichen Haptik-Kanal und setzen die klassischen Motoren vermutlich nicht
 (`pad-output.md`). Moonlight hat dafür keinen Kanal, aber die zwei Motoren. Der Host liest deshalb mit `haptic_mode` in
 `sunshine.conf` während eines Streams `sceAvcap2ReadHaptic` und gibt den Pegel als Rumble weiter
-(`poll_haptics` in `src/sunshine/platform_ps5.cpp`, `src/platform/ps5/haptic_envelope.hpp`).
+(`poll_haptics` in `src/sunshine/input_ps5.cpp`, `src/platform/ps5/haptic_envelope.hpp`).
 
 ## Gemessen auf 13.00
 

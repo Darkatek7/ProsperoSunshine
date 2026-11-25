@@ -185,7 +185,9 @@ extern const std::size_t prospero_web_asset_count = sizeof prospero_web_assets /
         ${SUNSHINE_KEPT}
         "${MOONLIGHT_SRC}/src/RtspParser.c"
         src/sunshine/main_ps5.cpp src/sunshine/video_ps5.cpp src/sunshine/process_ps5.cpp
-        src/sunshine/platform_ps5.cpp src/sunshine/stubs_ps5.cpp src/sunshine/self_check.cpp src/control/control_server.cpp
+        src/sunshine/platform_ps5.cpp src/sunshine/audio_ps5.cpp src/sunshine/input_ps5.cpp src/sunshine/input_seats_ps5.cpp
+        src/sunshine/input_pads_ps5.cpp src/sunshine/input_kbm_ps5.cpp
+        src/sunshine/stubs_ps5.cpp src/sunshine/self_check.cpp src/control/control_server.cpp
         src/control/autoload_host.cpp src/control/file_bridge.cpp app/src/psapp/autoload.cpp src/apps/titles.cpp src/platform/ps5/title_launch.c
         src/platform/ps5/console_users.c src/platform/ps5/profile_seat.c src/platform/ps5/user_service.c
         src/platform/ps5/thread_counters.cpp)

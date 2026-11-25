@@ -41,7 +41,7 @@ gemessen.
 
 ## Weg zum Client
 
-Der Host fragt die Motoren alle 10 ms ab (`poll_pad_output` in `src/sunshine/platform_ps5.cpp`) und stellt Änderungen in
+Der Host fragt die Motoren alle 10 ms ab (`poll_pad_output` in `src/sunshine/input_ps5.cpp`) und stellt Änderungen in
 Sunshines Feedback-Warteschlange. Sunshine sah dort nur zwischen zwei Steuer-Ereignissen nach, praktisch alle 100 ms
 mit dem Ping des Clients, und `moonlight-common-c` behält von wartenden Rumble-Meldungen nur die neueste. Ein kürzerer Puls
 kam daher nur als Stopp an. Patch `patches/sunshine/0008-feedback-latency.patch` senkt die Wartezeit der Schleife von

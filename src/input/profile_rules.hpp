@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// What the PS5 platform (platform_ps5.cpp) decides for a paired device with its own console profiles, kept apart from the
-// system calls so that the tests can run it: which profile a new controller may join, whether a profile the host signed
-// in may be signed out, and which keyboard and mouse a key or button goes to. The platform asks the console and passes the
-// answers in.
+// What the PS5 platform (input_seats_ps5.cpp, input_kbm_ps5.cpp) decides for a paired device with its own console profiles,
+// kept apart from the system calls so that the tests can run it: which profile a new controller may join, whether a profile
+// the host signed in may be signed out, and which keyboard and mouse a key or button goes to. The platform asks the console
+// and passes the answers in.
 #pragma once
 
 #include "control/device_profiles.hpp"

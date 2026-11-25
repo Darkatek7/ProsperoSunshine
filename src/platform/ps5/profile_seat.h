@@ -28,7 +28,7 @@ int ps_profile_credential_restore_failures(void);
 // The profile in front on the console (whoever the TV shows) in *user, 0 if none. 0, or <0 when the system didn't say.
 int ps_profile_foreground(uint32_t *user);
 // Gives the device with this bus id to the profile: a pad by ps_pad_device_id, a keyboard or mouse by its handle with a
-// device type above it (platform_ps5.cpp, seat_kbm_device). 0, or the system's error; -1 while libSceMbus is not up.
+// device type above it (input_kbm_ps5.cpp, seat_kbm_device). 0, or the system's error; -1 while libSceMbus is not up.
 int ps_profile_bind(uint64_t device, uint32_t user);
 // The profile the bus gives the device with this bus id to, 0 for none (sceMbusGetDeviceInfo_). 0, or <0 while libSceMbus
 // is not up or the system's error.

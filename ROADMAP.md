@@ -85,9 +85,14 @@ nur ein erfolgreicher Build.
     `keyboard_profiles.txt` (`docs/keyboard-profiles.md`). Ungeprüft in einem Spiel sind die Profile
     `driving`, `fighting`, `platformer` und `sports` und Firmware 13.00 (`docs/status-archive.md`, „Tastatur und Maus als
     Controller“).
-16. **Große Dateien aufteilen,** sobald die offenen PRs gemergt sind: `src/sunshine/platform_ps5.cpp`,
-    `app/src/psapp/screen.cpp` und `src/platform/ps5/capture.c` in kleinere Module. Verhalten bleibt gleich; beide
-    Testsuiten und ein Stream auf der Konsole vor dem Merge.
+16. **Große Dateien aufteilen:** `src/sunshine/platform_ps5.cpp` (jetzt `platform_ps5.cpp`, `audio_ps5.cpp`, `input_ps5.cpp`,
+    `input_seats_ps5.cpp`, `input_pads_ps5.cpp`, `input_kbm_ps5.cpp`, `input_ps5_internal.hpp`) und `app/src/psapp/screen.cpp`
+    (jetzt `screen.cpp`, `screen_sheets.cpp`, `screen_sheets_draw.cpp`, `screen_draw.cpp`, `screen_internal.hpp`) sind als
+    reine Verschiebung aufgeteilt, Zeile für Zeile verglichen; noch nicht veröffentlicht, der Stream auf der Konsole dazu
+    steht aus. `src/platform/ps5/capture.c` bleibt eine Datei: ein Zustandsautomat mit gemeinsamem Zustand, an dem die
+    Tests direkt hängen. Beim Aufteilen aufgefallen, offen: `profiles_changed` setzt beim Wegnehmen eines Pads nicht alles
+    zurück, was `free_gamepad` zurücksetzt (Motorwahl, Kombos, letzter Zustand, gehaltene PS-Taste der Tastatur); und ein
+    langer Text über `unicode` hält die Rückmeldungen aller Pads auf, solange er läuft.
 17. **Formatierung für neuen Code:** `.clang-format` (Host und Tests; die App hat ihre eigene in `app/`) und `.editorconfig`
     liegen im Repo, abgestimmt auf den bestehenden Stil: Mit clang-format 18 weichen rund 10 % der alten C++-Zeilen im Host und
     6 % in der App ab, deshalb nur über `git clang-format` für geänderte Zeilen, nie für ganze Dateien. Die C-Dateien sind

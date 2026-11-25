@@ -262,7 +262,7 @@ int main(int argc, char *argv[]) {
     // cutting the stuck-input window after a network drop (P4.3). sunshine.conf can override it.
     config::stream.ping_timeout = 2s;
     // Moonlight's on-screen layouts have no PS button: holding Select this long sends it (gamepad_update
-    // in platform_ps5.cpp). sunshine.conf can override it; a negative value turns it off.
+    // in input_pads_ps5.cpp). sunshine.conf can override it; a negative value turns it off.
     config::input.back_button_timeout = 500ms;
     mail::man = std::make_shared<safe::mail_raw_t>();
     if (const int rc = config::parse(argc, argv)) {

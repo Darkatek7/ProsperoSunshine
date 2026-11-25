@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// What the PS5 platform (platform_ps5.cpp) offers the host's own code, beside Sunshine's platf interface.
+// What the PS5 platform (input_seats_ps5.cpp, input_pads_ps5.cpp) offers the host's own code, beside Sunshine's platf
+// interface.
 #pragma once
 
 #include <cstdint>

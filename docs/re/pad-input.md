@@ -124,7 +124,7 @@ Ein Payload kann das nicht nachstellen. Für Issue 41 bleibt die Einstellung der
 ## Sunshine-Seite
 
 In `.cache/deps/src/sunshine/src` und `moonlight-common-c`. `docs/input-mapping.md` gibt es noch nicht, nur als Eintrag in
-der Roadmap. Der Host setzt das Folgende um (`pad.c`, `src/input/pad_touch.hpp`, `platform_ps5.cpp`), mit Unit-Tests und auf der
+der Roadmap. Der Host setzt das Folgende um (`pad.c`, `src/input/pad_touch.hpp`, `input_pads_ps5.cpp`), mit Unit-Tests und auf der
 Konsole mit dem Testclient geprüft.
 
 - `platf::get_capabilities()` muss `platform_caps::controller_touch` (2) liefern. `rtsp.cpp:900` meldet das als

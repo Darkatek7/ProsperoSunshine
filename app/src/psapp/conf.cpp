@@ -79,7 +79,7 @@ const std::vector<OptionSpec> &option_specs()
         {G::playing, I::home, "close_game_on_quit", "Quit closes game",
          "On: quitting in Moonlight also closes the game the stream started or found in front, and unsaved progress is lost.",
          OptionKind::toggle, "Off", {}, 0, 0, 1, 0},
-        // The host reads this one (src/sunshine/platform_ps5.cpp). Off, only the host's controller has PS and Create.
+        // The host reads this one (src/sunshine/input_ps5.cpp). Off, only the host's controller has PS and Create.
         {G::playing, I::monitor, "ps_button_all_players", "PS for all players",
          "Off: only the host, who plays as the console's user, has PS and Create. On: every player has them, friends online too.",
          OptionKind::toggle, "Off", {}, 0, 0, 1, 0},
@@ -113,7 +113,7 @@ const std::vector<OptionSpec> &option_specs()
             const ps_exp_switch_info *info = ps_exp_switch_at(i);
             list.push_back({G::experimental, I::sliders, info->key, info->label, info->help, OptionKind::toggle, "Off", {}, 0, 0, 1, 0});
         }
-        // The host reads this one too (src/sunshine/platform_ps5.cpp). Among the Experimental switches, but no firmware check
+        // The host reads this one too (src/sunshine/audio_ps5.cpp). Among the Experimental switches, but no firmware check
         // locks it.
         list.push_back({G::experimental, I::sliders, "surround_sound", "Surround",
                         "5.1 or 7.1 sound for devices that ask for it. The speaker order is not verified yet.",
