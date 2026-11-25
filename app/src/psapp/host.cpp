@@ -939,7 +939,7 @@ void Host::do_save(const Job &job)
     }
     if (!job.flag)
     {
-        finish(io::port_open(kControlPort) ? "Saved. Restart the host to use the new settings." : "Saved",
+        finish(io::port_open(kControlPort) ? "Saved. All but Controller's need a host restart." : "Saved",
                true);
         return;
     }

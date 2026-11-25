@@ -926,7 +926,7 @@ async function saveSettings(restartAfter) {
   try {
     await api('/api/settings', { values: settingValues() });
     showPending(true);
-    if (restartAfter || confirm('Saved. The host reads its settings when it starts.\n\nRestart the host now to apply them? Running streams end.')) {
+    if (restartAfter || confirm('Saved. The host reads its settings when it starts, except those under Controller, which apply within seconds.\n\nRestart the host now to apply the others? Running streams end.')) {
       await restartHost(true);
     } else {
       notice('Saved. The settings apply when the host starts again.');

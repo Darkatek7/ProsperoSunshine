@@ -8,6 +8,12 @@ LAN included, could no longer reach the host. net::take_ipv4_too clears the opti
 it leaves the socket IPv6 only, and the log says so (issue 64). The HTTP and HTTPS servers get the same in
 Simple-Web-Server (patches/simple-web-server/0004).
 
+ENet's control socket then failed for another reason: host_create handed the bind address to enet_address_set_host, which
+asks getaddrinfo with AI_ADDRCONFIG. For "::" that has no answer on a system whose only IPv6 address is link-local (the
+test console, 13.00, in a network where it takes no other), the ENetAddress stayed unset and bind returned EINVAL, so
+every session ended at ANNOUNCE with "ENet couldn't open UDP port 47999", over IPv4 as well. The address is now built
+from the text itself and getaddrinfo only asked when that fails.
+
 --- a/src/network.h
 +++ b/src/network.h
 @@ -127,6 +127,24 @@
@@ -67,3 +73,26 @@ Simple-Web-Server (patches/simple-web-server/0004).
  
      platf::trace_call("bind the audio port UDP " + std::to_string(audio_port));
      ctx.audio_sock.bind(udp::endpoint(bind_addr, audio_port), ec);
+--- a/src/network.cpp
++++ b/src/network.cpp
+@@ -215,8 +215,18 @@
+ 
+     af = get_effective_address_family(af);
+     const auto bind_addr = net::get_bind_address(af);
+-    enet_address_set_host(&addr, bind_addr.c_str());
+-    enet_address_set_port(&addr, port);
++    // ProsperoSunshine: the bind address goes to ENet as it is. enet_address_set_host asks getaddrinfo with AI_ADDRCONFIG,
++    // which has no answer for "::" on a system whose only IPv6 address is link-local (a PS5 in a network that hands out
++    // none): the address then stayed unset, and binding it failed with EINVAL, for IPv4 clients too (issue 64).
++    boost::system::error_code address_ec;
++    const auto bind_ip = boost::asio::ip::make_address(bind_addr, address_ec);
++    if (!address_ec) {
++      const boost::asio::ip::udp::endpoint endpoint {bind_ip, port};
++      enet_address_set_address(&addr, const_cast<sockaddr *>(endpoint.data()), static_cast<socklen_t>(endpoint.size()));
++    } else {
++      enet_address_set_host(&addr, bind_addr.c_str());
++      enet_address_set_port(&addr, port);
++    }
+ 
+     // Maximum of 128 clients, which should be enough for anyone
+     auto host = host_t {enet_host_create(af == IPV4 ? AF_INET : AF_INET6, &addr, 128, 0, 0, 0)};
