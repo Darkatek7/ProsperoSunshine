@@ -40,6 +40,29 @@ Outputs: `out/moonlight-test.h264` (received stream), `out/moonlight-test.s16` (
 `ffmpeg -xerror` results for the file. Exit code is non-zero if the connection failed, no frame arrived, or the host
 terminated the stream with an error. A failed connection reports the failing stage and error code.
 
+## Loss, and going on without a keyframe
+
+`loss_test.sh <console-ip> <seconds> <drop probability>` streams while the client's container drops that share of the
+incoming video packets; `STREAM_ARGS` passes options on to the client as in the smoke test.
+
+With `--rfi` the client says its decoder can go on from a frame that follows a reference frame invalidation, as
+Moonlight does for most HEVC decoders. Where the host announces that too (`reference_frame_invalidation = 1` in
+`sunshine.conf`), the client names the frames it lost instead of asking for an IDR, and drops what arrives until the
+host sends a frame marked as coming after the invalidation. The summary's `rfi` line counts how the stream went on
+after each loss (from a marked P frame, from an IDR), the complete frames dropped while waiting, and whether the client
+gave up waiting (120 dropped frames).
+
+```sh
+STREAM_ARGS="--hevc --rfi --no-script --timing-log out/rfi.csv" VIDEO_FORMAT=hevc bash tools/moonlight/loss_test.sh <console-ip> 30 0.03
+python3 tools/moonlight/rfi_verify.py out/moonlight-test.h264 out/rfi.csv
+```
+
+`rfi_verify.py` reads each frame the client kept from the dump, with its number from the timing log, and its
+references from the slice header as the host does (`src/video/hevc_refs.hpp`): the frame it is decoded from must be in
+the dump and decodable itself, and no more frames may be missing in front of it than a decoder counts over (7 with the
+console's stream). `OK` means the client never showed a picture built on one it didn't have; a failure names the first
+frame of each broken run. It needs the console's HEVC layout and Python 3, nothing else.
+
 ## Audio/video synchronisation (ROADMAP P5.2)
 
 `av_sync.py` measures how far apart picture and sound arrive at the client for one real event, and the long-term drift.

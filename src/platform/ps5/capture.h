@@ -166,9 +166,9 @@ int ps_capture_close(ps_capture *session);
 
 // Ask the encoder for an IDR as soon as possible (sceAvcap2RequestKeyFrame). 0 or error.
 int ps_capture_request_keyframe(ps_capture *session);
-// Research (rfi_probe): tells the encoder that the client lost the frames from this one on (sceAvcap2SetInvalidFrame;
-// `frame` is the read descriptor's frame counter, docs/re/encoder-options.md section 5). The raw code, or
-// PS_CAPTURE_ERROR without the call. The host doesn't use it yet.
+// Tells the encoder that a client lost the frames from this one on (sceAvcap2SetInvalidFrame; `frame` is the read
+// descriptor's frame counter, docs/re/encoder-options.md section 5): an HEVC encoder then decodes its next frame from
+// the newest picture before it, an H.264 one changes nothing. The raw code, or PS_CAPTURE_ERROR without the call.
 int ps_capture_invalidate_frame(ps_capture *session, uint32_t frame);
 // Change target and peak bitrate in bit/s at runtime; 0 keeps a value. 0 or error.
 int ps_capture_set_bitrate(ps_capture *session, uint32_t average, uint32_t peak);

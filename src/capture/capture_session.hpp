@@ -24,6 +24,7 @@ public:
     // Optional encoder controls (R1/R3); backends without them report failure.
     virtual int request_keyframe() { return -1; }
     virtual int set_bitrate(uint32_t, uint32_t) { return -1; }
+    virtual int invalidate_frame(uint32_t) { return -1; }
 };
 
 // slot: the capture channel (capture.h, PS_CAPTURE_SLOTS), 0 unless a second channel runs next to the first.
@@ -53,6 +54,9 @@ public:
     int request_keyframe() { return running_ ? backend_->request_keyframe() : -1; }
     // Target and peak bitrate in bit/s; 0 keeps a value. 0 or error.
     int set_bitrate(uint32_t average, uint32_t peak) { return running_ ? backend_->set_bitrate(average, peak) : -1; }
+    // Tells the encoder that a client lost the frame with this counter (the read descriptor's) and those after it: the
+    // next frame is decoded from the newest picture before it (HEVC; video/loss_recovery.hpp). 0 or error.
+    int invalidate_frame(uint32_t counter) { return running_ ? backend_->invalidate_frame(counter) : -1; }
 
     bool running() const { return running_; }
     const std::vector<uint8_t> &parameter_sets() const { return headers_; }

@@ -1,0 +1,74 @@
+ProsperoSunshine: sunshine.conf turns on getting over a lost frame without a keyframe, and a loss counts once
+
+reference_frame_invalidation (off by default) makes the host announce reference frame invalidation (video_ps5.cpp sets
+video::last_encoder_probe_supported_ref_frames_invalidation from it), so a client whose decoder can go on from a frame
+after an invalidation names the frames it lost instead of asking for an IDR. For an HEVC stream the host then tells the
+console's encoder, which decodes its next frame from the newest picture before the loss, and marks that frame for the
+client (video/loss_recovery.hpp; measured on firmware 13.00, docs/re/encoder-options.md section 5). Where that can't
+work (H.264, too many frames missing) the client gets an IDR as before.
+
+With it announced, Moonlight names a loss again for every complete frame it has to drop while it waits for the marked
+frame: the same first frame, the last one higher each time. The session's counts for the web page and the stream history
+took each message as a loss of its own and every frame of every range, so one lost frame that took four frames to answer
+counted as four requests and ten frames. Now a loss counts once (a message with another first frame) and each frame once.
+
+--- a/src/config.h
++++ b/src/config.h
+@@ -425,6 +425,7 @@
+     int internet_burst_kb;  ///< Clients over the internet: the most of a frame that leaves at once, in kB.
+     bool follow_output_size;  ///< Default for devices without their own line in device_follow_size.txt (off by default).
+     int internet_fec_percentage;  ///< Clients over the internet: their share of error correction; -1 (unset) is fec_percentage.
++    bool reference_frame_invalidation;  ///< An HEVC stream goes on after a lost frame without a keyframe where it can (off by default).
+   };
+ 
+   extern ps5_t ps5;
+--- a/src/config.cpp
++++ b/src/config.cpp
+@@ -913,6 +913,7 @@
+     16,  // internet_burst_kb
+     false,  // follow_output_size (control/device_follow_size.hpp)
+     -1,  // internet_fec_percentage: as fec_percentage (video/frame_pacing.hpp, fec_share)
++    false,  // reference_frame_invalidation (video/loss_recovery.hpp)
+   };
+ #endif
+ 
+@@ -1780,6 +1781,7 @@
+     int_between_f(vars, "internet_burst_kb", ps5.internet_burst_kb, {2, 64});
+     bool_f(vars, "follow_output_size", ps5.follow_output_size);
+     int_between_f(vars, "internet_fec_percentage", ps5.internet_fec_percentage, {0, 100});
++    bool_f(vars, "reference_frame_invalidation", ps5.reference_frame_invalidation);
+ #endif
+     generic_f(vars, "dd_mode_remapping", video.dd.mode_remapping, dd::mode_remapping_from_view);
+     {
+--- a/src/stream.cpp
++++ b/src/stream.cpp
+@@ -583,6 +583,8 @@
+     std::atomic<std::uint32_t> info_recoveries {0};  ///< The client's requests for an IDR or to invalidate reference frames.
+     std::atomic<std::uint32_t> info_rtt_ms {0};  ///< Round-trip time of the control connection; the control thread sets it.
+     std::atomic<std::uint32_t> info_missing_frames {0};  ///< Frames the client reported lost.
++    std::int64_t info_loss_first = -1;  ///< First frame of the loss the client named last; only the control thread touches it.
++    std::int64_t info_loss_counted = -1;  ///< Last frame counted in info_missing_frames; only the control thread touches it.
+     prospero::FramePacer video_pacer;  ///< Spreads the session's large frames; only the video broadcast thread touches it.
+     std::atomic<int> video_frames_alive {0};  ///< Frames of this session from the capture to their last packet; join() waits for none.
+   };
+@@ -1234,10 +1236,17 @@
+         << "firstFrame [" << firstFrame << ']' << std::endl
+         << "lastFrame [" << lastFrame << ']';
+ 
+-      session->info_recoveries.fetch_add(1, std::memory_order_relaxed);
++      // ProsperoSunshine: where the host announces reference frame invalidation, Moonlight names a loss again for every
++      // complete frame it drops while it waits (the same first frame, the last one higher), so a loss counts once and
++      // each frame once.
++      if (firstFrame != session->info_loss_first) {
++        session->info_loss_first = firstFrame;
++        session->info_recoveries.fetch_add(1, std::memory_order_relaxed);
++      }
+       // One range counts 1000 frames at most, so a broken client cannot run the count up.
+-      if (lastFrame >= firstFrame) {
+-        session->info_missing_frames.fetch_add(static_cast<std::uint32_t>(std::min<std::int64_t>(lastFrame - firstFrame + 1, 1000)), std::memory_order_relaxed);
++      if (const auto from = std::max(firstFrame, session->info_loss_counted + 1); lastFrame >= from) {
++        session->info_missing_frames.fetch_add(static_cast<std::uint32_t>(std::min<std::int64_t>(lastFrame - from + 1, 1000)), std::memory_order_relaxed);
++        session->info_loss_counted = lastFrame;
+       }
+       session->video.invalidate_ref_frames_events->raise(std::make_pair(firstFrame, lastFrame));
+     });

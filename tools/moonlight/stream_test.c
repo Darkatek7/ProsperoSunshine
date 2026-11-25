@@ -17,7 +17,7 @@
 //       [--timing-log file.csv] [--ui-ticks N [--tick-interval-ms 1500] [--tick-hold-ms 120]
 //       [--tick-kind dpad|ps|back] [--tick-seq right,cross,...] [--tick-start S]] [--no-script] [--hevc] [--hevc10] [--surround 51|71]
 //       [--touch-motion] [--kbm-seq step,step,... [--tick-start S] [--tick-interval-ms N] [--tick-hold-ms N]]
-//       [--packet-size N]
+//       [--packet-size N] [--rfi]
 //
 // --touch-motion announces a controller with touchpad and sensors and, from 3 s on, moves two fingers without a click and
 // sends a few seconds of motion. Whatever is in front on the console receives this as input.
@@ -27,6 +27,10 @@
 // --kbm-seq sends keyboard and mouse events, one step per tick interval from --tick-start on: key:VK (press, hold, release),
 // down:VK, up:VK (VK in hex, Windows virtual-key codes), move:DX:DY (in ten reports), click:N (Sunshine's button number),
 // scroll:N and hscroll:N (120 per notch), text:CHARS (as an on-screen keyboard sends it), abs:X:Y (of 1920x1080).
+// --rfi says the decoder can go on from a frame that follows a reference frame invalidation, as Moonlight does for most
+// HEVC decoders: where the host announces that too, a loss is named by its frame numbers instead of asking for an IDR.
+// The summary counts how the stream went on after each loss (rfi_*), and tools/moonlight/rfi_verify.py checks from the
+// dump and the timing log that every frame the client kept had its reference.
 
 #include <getopt.h>
 #include <math.h>
@@ -253,12 +257,30 @@ static void cl_terminated(int code) {
   g_term_code = code;
   tlog("CONNECTION TERMINATED errorCode=%d (0x%x)\n", code, (unsigned) code);
 }
+// What moonlight-common-c said about going on after a loss, counted from its log lines (VideoDepacketizer.c).
+static struct {
+  int went_on_p, went_on_idr;  // "Next post-invalidation frame is: N (P-frame)" or "(I-frame)"
+  int idr_waits;  // "Waiting for IDR frame": complete frames dropped while only an IDR helps
+  int rfi_waits;  // "Waiting for RFI frame": complete frames dropped until the marked one
+  int drop_limit;  // "Reached consecutive drop limit": 120 frames dropped, the client asked for an IDR itself
+} R;
 static void cl_log(const char *fmt, ...) {
+  char line[512];
   va_list ap;
   va_start(ap, fmt);
-  printf("[%7.3f]   lc: ", (now_ms() - g_t0_ms) / 1000.0);
-  vprintf(fmt, ap);
+  vsnprintf(line, sizeof line, fmt, ap);
   va_end(ap);
+  if (strstr(line, "Next post-invalidation frame")) {
+    if (strstr(line, "(P-frame)")) R.went_on_p++;
+    else R.went_on_idr++;
+  } else if (strstr(line, "Waiting for IDR frame")) {
+    R.idr_waits++;
+  } else if (strstr(line, "Waiting for RFI frame")) {
+    R.rfi_waits++;
+  } else if (strstr(line, "Reached consecutive drop limit")) {
+    R.drop_limit++;
+  }
+  printf("[%7.3f]   lc: %s", (now_ms() - g_t0_ms) / 1000.0, line);
   fflush(stdout);
 }
 static void cl_rumble(unsigned short n, unsigned short lo, unsigned short hi) {
@@ -408,6 +430,7 @@ int main(int argc, char **argv) {
   int surround = 0;  // --surround 51|71: ask for 5.1 or 7.1 sound instead of stereo
   int tick_pad = 0;  // --tick-pad N: the UI ticks come from controller N (with --pads above N)
   int packet_size = 1024;  // --packet-size N: video packet payload; Moonlight asks 1392 on a LAN, 1024 over the internet
+  int rfi = 0;  // --rfi: the decoder goes on from a frame after a reference frame invalidation
 
   static const struct option opts[] = {
     {"addr", 1, 0, 'a'},     {"rtsp-url", 1, 0, 'r'},   {"rikey", 1, 0, 'k'},    {"rikeyid", 1, 0, 'i'},
@@ -418,6 +441,7 @@ int main(int argc, char **argv) {
     {"timing-log", 1, 0, 'L'}, {"no-script", 0, 0, 'N'}, {"tick-hold-ms", 1, 0, 'M'}, {"tick-seq", 1, 0, 'Q'},
     {"hevc", 0, 0, 'E'},     {"hevc10", 0, 0, 'X'},     {"touch-motion", 0, 0, 'Y'}, {"kbm-seq", 1, 0, 'Z'},
     {"pads", 1, 0, 'P'}, {"tick-pad", 1, 0, 'J'}, {"surround", 1, 0, 'R'}, {"packet-size", 1, 0, 'G'},
+    {"rfi", 0, 0, 'F'},
     {0, 0, 0, 0}};
   int c;
   while ((c = getopt_long(argc, argv, "", opts, NULL)) != -1) {
@@ -454,6 +478,7 @@ int main(int argc, char **argv) {
       case 'J': tick_pad = atoi(optarg); break;
       case 'R': surround = atoi(optarg); break;
       case 'G': packet_size = atoi(optarg); break;
+      case 'F': rfi = 1; break;
       default: return 2;
     }
   }
@@ -569,7 +594,7 @@ int main(int argc, char **argv) {
   dr.stop = vstop;
   dr.cleanup = vcleanup;
   dr.submitDecodeUnit = vsubmit;
-  dr.capabilities = 0;
+  dr.capabilities = rfi ? CAPABILITY_REFERENCE_FRAME_INVALIDATION_AVC | CAPABILITY_REFERENCE_FRAME_INVALIDATION_HEVC : 0;
 
   AUDIO_RENDERER_CALLBACKS ar;
   LiInitializeAudioCallbacks(&ar);
@@ -719,6 +744,9 @@ int main(int argc, char **argv) {
     printf("video_pts_span_s      %.3f (presentationTimeUs)\n", (V.last_pts - V.first_pts) / 1e6);
     printf("video_rtp_span_s      %.3f (90 kHz)\n", (uint32_t) (V.last_rtp - V.first_rtp) / 90000.0);
     printf("video_sps_pps         %d/%d\n", V.sps_seen, V.pps_seen);
+    printf("rfi                   %s: went on from a marked P frame %d times, from an IDR %d; complete frames dropped "
+           "waiting for the marked frame %d, for an IDR %d; drop limit reached %d\n",
+           rfi ? "on" : "off", R.went_on_p, R.went_on_idr, R.rfi_waits, R.idr_waits, R.drop_limit);
     printf("rtp_video             packets=%u fec=%u recovered=%u fec_failed=%u oos=%u invalid=%u\n",
            vs->packetCountVideo, vs->packetCountFec, vs->packetCountFecRecovered, vs->packetCountFecFailed,
            vs->packetCountOOS, vs->packetCountInvalid);

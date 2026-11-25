@@ -34,6 +34,9 @@ public:
     int set_bitrate(uint32_t average, uint32_t peak) override {
         return shared_->exclusive([&](ps_capture *s) { return ps_capture_set_bitrate(s, average, peak); });
     }
+    int invalidate_frame(uint32_t counter) override {
+        return shared_->exclusive([&](ps_capture *s) { return ps_capture_invalidate_frame(s, counter); });
+    }
     // Releases this user's reference; the session closes once audio has released it too.
     int close() override {
         shared_.reset();
