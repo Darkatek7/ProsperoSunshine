@@ -50,6 +50,7 @@ struct kbm_t {
     bool keyboard_failed = false, mouse_failed = false;
     prospero::KeyboardState keys;
     prospero::TextTypist text;  // a text from its client's on-screen keyboard, typed by type_texts
+    bool text_cut = false;  // the text being typed lost its end, which the log said once
     uint8_t mouse_buttons = 0;
     prospero::WheelSteps wheel, tilt;
     std::chrono::steady_clock::time_point key_down_at, button_down_at;

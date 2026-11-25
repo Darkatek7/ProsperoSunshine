@@ -49,6 +49,7 @@ static void close_kbm(kbm_t &kbm) {
     kbm.keyboard_failed = kbm.mouse_failed = false;
     kbm.keys.clear();
     kbm.text.clear();
+    kbm.text_cut = false;
     kbm.mouse_buttons = 0;
     kbm.wheel.clear();
     kbm.tilt.clear();
@@ -406,9 +407,14 @@ void unicode(input_t &input, const char *utf8, int size) {
     if (!keyboard_of(*input, *kbm, false)) return;
     if (added) kbm->text.not_before(std::chrono::steady_clock::now() + text_settle);
     const auto pushed = kbm->text.push(std::string_view(utf8, static_cast<std::size_t>(size)));
-    if (pushed.over)
-        BOOST_LOG(info) << "PS5 virtual keyboard: a text is still being typed, "sv << pushed.over
-                        << " characters more than it holds were dropped"sv;
+    if (pushed.over) {
+        // A client sends a long text in pieces: said once per text, each piece's count for the debug log.
+        if (!kbm->text_cut)
+            BOOST_LOG(info) << "PS5 virtual keyboard: a text is longer than the "sv << prospero::TextTypist::max_pending
+                            << " characters that can wait to be typed; what comes until those are typed is dropped"sv;
+        kbm->text_cut = true;
+        BOOST_LOG(debug) << "PS5 virtual keyboard: "sv << pushed.over << " characters dropped"sv;
+    }
     if (pushed.without_key) BOOST_LOG(debug) << "PS5 virtual keyboard: "sv << pushed.without_key << " characters without a key"sv;
 }
 
@@ -420,10 +426,14 @@ void type_texts(input_raw_t &input) {
         if (kbm.text.idle()) return;
         if (!kbm.keyboard) {
             kbm.text.clear();
+            kbm.text_cut = false;
         } else if (kbm.text.tick(now)) {
             send_keys(kbm);
             const bool done = kbm.text.idle();
-            if (done) BOOST_LOG(debug) << "PS5 virtual keyboard: the queued keys are typed"sv;
+            if (done) {
+                kbm.text_cut = false;
+                BOOST_LOG(debug) << "PS5 virtual keyboard: the queued keys are typed"sv;
+            }
         }
     };
     step(input.shared);

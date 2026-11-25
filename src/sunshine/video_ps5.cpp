@@ -276,19 +276,21 @@ void log_keyframe_policy(int slot, channel_t &ch, std::chrono::steady_clock::tim
                     << " answered by one on its way; "sv << counts.asked << " IDRs asked for"sv;
 }
 
-// At most every 10 s: how the losses the clients named were answered. Caller holds captures.mutex.
+// At most every 10 s, and when the stream that reads the channel ends (`last`): how the losses the clients named were
+// answered since the line before. Caller holds captures.mutex.
 void log_loss_recovery(int slot, channel_t &ch, std::chrono::steady_clock::time_point now,
-                       std::chrono::steady_clock::time_point &last_logged) {
-    if (now - last_logged < 10s) return;
+                       std::chrono::steady_clock::time_point &last_logged, bool last = false) {
+    if (!last && now - last_logged < 10s) return;
+    const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(now - last_logged).count();
     last_logged = now;
     const auto losses = std::exchange(ch.losses, {});
     if (losses.went_on == 0 && losses.keyframes == 0 && losses.held == 0) return;
-    BOOST_LOG(info) << "PS5 capture: channel "sv << slot << ", losses the clients named in 10 s: "sv << losses.went_on
-                    << " went on without a keyframe, "sv << losses.keyframes << " needed one"sv;
+    BOOST_LOG(info) << "PS5 capture: channel "sv << slot << ", losses the clients named in "sv << seconds << " s: "sv
+                    << losses.went_on << " went on without a keyframe, "sv << losses.keyframes << " needed one"sv;
     // The encoder went on for one stream from a picture another stream on the channel never had.
     if (losses.held)
         BOOST_LOG(info) << "PS5 capture: channel "sv << slot << ", "sv << losses.held
-                        << " times in 10 s a stream waited for a keyframe because another's loss was answered from a picture "sv
+                        << " times a stream waited for a keyframe because another's loss was answered from a picture "sv
                            "it didn't have"sv;
 }
 
@@ -1073,6 +1075,7 @@ void capture(safe::mail_t mail, config_t config, stream::session_t *channel_data
             std::lock_guard lock(captures.mutex);
             ch.keyframes.forget(reinterpret_cast<std::uintptr_t>(channel_data));
             ch.recovery.forget(reinterpret_cast<std::uintptr_t>(channel_data));
+            if (rfi) log_loss_recovery(slot, ch, std::chrono::steady_clock::now(), losses_logged, true);
             if (!lost && !ch.joined.empty()) {
                 ch.parked = std::move(session);
                 BOOST_LOG(info) << "PS5 capture: leaving channel "sv << slot << " open for the stream that takes it over"sv;
