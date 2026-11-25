@@ -10,6 +10,14 @@
   one (Moonlight doesn't tell the host which frames it lost).
   The host keeps the list in `stream_history.txt`, so it outlasts a restart; `HISTORY` on the control socket gives it, and
   `sunshine.log` gets a `Stream ended:` line per stream with the same numbers, without the device.
+- **Going on after a lost frame without a keyframe** (experimental, off by default, HEVC only):
+  `reference_frame_invalidation = 1` in `sunshine.conf`. A device whose decoder can do it then names the frames it lost,
+  and the encoder goes on with an ordinary frame built on a picture the device still has, as long as no more than 7 are
+  missing in a row; otherwise, and for H.264, a keyframe comes as before. Measured on 13.00 with 6 % of the packets
+  dropped: 4 to 5 keyframes in 30 s instead of 17 to 21, the longest gap 67 to 69 ms instead of 97 to 104 ms. Several
+  devices on one stream don't pay for each other's losses. With it on, Recent streams also counts the frames a device
+  lost. Tried with the test client and Moonlight for Linux with software decoding only: hardware decoders are why it
+  is off.
 
 ### Fixed
 
@@ -20,7 +28,8 @@
   60 ms each, and did so on the thread that passes on every device's input: a pasted line of 100 characters stopped
   every controller for 6 s, and a button pressed just before it stayed down that long. The text is now typed in the
   background. A text that was the first thing a device typed also lost its first characters while the console took
-  in the new keyboard; it now waits a second before the first key.
+  in the new keyboard; it now waits a second before the first key. No more than 512 characters wait to be typed; what
+  comes on top is dropped and logged.
 - **A controller taken out of a profile kept some of its state.** When a device loses the profile one of its controllers
   plays as (web page, Devices), that controller leaves and waits for a press. It kept its last buttons, a held PS from
   Windows+Esc and its motor choice for the controller that joins next; these are now forgotten as when a controller is

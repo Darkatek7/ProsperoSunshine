@@ -80,7 +80,9 @@ uses it as long as `DOCKER_ARGS` and `PRE_CMD` are unset. `--no-script` presses 
 buttons on the console. Docker Desktop's network on Windows drops large bursts and falsifies loss and high-bitrate results.
 With `--network host` on Linux there is no NAT in between, but whether large bursts arrive complete there is not measured
 yet; `tools/moonlight/udp_burst.py` against `udp_burst_spike.elf` checks it (`tools/moonlight/README.md`). `loss_test.sh`
-always uses the container client. The home screen is too quiet to load the encoder; the Mario 64 demo moves without input.
+always uses the container client. `--rfi` makes the client name lost frames instead of asking for a keyframe (the host
+needs `reference_frame_invalidation = 1`); `tools/moonlight/rfi_verify.py <dump.h265> <timing.csv>` then checks that every
+frame it kept had its reference. The home screen is too quiet to load the encoder; the Mario 64 demo moves without input.
 
 The web page without a console: `python3 tools/web_mock.py [port] [busy|quiet|empty]` serves `src/web/page` with a stand-in
 for the host's API and made-up data, signed in, for looking at a change to the page in a browser on the PC. It follows

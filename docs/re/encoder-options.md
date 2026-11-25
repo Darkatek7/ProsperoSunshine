@@ -217,13 +217,55 @@ nach dem Aufruf auf das letzte gute aus. Was ein Decoder daraus macht:
   das Bild direkt davor ist. In der Probe kam es sofort, weil sie nach jedem Bild liest; ein Host, der hinterherliest,
   muss damit rechnen, dass noch ein Bild auf die alte Referenz dazwischen liegt.
 
-**Was das für den Host heißt (Plan, nichts davon gebaut):** `refPicInvalidation` anbieten, bei einer Invalidierung eines
-HEVC-Streams den Encoder-Zähler des ersten verlorenen Bildes an `ps_capture_invalidate_frame` geben und das erste Bild mit
-der neuen Referenz als „nach Invalidierung“ (Typ 5) markieren; ein IDR verlangen, wenn dann 8 oder mehr Bilder fehlen
-würden, wenn das Bild nicht innerhalb weniger Bilder kommt, und immer bei H.264. Offen: ob die Hardware-Decoder der
-Clients (über FFmpeg mit hwaccel, MediaCodec, VideoToolbox) das Referenzbild-Set mit fehlenden Bildern annehmen wie
-FFmpegs Software-Decoder; das zeigt erst echtes Moonlight. Mehrere Geräte auf einem Kanal teilen den Encoder: Ein
-Ausweichen für eines stört die anderen nicht, sie haben alle Bilder.
+**Im Host gebaut (Schalter `reference_frame_invalidation` in `sunshine.conf`, standardmäßig aus):** Mit dem Schalter
+bietet der Host `refPicInvalidation` an (Sunshine-Patch 0041). Ein Client, dessen Decoder das kann, nennt dann die
+verlorenen Bilder (erstes, letztes), statt ein IDR zu verlangen, und verwirft alles bis zu einem Bild, das der Host als
+„nach Invalidierung“ markiert (Typ 5), oder bis zu einem IDR. Was der Host damit macht, steht in
+`src/video/loss_recovery.hpp` (Entscheidung, portabel, mit Tests) und `src/video/hevc_refs.hpp` (Referenzen aus dem
+Slice-Header); `video_ps5.cpp` führt es je Kanal:
+
+* Jeder Stream zählt seine Bilder selbst (ein später beigetretener anders als der Encoder), deshalb merkt sich der Host je
+  Stream für die letzten 64 Bilder die Bildnummer des Clients neben dem Zähler des Encoders (Descriptor `+0x20`, bei
+  `ReadVideo2` `+0x30`).
+* Nennt ein Client einen Verlust, bekommt der Encoder zwischen zwei Bildern den Zähler des ersten verlorenen Bildes
+  (`sceAvcap2SetInvalidFrame`). Danach liest der Host von jedem Bild den Slice-Header: Das erste, dessen Referenzen alle
+  vor dem Verlust liegen, wird für diesen Stream markiert. Kommt es nicht binnen drei Bildern, würden mehr als 7 Bilder
+  fehlen, lehnt der Encoder ab oder lässt sich der Header nicht lesen, gibt es ein IDR wie bisher; bei H.264 immer.
+* Moonlight nennt denselben Verlust für jedes weitere vollständige Bild noch einmal, das es verwerfen muss (gleiches
+  erstes Bild, das letzte je eins höher). Der Encoder wird dafür nicht erneut gerufen. Weil die Meldung die Bilder
+  nennt, erkennt der Host auch, ob sie von dem markierten Bild oder IDR schon beantwortet ist (ihr letztes Bild liegt
+  davor) oder ob genau dieses Bild auch verloren ging (dann von vorn). Die Zähler für Webseite und Verlauf zählen einen
+  Verlust und jedes Bild nur einmal.
+* Mehrere Geräte auf einem Kanal teilen den Encoder, und jedes bekommt auch das Bild, mit dem ein anderes weitermacht.
+  Ob der Encoder sich länger als ein Bild merkt, welche Bilder er als verloren genannt bekam, ist nicht gemessen. Der
+  Host prüft deshalb die Bilder nach jedem Aufruf für alle Streams: Hängt eines an einem Bild, das ein Stream nie hatte,
+  bekommt dieser Stream bis zum nächsten IDR (das der Host verlangt) nichts mehr. Sein Client sieht keine Lücke in den
+  Bildnummern, nur eine Pause von wenigen Bildern, und nie ein kaputtes Bild.
+* Eine Simulation (`tests/loss_recovery_sim_test.cpp`: Encoder-Modell in allen ungemessenen Varianten, Verluste und
+  Laufzeiten, Moonlights Regeln, bis zu drei Streams) prüft, dass kein Client je ein Bild behält, dessen Referenz ihm
+  fehlt, und dass jeder sein Bild zurückbekommt. Darin ging auf einem LAN-Pfad (2 % der Bilder verloren, keine
+  Laufzeit) 99 % der Verluste ohne IDR weiter, über WLAN mit Bündelverlusten 89 %, bei 80 ms Hin- und Rückweg 46 %: Dort
+  fehlen meist schon mehr als 7 Bilder, bis der Encoder es erfährt.
+
+Am Testclient schaltet `--rfi` die Fähigkeit ein; `tools/moonlight/rfi_verify.py` prüft am mitgeschnittenen Strom, dass
+jedes behaltene Bild seine Referenz hatte.
+
+**Gemessen (13.00, 2026-11-25, `STATUS.md`, „Verlust ohne Keyframe, Text im Hintergrund und echtes Moonlight“):**
+
+* 106 von 107 Verlusten gingen ab einem markierten P-Bild weiter, davor fehlten 2 Bilder (86-mal) oder 3 (20-mal): Der
+  Client meldet nach einem Bild, der Encoder antwortet mit dem nächsten. In allen 51 Mitschnitten hatte jedes behaltene
+  Bild seine Referenz. Bei 6 % verworfenen Paketen 4 bis 5 IDRs je 30 s statt 17 bis 21.
+* Moonlight meldet jeden Verlust zweimal im Abstand von 16 bis 19 ms (bei der Erkennung und für das erste verworfene
+  Bild); der Host ruft den Encoder einmal.
+* Auf einem geteilten Kanal wurde nie ein Stream angehalten, auch nicht mit Verlust auf beiden: Der Encoder nahm in
+  keinem Lauf ein Bild als Referenz, das einem der Streams fehlte. Ob er sich die genannten Bilder merkt oder die
+  Verluste nur nie so fielen, sagt das nicht; die Prüfung im Host bleibt.
+* 720p60, 1080p30, HDR (Main 10) und der zweite Kanal verhalten sich gleich; 4K ist nicht gemessen.
+* Moonlight 6.2.0 für Linux mit FFmpegs Software-Decoder zeigte nach fünf Verlusten ein heiles Bild.
+
+Offen: ob die Hardware-Decoder der Clients (über FFmpeg mit hwaccel, MediaCodec, VideoToolbox) das Referenzbild-Set mit
+fehlenden Bildern annehmen wie FFmpegs Software-Decoder; das zeigt erst echtes Moonlight auf den Geräten. Deshalb ist der
+Schalter aus.
 
 ## 6. IDR-Größe (B.3)
 

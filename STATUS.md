@@ -32,7 +32,8 @@ auf Firmware 10.20“, „HDR“, „Quantisierer auf 10.x folgt der Bitrate“)
 
 **Eingabe:** ein virtuelles DualSense je Moonlight-Controller, mit Touch und Bewegung (nur am Testclient gemessen),
 klassischem Rumble, Lichtleiste und adaptiven Triggern (Moonlight am PC). Die Haptik von PS5-Spielen gibt der Host mit
-`haptic_mode = rumble` als Rumble an das Pad des Hosts, nur am Testclient gemessen („Haptik als Rumble und Trigger-Knock“).
+`haptic_mode = rumble` als Rumble an das Pad des Hosts, mit dem Testclient und mit Moonlight für Linux an einem virtuellen
+Pad gemessen („Haptik als Rumble und Trigger-Knock“, „Verlust ohne Keyframe, Text im Hintergrund und echtes Moonlight“).
 Tastatur und Maus gehen auf eine virtuelle Tastatur und Maus der Konsole. Ein Gerät ohne Controller spielt mit Tastatur und
 Maus als eigenes Pad, mit Profilen je Spiel: auf 10.20 vom Besitzer in GTA III gespielt, auf 13.00 nur am Testclient, ohne
 Spiel und Profile („Tastatur-Pad nach dem Review von PR 20“, „Release 0.3.3 auf der Konsole“; Archiv, „Tastatur und Maus“,
@@ -60,8 +61,9 @@ Issue 36“) und ein Debug-Build in jedem Release („Debug-Build (PR 29) zusamm
 1. **Menüs je Profil (PR 38):** nach 0.5.0 auf `main` gemergt, in keinem Release. Mit dem Testclient auf 13.00 gemessen
    („Konsolenmenüs, PR 38“), mit echtem Moonlight 6.2.0 unter Linux der Controller-Weg (App-Liste, Ablehnung, PS); Tastatur und
    Moonlight auf anderen Systemen noch nicht.
-2. **Echtes Moonlight fehlt** beim zweiten Aufnahmekanal, bei den Profilen pro Gerät, den versteckten Apps, der Host-Rolle
-   mit mehreren Geräten und bei Touch und Bewegung. Dort lief nur der Testclient.
+2. **Echtes Moonlight fehlt** bei den Profilen pro Gerät, den versteckten Apps und bei Touch und Bewegung. Dort lief nur
+   der Testclient. Zwei Moonlight zugleich (Beitritt, zweiter Kanal, Übernahme) liefen unter Linux („Verlust ohne Keyframe,
+   Text im Hintergrund und echtes Moonlight“).
 3. **Andere Firmware:** Nur 13.00 und 10.20 sind geprüft (Checkliste in `docs/firmware-porting.md`). 9.60 hat einen
    Datensatz aus der Sonde eines Mitwirkenden und bleibt ungeprüft; die App sieht dort `/data` nicht und geht über den Host
    („Firmware-Sonde auf 9.60“).
@@ -96,11 +98,73 @@ Issue 36“) und ein Debug-Build in jedem Release („Debug-Build (PR 29) zusamm
     Store nicht eigens installiert worden.
 15. **IPv6:** Mit `address_family = both` nur im Heimnetz über die link-lokale Adresse der Konsole gemessen. Die Testkonsole
     nimmt keine andere IPv6-Adresse an, auch nicht aus dem ULA-Präfix des Netzes; ein Stream von außen über IPv6 ist
-    ungeprüft, ebenso echtes Moonlight über IPv6 („Release 0.6.7 auf der Konsole, lokale Builds“).
+    ungeprüft („Release 0.6.7 auf der Konsole, lokale Builds“). Moonlight für Linux streamt über die link-lokale Adresse,
+    wenn sie in seiner Konfiguration steht („Verlust ohne Keyframe, Text im Hintergrund und echtes Moonlight“).
 16. **Fehlerkorrektur über das Internet:** `internet_fec_percentage` ist nur mit dem Testclient und künstlichem Verlust im LAN
     gemessen (H.264, 10 Mbit/s). Welchen Verlust echte Wege haben und was der kleinere Bildanteil an Qualität kostet, ist offen.
+17. **Verlust ohne Keyframe (`reference_frame_invalidation`, ab Werk aus, unveröffentlicht):** nur HEVC, nur mit dem
+    Testclient und Moonlight für Linux mit Software-Decoder gemessen, im LAN. Ob die Hardware-Decoder der Geräte (Windows,
+    Android, iOS, Fernseher) das Bild nach der Invalidierung annehmen, ist offen, ebenso 4K und ein Weg mit langer Laufzeit
+    (ab etwa 70 ms hin und zurück fehlen mehr als 7 Bilder, dann kommt ein IDR wie bisher).
 
 ## Neuere Nachweise
+
+### Verlust ohne Keyframe, Text im Hintergrund und echtes Moonlight, aus dem Speicher (2026-11-25, 13.00)
+
+Unveröffentlichter Stand nach 0.6.7 (Zweig `work/after-0.6.7`, zuletzt `654afd61`), Host aus dem Speicher gestartet,
+installiert blieb 0.6.7. Drei Runden am selben Abend; das Mario-64-Demo lief für ein bewegtes Bild (es bewegt sich nur
+einige Minuten nach dem Start, danach repariert die Fehlerkorrektur auf dem stehenden Titelbild jeden Verlust, also vor
+jeder Messreihe neu gestartet). Verlust: `tools/moonlight/loss_test.sh` verwirft im Container des Clients einen Anteil der
+ankommenden Videopakete.
+
+- **Was der Encoder kann (`rfi_probe`, `docs/re/encoder-options.md` Abschnitt 5):** Nach `sceAvcap2SetInvalidFrame` hängt bei
+  HEVC schon das nächste Bild am neuesten Bild vor dem Verlust (101→99, 201→197, 301→292), als P-Bild gewöhnlicher Größe.
+  Bei H.264 ändert der Aufruf nichts (ein Referenzbild). Mehr als 7 fehlende Bilder am Stück dekodiert kein Decoder mehr
+  richtig (4 Bit Bildzähler).
+- **Verlust ohne Keyframe im Host (`reference_frame_invalidation = 1`, HEVC 1080p60, 30 s je Lauf, Client mit `--rfi`
+  gegen denselben Host ohne, abwechselnd, vier Runden):** Mit `--rfi` gingen 106 von 107 Verlusten ab einem markierten
+  P-Bild weiter, davor fehlten 2 Bilder (86-mal) oder 3 (20-mal); der eine andere fiel direkt vor ein IDR, das der Encoder
+  ohnehin schickte. Bei 6 % verworfenen Paketen: 4 bis 5 IDRs je Lauf statt 17 bis 21 (die 4 bis 5 kommen auch ohne
+  Verlust), längste Lücke 67 bis 69 ms statt 97 bis 104 ms, je Verlust rund 2,2 fehlende Bilder statt 4. Bei 3 %: längste
+  Lücke 28 bis 67 ms statt 89 bis 95 ms. `tools/moonlight/rfi_verify.py` fand in allen 51 HEVC-Mitschnitten der Runde kein
+  behaltenes Bild ohne seine Referenz. Moonlights Grenze von 120 verworfenen Bildern wurde nie erreicht. Der Host zählt
+  die Verluste jetzt (`missing_frames` 2 bis 73, etwa die fehlenden Bildnummern am Client; ohne `--rfi` weiter 0).
+- **Ohne die Zeile** kündigt der Host nichts an, der Client verlangt IDRs wie bisher, keine der neuen Logzeilen.
+- **H.264 mit dem Schalter:** Jeder Verlust bekommt ein IDR, längste Lücke 83 und 100 ms, nichts hängt.
+- **Zwei Geräte auf einem Kanal:** Das Gerät ohne Verlust bekam wegen der Verluste des anderen kein IDR mehr (5 bis 6 je
+  Lauf gegen 6 bis 7, wenn beide sauber sind) und keine Lücke; beide Mitschnitte jedes Laufs geprüft. Auch mit 6 % auf
+  beiden (14 bis 21 Verluste je Stream) wurde nie ein Stream wegen des anderen angehalten: Der Encoder hat nie den Verlust
+  des einen aus einem Bild beantwortet, das dem anderen fehlte.
+- **Andere Modi:** 720p60, 1080p30 (längste Lücke 137 ms), HDR (Main 10), ein Stream auf dem zweiten Kanal und 1440p
+  (kam bei 120-Hz-Ausgabe als 1080p): Überall las der Host die Parametersätze, und jeder Lauf mit Verlust ging ab P-Bildern
+  weiter. 4K ist nicht gemessen.
+- **Übernahme und Titelwechsel:** Ein beigetretenes Gerät übernahm den offenen Kanal ohne Neuöffnen und ging danach 15-mal
+  ab P-Bildern weiter. Über einen Titelwechsel (drei Neuöffnungen, längste Lücke 4,6 s) ging der Stream ab dem IDR der
+  Öffnung weiter, spätere Verluste wieder ab P-Bildern.
+- **Echtes Moonlight 6.2.0 (Linux, FFmpegs Software-Decoder, 3 % Verlust, 60 s):** fünfmal `Next post-invalidation frame
+  is: … (P-frame)`, das Bild in drei Bildschirmfotos seines Fensters heil, kein Abbruch. Hardware-Decoder sind nicht
+  geprüft.
+- **Text von der Bildschirmtastatur eines Geräts:** Während ein Gerät 100 Zeichen tippte, kamen die 15 Steuerkreuz-Drücke
+  eines zweiten alle 0,5 s an (0.6.7: alle erst nach 6 s auf einmal), und ein Druck kurz vor dem Text blieb 150 ms unten
+  statt 6,2 s. Die 100 Zeichen kamen vollständig und in Reihenfolge an, auch wenn erst der Text die Tastatur anlegt (0.6.7
+  verlor dort die ersten 8 bis 11). Von 600 Zeichen kamen die ersten 512. Endet der Stream mitten im Text, bleibt keine
+  Taste unten.
+- **Ein Controller, dessen Profil dem Gerät genommen wird:** verlässt das Profil, der Stream läuft weiter, beim nächsten
+  Druck tritt er im anderen Profil bei; der Host meldet das von ihm angemeldete Profil 45 s nach dem letzten Pad wieder ab.
+  Ob eine vorher gehaltene Taste hängen blieb, war am Bild nicht zu sehen.
+- **Modi eines Steam Deck (Testclient):** 1280x800@60, 1280x800@90 und 1280x720@90 starten in H.264 und HEVC und bekommen
+  1280x720@60; darauf weist nur eine Info-Zeile hin.
+- **Echtes Moonlight, Release 0.6.7:** Rumble kommt am Controller an (virtuelles Xbox-Pad mit Force Feedback): in GTA III
+  3 von 3 Motorwerten, mit `haptic_mode = rumble` in Astro's Playroom 927 von 929 in Reihenfolge, jeweils mal 257, am
+  Stream-Ende Null, Stopp und Löschen. Zwei Moonlight zugleich: gleicher Modus tritt bei (`role=joined`), 720p H.264 neben
+  1080p HEVC bekommt Kanal 1, beide je rund 60 fps ohne Verlust; die Frage „Who's using this controller?“ für das zweite Pad
+  mit User1 beantwortet, danach steuern beide Pads den Startbildschirm; endet das erste, läuft das zweite weiter (Übernahme
+  ohne Neuöffnen). IPv6 mit `address_family = both`: Das Pairing gilt weiter und der Stream läuft (60 fps), aber Moonlights
+  Kommandozeile nimmt die IPv6-Adresse erst, wenn sie in seiner eigenen Konfiguration steht; mit `[fe80::…%if]` bricht es
+  nach 30 s ab, ohne Klammern streamt es über IPv4. Trigger-Effekte und Lichtleiste nicht geprüft (brauchen einen DualSense
+  am Client).
+- **Debug-Build:** `0.6.7-debug commit=654afd61`, `selfcheck done … problems=0`, H.264 und HEVC mit 1796 und 1794 Bildern
+  ohne Lücke, mit Verlust wie der normale Build.
 
 ### Stream-Verlauf, Zahleneditor und aufgeteilte Dateien, aus dem Speicher (2026-11-25, 13.00)
 

@@ -90,10 +90,11 @@ nur ein erfolgreicher Build.
     (jetzt `screen.cpp`, `screen_sheets.cpp`, `screen_sheets_draw.cpp`, `screen_draw.cpp`, `screen_internal.hpp`) sind als
     reine Verschiebung aufgeteilt, Zeile für Zeile verglichen; noch nicht veröffentlicht, auf 13.00 aus dem Speicher geprüft
     (`STATUS.md`, „Stream-Verlauf“). `src/platform/ps5/capture.c` bleibt eine Datei: ein Zustandsautomat mit gemeinsamem Zustand, an dem die
-    Tests direkt hängen. Beim Aufteilen aufgefallen und danach behoben, auf der Konsole noch nicht geprüft:
-    `profiles_changed` setzte beim Wegnehmen eines Pads nicht alles zurück, was `free_gamepad` zurücksetzt (Motorwahl,
-    Kombos, letzter Zustand, gehaltene PS-Taste der Tastatur; jetzt beide über `forget_pad_state`); und ein langer Text
-    über `unicode` hielt die Eingaben und Rückmeldungen aller Pads auf, solange er lief (die Sperre gilt jetzt je Taste).
+    Tests direkt hängen. Beim Aufteilen aufgefallen und danach behoben, auf 13.00 aus dem Speicher geprüft (`STATUS.md`,
+    „Verlust ohne Keyframe, Text im Hintergrund und echtes Moonlight“): `profiles_changed` setzte beim Wegnehmen eines Pads nicht
+    alles zurück, was `free_gamepad` zurücksetzt (Motorwahl, Kombos, letzter Zustand, gehaltene PS-Taste der Tastatur; jetzt
+    beide über `forget_pad_state`); und ein langer Text über `unicode` hielt die Eingaben und Rückmeldungen aller Pads auf,
+    solange er lief (er wird jetzt im Hintergrund getippt, höchstens 512 Zeichen warten).
 17. **Formatierung für neuen Code:** `.clang-format` (Host und Tests; die App hat ihre eigene in `app/`) und `.editorconfig`
     liegen im Repo, abgestimmt auf den bestehenden Stil: Mit clang-format 18 weichen rund 10 % der alten C++-Zeilen im Host und
     6 % in der App ab, deshalb nur über `git clang-format` für geänderte Zeilen, nie für ganze Dateien. Die C-Dateien sind
@@ -103,19 +104,28 @@ nur ein erfolgreicher Build.
     gesendeter Rate, Round-Trip und wie oft das Gerät ein neues Bild verlangt hat; die Liste überdauert einen Neustart des
     Hosts (`src/control/stream_history.hpp`). Die angemeldete Ansicht ist am PC in Chrome geprüft, gegen einen Nachbau der
     Host-API mit `HISTORY`-Zeilen aus der Konsolenrunde (Desktop- und Handybreite, hell und dunkel, ohne Skriptfehler und
-    ohne Überlauf). Offen: dieselbe Ansicht vom Host selbst, ob die App den Verlauf auch zeigen soll, und eine Zahl
-    verlorener Bilder: Moonlight nennt dem Host keine, solange der Host keine Referenzbild-Invalidierung anbietet. Ob der
-    Encoder das kann, klärt `rfi_probe` (`docs/re/encoder-options.md`, Abschnitt 10, Test 1).
+    ohne Überlauf). Offen: dieselbe Ansicht vom Host selbst und ob die App den Verlauf auch zeigen soll. Eine Zahl
+    verlorener Bilder gibt es nur mit `reference_frame_invalidation` (Punkt 22): Ohne nennt Moonlight dem Host keine.
 19. **Haptik als Rumble** (seit 0.6.7-beta.3, Issue 30, PR 35, `haptic_mode = rumble`): auf 13.00 mit dem Testclient in Teardown
-    und Astro's Playroom gemessen, von einem Mitwirkenden auf 9.60 (`STATUS.md`, „Haptik als Rumble und Trigger-Knock“). Offen:
+    und Astro's Playroom gemessen, von einem Mitwirkenden auf 9.60 (`STATUS.md`, „Haptik als Rumble und Trigger-Knock“), mit
+    Moonlight für Linux an einem virtuellen Pad („Verlust ohne Keyframe, Text im Hintergrund und echtes Moonlight“). Offen:
     echtes Moonlight mit einem DualSense und andere Firmware. Der Kanal gilt für die ganze Konsole, darum bekommt nur das Pad
     des Hosts das Rumble.
 20. **IPv6** (Issue 64, `address_family = both`, seit 0.6.7 für IPv4 und IPv6): im Heimnetz über die link-lokale Adresse
-    gemessen. Offen: ein Stream von außen, echtes Moonlight über IPv6, und warum die Testkonsole keine weitere IPv6-Adresse
+    gemessen, auch mit Moonlight für Linux (dessen Kommandozeile die Adresse nur aus seiner eigenen Konfiguration nimmt).
+    Offen: ein Stream von außen, Moonlight auf anderen Geräten, und warum die Testkonsole keine weitere IPv6-Adresse
     annimmt (ob die PS5 das überhaupt tut, entscheidet, ob der Weg für Nutzer ohne öffentliche IPv4-Adresse taugt).
 21. **Fehlerkorrektur über das Internet** (`internet_fec_percentage`, seit 0.6.7): mit künstlichem Verlust gemessen
     (`STATUS.md`, „Fehlerkorrektur bei Verlust“). Offen: Berichte von echten Wegen (Mobilfunk, Tailscale), andere Bitraten,
     und ob 40 % dort den kleineren Bildanteil wert sind. Davon hängt ab, ob der Wert ab Werk leer bleibt.
+22. **Verlust ohne Keyframe** (`reference_frame_invalidation` in `sunshine.conf`, ab Werk aus; gebaut nach 0.6.7, noch nicht
+    veröffentlicht): Bei HEVC nennt der Client die verlorenen Bilder, und der Encoder macht mit einem P-Bild weiter, das an
+    einem Bild vor dem Verlust hängt, statt mit einem IDR (`docs/re/encoder-options.md`, Abschnitt 5;
+    `src/video/loss_recovery.hpp`). Auf 13.00 mit dem Testclient und Moonlight für Linux gemessen: bei 6 % Paketverlust
+    4 bis 5 IDRs je 30 s statt 17 bis 21, längste Lücke 67 bis 69 ms statt 97 bis 104 ms (`STATUS.md`,
+    „Verlust ohne Keyframe, Text im Hintergrund und echtes Moonlight“). Offen, und der Grund für „aus“: die
+    Hardware-Decoder der Geräte (Windows, Android, iOS, Fernseher), 4K, andere Firmware, ein Weg mit langer Laufzeit.
+    Danach: ob der Schalter in App und Webseite gehört und ob er ab Werk an sein kann.
 
 ## Bis 1.0
 

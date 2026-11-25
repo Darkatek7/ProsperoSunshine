@@ -386,6 +386,13 @@ Tips:
   40 % it lost 0, 4 and 32, and the picture got a fifth fewer bits. With 10 % it lost 36, 246 and 937. So leave it
   alone on a clean path, and try 40 where the picture breaks up; loss in bursts is helped less (at 10 % loss in runs
   of 8 packets, 40 % still lost a third of the frames, 20 % a little more). The host reads it when it starts.
+- **Going on after a lost frame without a keyframe** (experimental, HEVC only): `reference_frame_invalidation = 1` in
+  `sunshine.conf`. A frame that can't be rebuilt normally costs a keyframe, a large picture that a lossy path may lose
+  again. With the line, a device whose decoder can do it tells the host which frames it lost, and the encoder goes on
+  from a picture the device still has. Measured on 13.00 with 6 % of the packets dropped: 4 to 5 keyframes in 30 s
+  instead of 17 to 21, and the longest gap in the picture 67 to 69 ms instead of 97 to 104 ms. It is off by default
+  because only Moonlight for Linux with software decoding has been tried; if the picture breaks up or turns grey after a
+  loss on your device, remove the line and please open an issue naming the device. H.264 streams are not changed.
 
 ### Forwarding the ports by UPnP
 
