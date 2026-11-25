@@ -209,6 +209,7 @@ void check_seat_switches(input_raw_t &input);
 void request_motion(const input_raw_t &input, int nr);
 std::optional<prospero::MenuProfiles> menu_profiles();
 void apply_gamepad(input_raw_t *input, int nr, const gamepad_state_t &client_state);
+void forget_pad_state(input_raw_t &input, int nr);
 
 // input_kbm_ps5.cpp
 void close_own_kbm(input_raw_t &input, const std::string &owner);

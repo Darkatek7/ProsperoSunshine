@@ -16,6 +16,13 @@
 - **L1 and R1 in the app's number editor** took a hundred steps whatever the range, which threw Error correction, Rumble
   level and Trigger knock from one end to the other. The larger steps now fit the range: 1, 5 and 20 for error
   correction, 5, 10 and 50 for the rumble level; a port still moves by 1, 10 and 100.
+- **A long text from a device's on-screen keyboard held everyone's input.** The host types such a text key by key,
+  60 ms each, and kept its input lock for all of it: a pasted line of 100 characters stopped every controller, and the
+  rumble and light bar going back to them, for 6 s. The lock is now taken per key.
+- **A controller taken out of a profile kept some of its state.** When a device loses the profile one of its controllers
+  plays as (web page, Devices), that controller leaves and waits for a press. It kept its last buttons, a held PS from
+  Windows+Esc and its motor choice for the controller that joins next; these are now forgotten as when a controller is
+  unplugged.
 
 ## 0.6.7 (2026-11-25)
 

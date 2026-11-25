@@ -371,31 +371,46 @@ void keyboard_update(input_t &input, uint16_t modcode, bool release, uint8_t, bo
 }
 
 // Text from a client's on-screen keyboard: printable ASCII is typed key by key as on a US keyboard, and what the
-// client holds stays held. Other characters have no key and are dropped.
+// client holds stays held. Other characters have no key and are dropped. Each key takes two min_hold, so a pasted text
+// runs for seconds: the lock is taken for each report and let go while the key is held, or every device's input and
+// the pads' feedback would wait for the text. The keyboard is looked up anew each time, as it may go meanwhile (its
+// device's last controller left, its profile changed); the rest of the text is dropped then.
 void unicode(input_t &input, const char *utf8, int size) {
-    std::lock_guard lock(input->mutex);
-    kbm_t *kbm = kbm_for_input(*input, false);
-    if (!kbm) return;
-    ps_keyboard *keyboard = keyboard_of(*input, *kbm, false);
-    if (!keyboard) return;
-    const auto &held = kbm->keys;
-    int dropped = 0;
-    for (int i = 0; i < size; i++) {
+    int dropped = 0, typed = 0;
+    bool gone = false;
+    for (int i = 0; i < size && !gone; i++) {
         const auto key = prospero::ascii_key(utf8[i]);
         if (!key.usage) {
             dropped += (static_cast<uint8_t>(utf8[i]) & 0xC0) != 0x80;  // a UTF-8 sequence counts once
             continue;
         }
-        std::array<uint8_t, prospero::KeyboardState::max_keys> usages{};
-        const auto count = std::min<uint8_t>(held.count(), prospero::KeyboardState::max_keys - 1);
-        std::copy_n(held.usages(), count, usages.begin());
-        usages[count] = key.usage;
-        const uint8_t modifiers = held.modifiers() | (key.shift ? 0x02 : 0);
-        ps_keyboard_send(keyboard, modifiers, usages.data(), count + 1);
-        std::this_thread::sleep_for(min_hold);
-        ps_keyboard_send(keyboard, held.modifiers(), held.usages(), held.count());
-        std::this_thread::sleep_for(min_hold);
+        for (const bool down : {true, false}) {
+            {
+                std::lock_guard lock(input->mutex);
+                // Letting go never adds a keyboard: one that went let go of the key itself.
+                kbm_t *kbm = kbm_for_input(*input, !down);
+                ps_keyboard *keyboard = kbm ? keyboard_of(*input, *kbm, !down) : nullptr;
+                if (!keyboard) {
+                    gone = true;
+                    break;
+                }
+                const auto &held = kbm->keys;
+                if (down) {
+                    std::array<uint8_t, prospero::KeyboardState::max_keys> usages{};
+                    const auto count = std::min<uint8_t>(held.count(), prospero::KeyboardState::max_keys - 1);
+                    std::copy_n(held.usages(), count, usages.begin());
+                    usages[count] = key.usage;
+                    const uint8_t modifiers = held.modifiers() | (key.shift ? 0x02 : 0);
+                    ps_keyboard_send(keyboard, modifiers, usages.data(), count + 1);
+                    ++typed;
+                } else {
+                    ps_keyboard_send(keyboard, held.modifiers(), held.usages(), held.count());
+                }
+            }
+            std::this_thread::sleep_for(min_hold);
+        }
     }
+    if (gone && typed) BOOST_LOG(info) << "PS5 virtual keyboard: it went while a text was typed, the rest is dropped"sv;
     if (dropped) BOOST_LOG(debug) << "PS5 virtual keyboard: "sv << dropped << " characters without a key"sv;
 }
 }

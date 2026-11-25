@@ -110,6 +110,23 @@ int rebind_gamepad(input_t &input, const gamepad_id_t &id, feedback_queue_t feed
     return 0;
 }
 
+// What a slot keeps of the pad it held, forgotten when that pad is taken off the console (the stream's pad left, or its
+// device lost the profile it sat in): a later pad in the slot starts as a new one. Caller holds input.mutex.
+void forget_pad_state(input_raw_t &input, int nr) {
+    input.colors[nr] = {};  // a later pad in this slot reports its colour anew
+    input.motor_choice[nr] = {};
+    input.triggers[nr] = {};
+    input.touch[nr].clear();
+    input.back[nr] = false;
+    input.ps_held[nr] = false;
+    input.combo[nr] = {};
+    input.held_back[nr] = false;
+    input.menu_checked[nr] = {};
+    input.last_state[nr] = {};
+    input.keyboard_ps[nr] = input.keyboard_ps_up[nr] = false;
+    input.keyboard_ps_until[nr] = {};
+}
+
 void free_gamepad(input_t &input, int nr) {
     if (nr < 0 || nr >= MAX_GAMEPADS) return;
     std::lock_guard lock(input->mutex);
@@ -138,18 +155,7 @@ void free_gamepad(input_t &input, int nr) {
         close_own_kbm(*input, owner);
     const bool was_host = input->roles.is_host(nr);
     input->roles.detach(nr);
-    input->colors[nr] = {};  // a later pad in this slot reports its colour anew
-    input->motor_choice[nr] = {};
-    input->triggers[nr] = {};
-    input->touch[nr].clear();
-    input->back[nr] = false;
-    input->ps_held[nr] = false;
-    input->combo[nr] = {};
-    input->held_back[nr] = false;
-    input->menu_checked[nr] = {};
-    input->last_state[nr] = {};
-    input->keyboard_ps[nr] = input->keyboard_ps_up[nr] = false;
-    input->keyboard_ps_until[nr] = {};
+    forget_pad_state(*input, nr);
     BOOST_LOG(info) << "PS5 virtual pad "sv << nr << " detached ("sv << rc << ')'
                     << (was_host ? (input->roles.host_away() ? ", the host's device keeps the role"sv : ", the host role is free"sv) : ""sv);
     release_profile(*input, seated);

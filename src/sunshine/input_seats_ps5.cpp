@@ -673,11 +673,7 @@ void profiles_changed(const std::string &cert, const std::vector<uint32_t> &adde
         input.pads[nr] = nullptr;
         input.seat[nr] = 0;
         input.roles.detach(nr);
-        input.colors[nr] = {};
-        input.triggers[nr] = {};
-        input.touch[nr].clear();
-        input.back[nr] = input.ps_held[nr] = input.held_back[nr] = false;
-        input.menu_checked[nr] = {};
+        forget_pad_state(input, nr);
         input.switch_since[nr] = {};
         input.switch_done[nr] = false;
         input.waiting[nr] = input.spectating[nr] = true;
