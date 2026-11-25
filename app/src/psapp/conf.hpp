@@ -31,6 +31,7 @@ enum class OptionGroup
     host,         // the host's name and log
     network,      // how clients reach it: ports, pairing, encryption, the ping timeout
     playing,      // what a stream does on the console
+    controller,   // what the host's controller gets from a PS5 game: vibration, the trigger knock
     experimental, // the firmware switches (experimental_list.h) and surround sound
 };
 

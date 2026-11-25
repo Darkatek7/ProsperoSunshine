@@ -22,7 +22,7 @@ struct SettingsGroup {
     std::string caption;  // as the app shows it ("HOST"); the page sets it in spaced capitals too
 };
 
-// The groups that have options, in the app's reading order (Host, Playing, Network, Experimental).
+// The groups that have options, in the app's reading order (Host, Playing, Network, Controller, Experimental).
 inline std::vector<SettingsGroup> settings_groups() {
     std::vector<SettingsGroup> groups;
     for (const auto &caption : psapp::settings_layout::page().captions)

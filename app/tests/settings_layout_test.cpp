@@ -48,13 +48,11 @@ Move opposite(Move move)
 // nearer one back. These are the round trips that don't, for today's list (option key or action, the first move).
 // A change of the option list may change them: look at the SVG, and update this list when the new paths make sense.
 const std::set<std::pair<std::string, std::string>> kOneWay = {
-    // Host and Playing's five tiles over Network's three.
-    {"min_log_level", "down"},         // to port, whose up is the host name
-    {"ps_button_all_players", "down"}, // to pair_over_internet, whose up is error correction
-    // Network's three over the Experimental six.
-    {"experimental_hdr", "up"},          // to lan_encryption_mode, whose down is HEVC
-    {"experimental_high_bitrate", "up"}, // to wan_encryption_mode, whose down is 1440p and 4K
-    {"surround_sound", "up"},            // to ping_timeout, whose down is below 1080p
+    // Controller's two tiles over its third.
+    {"haptic_strength", "down"}, // to trigger_knock_strength, whose up is vibration
+    // Network's three and Controller's one over the Experimental six.
+    {"experimental_large_modes", "up"}, // to wan_encryption_mode, whose down is HDR
+    {"surround_sound", "up"},           // to trigger_knock_strength, whose down is below 1080p
     // The Experimental six over the four actions.
     {"experimental_high_bitrate", "down"}, // to revert, whose up is 1440p and 4K
     {"experimental_small_modes", "down"},  // to web, whose up is surround
@@ -315,7 +313,8 @@ void group_tests()
     const Layout layout = build(specs);
     CHECK(layout.error.find("orphan") != std::string::npos);
     CHECK(layout.tiles.back().w == 0.0f);
-    for (OptionGroup group : {OptionGroup::host, OptionGroup::network, OptionGroup::playing, OptionGroup::experimental})
+    for (OptionGroup group : {OptionGroup::host, OptionGroup::network, OptionGroup::playing, OptionGroup::controller,
+                              OptionGroup::experimental})
         CHECK(std::string(caption(group)).size() > 0);
     // Another network option takes a third row of Network, and the page no longer fits above the actions.
     std::vector<OptionSpec> more = option_specs();

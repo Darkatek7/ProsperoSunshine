@@ -26,6 +26,7 @@ constexpr GroupPlan kPlan[] = {
     {OptionGroup::host, "HOST", 0, 0, 280.0f},
     {OptionGroup::playing, "PLAYING", 0, 0, 360.0f},
     {OptionGroup::network, "NETWORK", 1, 3, 1.0f},
+    {OptionGroup::controller, "CONTROLLER", 1, 2, 0.745f},
     {OptionGroup::experimental, "EXPERIMENTAL", 2, 0, 1.0f},
 };
 constexpr int kBands = 3;

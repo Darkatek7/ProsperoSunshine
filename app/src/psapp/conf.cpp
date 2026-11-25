@@ -36,7 +36,7 @@ const std::vector<Choice> kEncryption = {
 
 // Names, ranges and defaults from Sunshine a679b059 src/config.cpp; ping_timeout's default is the
 // host's own (src/sunshine/main_ps5.cpp sets 2 s before the file is read). The order is the settings page's: Host,
-// Network, Playing, Experimental (settings_layout.cpp lays the groups out; the app's tests check every option has a tile).
+// Network, Playing, Controller, Experimental (settings_layout.cpp lays the groups out; the app's tests check every option has a tile).
 const std::vector<OptionSpec> &option_specs()
 {
     using G = OptionGroup;
@@ -89,6 +89,18 @@ const std::vector<OptionSpec> &option_specs()
         {G::playing, I::check, "fec_percentage", "Error correction (%)",
          "Rebuilds lost video. More survives more packet loss but costs bitrate.",
          OptionKind::number, "20 %", {}, 0, 80, 1, 20, "%"},
+        // The next three the host reads itself, within seconds and in a running stream too (src/input/pad_settings.hpp).
+        // haptic_mode: the haptics of a PS5 game as two-motor rumble, on the host's controller only (docs/re/haptics.md).
+        {G::controller, I::sliders, "haptic_mode", "Vibration",
+         "Rumble: PS5 games' vibration reaches the host's controller as rumble.",
+         OptionKind::choice, "Off", {{"off", "Off"}, {"rumble", "Rumble"}}, 0, 0, 1, 0},
+        {G::controller, I::sliders, "haptic_strength", "Rumble level",
+         "How strong that rumble is. 100 is as measured, 200 twice as strong.",
+         OptionKind::number, "100 %", {}, 0, 200, 5, 100, "%"},
+        // Trigger effect 0x26 (src/input/gamepad_map.hpp): 100 leaves it as the game sent it, 0 takes it away.
+        {G::controller, I::sliders, "trigger_knock_strength", "Trigger knock",
+         "Softens the hard knock some games send when firing. 0 turns it off.",
+         OptionKind::number, "100 %", {}, 0, 100, 5, 100, "%"},
         };
         // The Experimental switches, which the host reads itself (src/sunshine/main_ps5.cpp), not Sunshine.
         for (int i = 0; i < PS_EXP_SWITCH_COUNT; ++i)
