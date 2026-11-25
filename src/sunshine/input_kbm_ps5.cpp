@@ -6,6 +6,7 @@
 #include "control/menu_access.hpp"
 #include "input/keyboard_map.hpp"
 #include "input/profile_rules.hpp"
+#include "input/text_typist.hpp"
 #include "platform/ps5/kbm.h"
 #include "platform/ps5/profile_seat.h"
 #include "src/logging.h"
@@ -21,6 +22,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 
@@ -46,6 +48,7 @@ static void close_kbm(kbm_t &kbm) {
     kbm.keyboard_bus = kbm.mouse_bus = 0;
     kbm.keyboard_failed = kbm.mouse_failed = false;
     kbm.keys.clear();
+    kbm.text.clear();
     kbm.mouse_buttons = 0;
     kbm.wheel.clear();
     kbm.tilt.clear();
@@ -203,6 +206,22 @@ static ps_keyboard *keyboard_of(input_raw_t &input, kbm_t &kbm, bool release) {
         }
     }
     return kbm.keyboard;
+}
+
+// The keyboard's report: the keys its clients hold and, while a text is typed, that text's key. Caller holds input.mutex.
+static void send_keys(kbm_t &kbm) {
+    const auto &held = kbm.keys;
+    const uint8_t typed = kbm.text.usage();
+    if (!typed) {
+        ps_keyboard_send(kbm.keyboard, held.modifiers(), held.usages(), held.count());
+        return;
+    }
+    std::array<uint8_t, prospero::KeyboardState::max_keys> usages{};
+    const auto count = std::min<uint8_t>(held.count(), prospero::KeyboardState::max_keys - 1);
+    std::copy_n(held.usages(), count, usages.begin());
+    usages[count] = typed;
+    const uint8_t modifiers = held.modifiers() | (kbm.text.shift() ? 0x02 : 0);
+    ps_keyboard_send(kbm.keyboard, modifiers, usages.data(), count + 1);
 }
 
 static ps_mouse *mouse_of(input_raw_t &input, kbm_t &kbm, bool release) {
@@ -366,51 +385,48 @@ void keyboard_update(input_t &input, uint16_t modcode, bool release, uint8_t, bo
     if (!keyboard) return;
     kbm->keys = keys;
     if (release) hold_from(kbm->key_down_at);
-    ps_keyboard_send(keyboard, kbm->keys.modifiers(), kbm->keys.usages(), kbm->keys.count());
+    send_keys(*kbm);
     if (!release) kbm->key_down_at = std::chrono::steady_clock::now();
 }
 
+// How long a keyboard that was just added gets before a text is typed on it. A single key is taken 50 ms after the
+// keyboard was added (device_settle), but of a text typed from 150 ms on the console's text field lost the first 8 and
+// 11 of 100 characters, 0.6 to 0.8 s' worth (13.00, 0.6.7 and this code before the wait, browser text field).
+constexpr auto text_settle = 1s;
+
 // Text from a client's on-screen keyboard: printable ASCII is typed key by key as on a US keyboard, and what the
-// client holds stays held. Other characters have no key and are dropped. Each key takes two min_hold, so a pasted text
-// runs for seconds: the lock is taken for each report and let go while the key is held, or every device's input and
-// the pads' feedback would wait for the text. The keyboard is looked up anew each time, as it may go meanwhile (its
-// device's last controller left, its profile changed); the rest of the text is dropped then.
+// client holds stays held. Other characters have no key and are dropped. The text is only queued here: Sunshine passes
+// every stream's input on from this one thread, and a text takes 60 ms and more per character (input/text_typist.hpp).
 void unicode(input_t &input, const char *utf8, int size) {
-    int dropped = 0, typed = 0;
-    bool gone = false;
-    for (int i = 0; i < size && !gone; i++) {
-        const auto key = prospero::ascii_key(utf8[i]);
-        if (!key.usage) {
-            dropped += (static_cast<uint8_t>(utf8[i]) & 0xC0) != 0x80;  // a UTF-8 sequence counts once
-            continue;
+    if (size <= 0) return;
+    std::lock_guard lock(input->mutex);
+    kbm_t *kbm = kbm_for_input(*input, false);
+    if (!kbm) return;
+    const bool added = !kbm->keyboard;
+    if (!keyboard_of(*input, *kbm, false)) return;
+    if (added) kbm->text.not_before(std::chrono::steady_clock::now() + text_settle);
+    const auto pushed = kbm->text.push(std::string_view(utf8, static_cast<std::size_t>(size)));
+    if (pushed.over)
+        BOOST_LOG(info) << "PS5 virtual keyboard: a text is still being typed, "sv << pushed.over
+                        << " characters more than it holds were dropped"sv;
+    if (pushed.without_key) BOOST_LOG(debug) << "PS5 virtual keyboard: "sv << pushed.without_key << " characters without a key"sv;
+}
+
+// Types the queued texts: a step for each keyboard whose key has been down, or up, long enough. Every 10 ms from
+// poll_pad_output. Caller holds input.mutex.
+void type_texts(input_raw_t &input) {
+    const auto now = std::chrono::steady_clock::now();
+    const auto step = [now](kbm_t &kbm) {
+        if (kbm.text.idle()) return;
+        if (!kbm.keyboard) {
+            kbm.text.clear();
+        } else if (kbm.text.tick(now)) {
+            send_keys(kbm);
+            const bool done = kbm.text.idle();
+            if (done) BOOST_LOG(debug) << "PS5 virtual keyboard: the queued keys are typed"sv;
         }
-        for (const bool down : {true, false}) {
-            {
-                std::lock_guard lock(input->mutex);
-                // Letting go never adds a keyboard: one that went let go of the key itself.
-                kbm_t *kbm = kbm_for_input(*input, !down);
-                ps_keyboard *keyboard = kbm ? keyboard_of(*input, *kbm, !down) : nullptr;
-                if (!keyboard) {
-                    gone = true;
-                    break;
-                }
-                const auto &held = kbm->keys;
-                if (down) {
-                    std::array<uint8_t, prospero::KeyboardState::max_keys> usages{};
-                    const auto count = std::min<uint8_t>(held.count(), prospero::KeyboardState::max_keys - 1);
-                    std::copy_n(held.usages(), count, usages.begin());
-                    usages[count] = key.usage;
-                    const uint8_t modifiers = held.modifiers() | (key.shift ? 0x02 : 0);
-                    ps_keyboard_send(keyboard, modifiers, usages.data(), count + 1);
-                    ++typed;
-                } else {
-                    ps_keyboard_send(keyboard, held.modifiers(), held.usages(), held.count());
-                }
-            }
-            std::this_thread::sleep_for(min_hold);
-        }
-    }
-    if (gone && typed) BOOST_LOG(info) << "PS5 virtual keyboard: it went while a text was typed, the rest is dropped"sv;
-    if (dropped) BOOST_LOG(debug) << "PS5 virtual keyboard: "sv << dropped << " characters without a key"sv;
+    };
+    step(input.shared);
+    for (auto &kbm : input.own) step(*kbm);
 }
 }

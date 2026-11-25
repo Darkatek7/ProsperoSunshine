@@ -11,6 +11,7 @@
 #include "input/pad_settings.hpp"
 #include "input/pad_touch.hpp"
 #include "input/profile_rules.hpp"
+#include "input/text_typist.hpp"
 #include "platform/ps5/haptic_envelope.hpp"
 #include "platform/ps5/kbm.h"
 #include "platform/ps5/pad.h"
@@ -48,6 +49,7 @@ struct kbm_t {
     uint64_t keyboard_bus = 0, mouse_bus = 0;  // the bus ids they were seated by; 0 for the shared ones
     bool keyboard_failed = false, mouse_failed = false;
     prospero::KeyboardState keys;
+    prospero::TextTypist text;  // a text from its client's on-screen keyboard, typed by type_texts
     uint8_t mouse_buttons = 0;
     prospero::WheelSteps wheel, tilt;
     std::chrono::steady_clock::time_point key_down_at, button_down_at;
@@ -215,5 +217,6 @@ void forget_pad_state(input_raw_t &input, int nr);
 void close_own_kbm(input_raw_t &input, const std::string &owner);
 void close_keyboard_mouse(input_raw_t &input);
 void release_keyboard_ps(input_raw_t &input);
+void type_texts(input_raw_t &input);
 
 }  // namespace platf

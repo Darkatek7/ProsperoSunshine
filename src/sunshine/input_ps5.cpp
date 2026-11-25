@@ -140,6 +140,7 @@ static void poll_pad_output(std::stop_token stop, input_raw_t *input) {
             any_pad = std::any_of(input->pads.begin(), input->pads.end(), [](const ps_pad *pad) { return pad != nullptr; });
             check_seat_switches(*input);
             release_keyboard_ps(*input);
+            type_texts(*input);
             if (const auto now = std::chrono::steady_clock::now(); now >= next_owner_check) {
                 next_owner_check = now + owner_check;
                 keep_owners(*input);
