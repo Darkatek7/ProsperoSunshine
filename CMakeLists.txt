@@ -209,8 +209,8 @@ extern const std::size_t prospero_web_asset_count = sizeof prospero_web_assets /
         set(PROSPERO_COMMIT "unknown")
     endif()
     target_compile_definitions(prospero_sunshine PRIVATE
-        PROJECT_NAME="ProsperoSunshine" PROJECT_VERSION="0.6.8${PROSPERO_FLAVOR_SUFFIX}" PROJECT_VERSION_MAJOR="0"
-        PROJECT_VERSION_MINOR="6" PROJECT_VERSION_PATCH="8" PROJECT_VERSION_COMMIT="${PROSPERO_COMMIT}"
+        PROJECT_NAME="ProsperoSunshine" PROJECT_VERSION="0.6.9${PROSPERO_FLAVOR_SUFFIX}" PROJECT_VERSION_MAJOR="0"
+        PROJECT_VERSION_MINOR="6" PROJECT_VERSION_PATCH="9" PROJECT_VERSION_COMMIT="${PROSPERO_COMMIT}"
         PROJECT_FQDN="dev.prosperosunshine" SUNSHINE_ASSETS_DIR="/data/prosperosunshine/assets"
         SUNSHINE_PUBLISHER_NAME="ProsperoSunshine" SUNSHINE_PUBLISHER_WEBSITE=""
         SUNSHINE_PUBLISHER_ISSUE_URL="" SUNSHINE_TRAY=0 BOOST_ALL_NO_LIB)

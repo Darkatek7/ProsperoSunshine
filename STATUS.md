@@ -1,6 +1,6 @@
 # Arbeitsstand
 
-Stand: 26. November 2026, Release 0.6.8 (Verlauf der letzten Streams auf der Webseite, Text im Hintergrund, `reference_frame_invalidation` als Versuch). Hier steht nur, was live geprüft ist, mit dem Messweg. Was ausgeliefert ist:
+Stand: 26. November 2026, Release 0.6.9 (Spiele auf der M.2-SSD stehen in der App-Liste; aus 0.6.8: Verlauf der letzten Streams auf der Webseite, Text im Hintergrund, `reference_frame_invalidation` als Versuch). Hier steht nur, was live geprüft ist, mit dem Messweg. Was ausgeliefert ist:
 `CHANGELOG.md`. Plan und Reihenfolge: `ROADMAP.md`. Architektur: `docs/adr/001-sunshine-port.md`.
 
 Die älteren Einträge (bis 4. November 2026) und die ersten Nachweise nach Roadmap stehen unverändert und mit denselben
