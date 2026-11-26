@@ -12,7 +12,7 @@ hier fehlt (etwa in Code-Kommentaren), meinen diese Datei. „Archiv“ unten he
 **Der Host streamt.** Moonlight paart sich mit der PS5, startet „PS5 Screen“ oder ein installiertes Spiel und bekommt Bild,
 Spielton und Controller. Eine 30-Minuten-Sitzung und zehn Wiederverbindungen liefen fehlerfrei (Archiv, „Nachweise nach
 Roadmap“). Jedes Release seit 0.3.2 lief auf der Konsole mit 13.00 je 30 s in H.264 und HEVC 1080p60 und dekodierte
-fehlerfrei („Release 0.6.7, CI-Dateien auf der Konsole“ und die Einträge davor).
+fehlerfrei („Release 0.6.8, CI-Dateien auf der Konsole“ und die Einträge davor).
 
 **Firmware:** 13.00 und 10.20 (PS5 Pro) sind geprüft. Von 9.60, 10.40, 11.40, 13.40 und 13.60 gibt es Berichte von
 Nutzern und Mitwirkenden, gemessen ist dort hier nichts („Firmware-Sonde auf 9.60“, „Berichte nach 0.3.1“, „Belegter
@@ -108,6 +108,22 @@ Issue 36“) und ein Debug-Build in jedem Release („Debug-Build (PR 29) zusamm
     (ab etwa 70 ms hin und zurück fehlen mehr als 7 Bilder, dann kommt ein IDR wie bisher).
 
 ## Neuere Nachweise
+
+### Release 0.6.8, CI-Dateien auf der Konsole (2026-11-26, 13.00)
+
+Die Dateien, die CI aus `6f591f74` gebaut hat (`SHA256SUMS` stimmt, das ELF der App gleich dem des Archivs), installiert wie
+ein Release; die App zeigt `v01.000.032`, Host-Datei, Kopie im Autoload-Slot und ELF der App sind gleich. Messweg wie im
+Eintrag darunter.
+
+- **Streams:** H.264 und HEVC 1080p60 mit 1796 und 1794 Bildern, HEVC 3840x2160 bei 60 fps mit 1778, je 0 fehlend,
+  decodiert, kein `PS5 capture lost`, keine `Error`-Zeile.
+- **Ab Werk:** keine Zeile zur Referenzbild-Invalidierung, je Stream eine `Stream ended:`-Zeile, die Webseite antwortet über
+  HTTPS mit ihrer Anmeldeseite.
+- **`reference_frame_invalidation = 1` (HEVC 1080p60, 6 % verworfene Pakete, 30 s):** 19 von 19 Verlusten gingen ab einem
+  markierten P-Bild weiter, längste Lücke 68 ms, `rfi_verify.py` ohne Befund; die Verlust-Zeilen des Hosts ergeben die 19 des
+  Clients. Ohne die Zeile danach wieder keine Ankündigung.
+- **Debug-Datei aus dem Speicher:** `0.6.8-debug commit=6f591f74`, `selfcheck done … problems=0`, H.264 mit 1796 Bildern, 0
+  fehlend.
 
 ### Release 0.6.8 auf der Konsole, lokale Builds (2026-11-26, 13.00)
 
