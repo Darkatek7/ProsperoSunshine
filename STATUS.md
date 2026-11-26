@@ -109,6 +109,18 @@ Issue 36“) und ein Debug-Build in jedem Release („Debug-Build (PR 29) zusamm
 
 ## Neuere Nachweise
 
+### Release 0.6.9 auf der Konsole, lokaler Build (2026-11-26, 13.00)
+
+Konsolenrunde p71 mit dem lokalen Build von `9db7b6c7` (0.6.8 plus die Korrektur unten), aus dem Speicher über
+`host_restart.next`, ohne einen Titel zu starten oder zu schließen; der installierte Host 0.6.8 blieb und lief danach wieder.
+
+- **App-Liste:** `/applist` über HTTPS mit dem gekoppelten Testclient: 22 Einträge, die beiden Spiele von der M.2-SSD je
+  einmal, keine App-ID doppelt. `/appasset` liefert für beide ein PNG mit 512×512, bytegleich mit dem `icon0.png` des Spiels.
+- **Streams, Home-Bildschirm, 1080p60, 30 s:** H.264 1797 Bilder, 0 fehlend, längste Lücke 27 ms; HEVC 1794 Bilder, 0 fehlend,
+  längste Lücke 66 ms. Jedes Bild dekodiert, kein `PS5 capture lost`, keine `Error`-Zeile des Hosts.
+- **Danach:** `sunshine.log` meldet wieder `0.6.8 (commit 6f591f74)`, die Zustandsdateien sind bytegleich mit der Sicherung
+  (bis auf Verlauf und Logs).
+
 ### Spiele auf der M.2-SSD in der App-Liste (2026-11-26, 13.00, nach 0.6.8)
 
 Zwei auf die M.2-SSD installierte Spiele fehlten in Moonlight und in der Apps-Liste der Webseite. Per FTP nachgesehen: Ihr
