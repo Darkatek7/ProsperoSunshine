@@ -66,7 +66,7 @@ std::vector<ctx_t> all_apps() {
     std::vector<ctx_t> apps;
     // Moonlight sorts by name and shows no order of the host's. The space, which it doesn't trim or show, puts this one first.
     apps.push_back(make_app(" PS5 Screen", screen_app_id));
-    for (const auto &title : prospero::list_titles("/user")) {
+    for (const auto &title : prospero::console_titles()) {
         auto app = make_app(title.name, title.app_id);
         app.cmd = title.id;
         app.image_path = title.cover.string();

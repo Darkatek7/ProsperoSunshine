@@ -425,7 +425,7 @@ std::string ControlServer::handle_locked(const std::string &line, Caller caller)
         const auto is_hidden = [&hidden](const std::string &id) { return std::find(hidden.begin(), hidden.end(), id) != hidden.end(); };
         std::string out;
         std::vector<std::string> listed;
-        for (const auto &title : list_titles("/user")) {
+        for (const auto &title : console_titles()) {
             if (!title_id_valid(title.id)) continue;
             out += "OK " + title.id + (is_hidden(title.id) ? " hidden " : " shown ") + one_line(title.name) + '\n';
             listed.push_back(title.id);

@@ -218,7 +218,7 @@ void log_stream_stats(std::stop_token stop, prospero::ControlServer &control) {
 // lines with the profile the title map gives them, so the player picks one by removing a #. The player's lines stay.
 void note_installed_titles(const std::filesystem::path &file) {
     std::vector<prospero::ListedTitle> listed;
-    for (const auto &title : prospero::list_titles("/user")) {
+    for (const auto &title : prospero::console_titles()) {
         const auto meta = prospero::read_title_meta("/user", title.id);
         const auto choice = prospero::choose_profile(title.id, meta ? meta->concept_id : 0, meta ? meta->english : title.name,
                                                      {}, prospero::Profile::standard);

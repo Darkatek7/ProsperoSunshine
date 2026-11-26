@@ -37,7 +37,11 @@ std::optional<TitleMeta> parse_param_sfo(std::span<const uint8_t> sfo);
 // One title's data under user_dir: param.json or param.sfo, from appmeta or the app's sce_sys. Nothing if unreadable.
 std::optional<TitleMeta> read_title_meta(const std::filesystem::path &user_dir, const std::string &id);
 
-// The games under user_dir (/user on the console), sorted by name.
-std::vector<Title> list_titles(const std::filesystem::path &user_dir);
+// The games under user_dir (/user on the console), sorted by name. A title installed on other storage has its folder in one
+// of more_apps and its data under user_dir all the same; a title found in several folders is listed once.
+std::vector<Title> list_titles(const std::filesystem::path &user_dir, std::span<const std::filesystem::path> more_apps = {});
+
+// The console's games: those on the internal storage, on the M.2 SSD and on USB extended storage.
+std::vector<Title> console_titles();
 
 }  // namespace prospero

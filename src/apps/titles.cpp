@@ -7,6 +7,7 @@
 #include <fstream>
 #include <iterator>
 #include <map>
+#include <set>
 
 namespace prospero {
 namespace {
@@ -159,10 +160,12 @@ std::string_view trimmed(std::string_view text) {
 }
 
 std::optional<TitleMeta> read_meta(const std::filesystem::path &user_dir, const std::string &id) {
-    const auto meta = user_dir / "appmeta" / id, sys = user_dir / "app" / id / "sce_sys";
-    for (const auto &path : {meta / "param.json", sys / "param.json"})
+    // appmeta/external is where the PS4 keeps the data of a title on USB extended storage; not seen on a PS5 yet.
+    const auto meta = user_dir / "appmeta" / id, external = user_dir / "appmeta" / "external" / id,
+               sys = user_dir / "app" / id / "sce_sys";
+    for (const auto &path : {meta / "param.json", external / "param.json", sys / "param.json"})
         if (auto parsed = parse_param_json(read_file(path))) return parsed;
-    for (const auto &path : {meta / "param.sfo", sys / "param.sfo"}) {
+    for (const auto &path : {meta / "param.sfo", external / "param.sfo", sys / "param.sfo"}) {
         const auto data = read_file(path);
         if (auto parsed = parse_param_sfo({reinterpret_cast<const uint8_t *>(data.data()), data.size()})) return parsed;
     }
@@ -257,16 +260,24 @@ std::optional<TitleMeta> read_title_meta(const std::filesystem::path &user_dir, 
     return read_meta(user_dir, id);
 }
 
-std::vector<Title> list_titles(const std::filesystem::path &user_dir) {
-    std::vector<Title> titles;
+std::vector<Title> list_titles(const std::filesystem::path &user_dir, std::span<const std::filesystem::path> more_apps) {
+    std::set<std::string> ids;
     std::error_code ec;
-    for (const auto &entry : std::filesystem::directory_iterator(user_dir / "app", ec)) {
-        const auto id = entry.path().filename().string();
-        if (!valid_title_id(id)) continue;
+    const auto collect = [&](const std::filesystem::path &apps) {
+        for (std::filesystem::directory_iterator it(apps, ec), end; !ec && it != end; it.increment(ec)) {
+            auto id = it->path().filename().string();
+            if (valid_title_id(id)) ids.insert(std::move(id));
+        }
+    };
+    collect(user_dir / "app");
+    for (const auto &apps : more_apps) collect(apps);
+    std::vector<Title> titles;
+    for (const auto &id : ids) {
         const auto meta = read_meta(user_dir, id);
         if (!meta || !meta->game) continue;
         std::filesystem::path cover;
-        for (const auto &path : {user_dir / "appmeta" / id / "icon0.png", user_dir / "app" / id / "sce_sys" / "icon0.png"})
+        for (const auto &path : {user_dir / "appmeta" / id / "icon0.png", user_dir / "appmeta" / "external" / id / "icon0.png",
+                                 user_dir / "app" / id / "sce_sys" / "icon0.png"})
             if (cover.empty() && std::filesystem::is_regular_file(path, ec)) cover = path;
         titles.push_back({id, meta->name, cover, title_app_id(id)});
     }
@@ -275,6 +286,14 @@ std::vector<Title> list_titles(const std::filesystem::path &user_dir) {
         return left != right ? left < right : a.id < b.id;
     });
     return titles;
+}
+
+std::vector<Title> console_titles() {
+    // /mnt/ext1 is the M.2 SSD: a title installed there has <id>/app.pkg in this folder and nothing under /user/app, while
+    // its param.json and icon are in /user/appmeta as any other's (seen on 13.00). /mnt/ext0 is the USB extended storage,
+    // by the PS4's layout; not seen on a PS5 yet.
+    static const std::filesystem::path more[] = {"/mnt/ext1/user/app", "/mnt/ext0/user/app"};
+    return list_titles("/user", more);
 }
 
 }  // namespace prospero

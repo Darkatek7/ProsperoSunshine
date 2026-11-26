@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Games on the M.2 SSD were missing from the app list.** A game installed on the M.2 SSD has its folder there and none
+  on the internal storage, the only place the host looked. So it was missing in Moonlight, in the web page's Apps list and
+  in `keyboard_profiles.txt`. The host now also reads the app folder of the M.2 SSD and that of USB extended storage (the
+  latter by the PS4's layout, not tried on a console yet).
+
 ## 0.6.8 (2026-11-26)
 
 ### Added

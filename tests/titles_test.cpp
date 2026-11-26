@@ -109,9 +109,32 @@ int main() {
     assert(titles[3].id == "PPSA00002" && titles[3].app_id == title_app_id("PPSA00002"));
     assert(read_title_meta(root, "PPSA00005")->name == "Own sce_sys" && read_title_meta(root, "CUSA00001")->english == "Middle");
     assert(!read_title_meta(root, "PPSA00004"));
+
+    // Titles on other storage (the M.2 SSD): the folder with the package is there, the data under appmeta as for the others.
+    const auto m2 = root / "ext1" / "user" / "app", usb = root / "ext0" / "user" / "app";
+    fs::create_directories(m2 / "PPSA00006");
+    write(root / "appmeta" / "PPSA00006" / "param.json", param_json("Big game", 0));
+    write(root / "appmeta" / "PPSA00006" / "icon0.png", "png");
+    fs::create_directories(m2 / "PPSA00007");
+    write(root / "appmeta" / "PPSA00007" / "param.json", param_json("Media app on the SSD", 65536));
+    fs::create_directories(m2 / "PPSA00008");  // no metadata
+    fs::create_directories(m2 / "PPSA00001");  // also on the internal storage
+    fs::create_directories(m2 / "not-a-title");
+    fs::create_directories(usb / "CUSA00002");
+    write(root / "appmeta" / "external" / "CUSA00002" / "param.sfo", sfo("Old game on USB", "gd"));
+    write(root / "appmeta" / "external" / "CUSA00002" / "icon0.png", "png");
+    assert(list_titles(root).size() == 4);  // not without their folders
+    const fs::path more[] = {m2, usb, root / "ext2" / "user" / "app"};  // the last one doesn't exist
+    const auto all = list_titles(root, more);
+    assert(all.size() == 6);
+    assert(all[0].id == "PPSA00001" && all[1].id == "PPSA00006" && all[1].name == "Big game");
+    assert(all[1].cover == root / "appmeta" / "PPSA00006" / "icon0.png" && all[1].app_id == title_app_id("PPSA00006"));
+    assert(all[2].id == "CUSA00001" && all[3].id == "CUSA00002" && all[3].name == "Old game on USB");
+    assert(all[3].cover == root / "appmeta" / "external" / "CUSA00002" / "icon0.png");
+    assert(all[4].id == "PPSA00005" && all[5].id == "PPSA00002");
     fs::remove_all(root);
     assert(list_titles(root).empty());
 
-    std::puts("PASS: titles (IDs, param.json, param.sfo, games only, covers, order, Store concept, English name)");
+    std::puts("PASS: titles (IDs, param.json, param.sfo, games only, covers, order, other storage, Store concept, English name)");
     return 0;
 }
