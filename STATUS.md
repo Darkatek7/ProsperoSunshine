@@ -109,6 +109,25 @@ Issue 36“) und ein Debug-Build in jedem Release („Debug-Build (PR 29) zusamm
 
 ## Neuere Nachweise
 
+### Release 0.6.9, CI-Dateien auf der Konsole (2026-11-26, 13.00)
+
+Konsolenrunde p72 mit den CI-Dateien des Tags `v0.6.9` (`01ae580b`), für dauernd installiert: App `v01.000.033`, Host-Datei,
+Kopie im Autoload-Slot und ELF der App bytegleich mit dem aus dem Archiv. `Restart host` in der App brachte
+`0.6.9 commit=01ae580b`, Steuer-Socket nur lokal.
+
+- **Streams, Home-Bildschirm, 30 s:** H.264 1080p60 1796 Bilder, HEVC 1080p60 1793, HEVC 4K60 1784; je 0 fehlend, jedes
+  Bild dekodiert, kein `PS5 capture lost`, keine `Error`-Zeile.
+- **App-Liste:** 22 Einträge, die beiden Spiele von der M.2-SSD je einmal, keine App-ID doppelt, `/appasset` liefert für
+  beide ein PNG; die Anmeldeseite der Webseite antwortet über HTTPS.
+- **Ein Spiel von der M.2-SSD über den Host gestartet** (Testclient mit der App-ID des Titels, ohne `/cancel` am Ende, weil
+  `close_game_on_quit = 1` es sonst schließt): `Started PPSA04339`, HEVC 1080p60 1792 Bilder, 0 fehlend; danach war das
+  Spiel vorn. Ohne Speichern geschlossen.
+- **Debug-Datei aus dem Speicher:** `0.6.9-debug commit=01ae580b`, `selfcheck done ms=243 problems=0`, H.264 1795 Bilder,
+  0 fehlend.
+- **Danach:** Zustandsdateien bytegleich mit vorher, `autoload.txt` unberührt, kein `control_lan`.
+
+Nicht geprüft: ein Spiel auf USB-Erweiterungsspeicher (`/mnt/ext0`).
+
 ### Release 0.6.9 auf der Konsole, lokaler Build (2026-11-26, 13.00)
 
 Konsolenrunde p71 mit dem lokalen Build von `9db7b6c7` (0.6.8 plus die Korrektur unten), aus dem Speicher über
