@@ -109,6 +109,21 @@ Issue 36“) und ein Debug-Build in jedem Release („Debug-Build (PR 29) zusamm
 
 ## Neuere Nachweise
 
+### Spiele auf der M.2-SSD in der App-Liste (2026-11-26, 13.00, nach 0.6.8)
+
+Zwei auf die M.2-SSD installierte Spiele fehlten in Moonlight und in der Apps-Liste der Webseite. Per FTP nachgesehen: Ihr
+Ordner mit `app.pkg` liegt unter `/mnt/ext1/user/app/<ID>`, unter `/user/app` gibt es keinen; `param.json` und `icon0.png`
+liegen wie bei jedem anderen Titel unter `/user/appmeta/<ID>`. Der Host las nur `/user/app`. Gegenprobe über die `param.json`
+aller Titel: 40 Spiele auf dem internen Speicher, 21 davon ausgeblendet, bleiben mit „PS5 Screen“ die 20 Einträge, die
+Moonlight zeigte; es fehlten also nur die beiden.
+
+Build `c9b22e17` aus dem Speicher (`host_restart.elf` mit `host_restart.next`, der installierte Host 0.6.8 blieb), während
+eines der beiden Spiele lief: Es lief weiter (`close_game_on_quit = 1` greift nur bei Moonlights „Quit“). `/applist` über
+HTTPS mit dem gekoppelten Testclient: 22 Einträge, beide Titel dabei; `/appasset` liefert für beide ein PNG mit 512×512; der
+Besitzer sieht beide mit Cover in Moonlight für PC. `keyboard_profiles.txt` bekam beim Start die zwei auskommentierten
+Zeilen dazu. Nicht geprüft: ein Start von der M.2 aus Moonlight heraus und USB-Erweiterungsspeicher (`/mnt/ext0`, nach dem
+Layout der PS4 angenommen, an der Konsole hing keiner).
+
 ### Release 0.6.8, CI-Dateien auf der Konsole (2026-11-26, 13.00)
 
 Die Dateien, die CI aus `6f591f74` gebaut hat (`SHA256SUMS` stimmt, das ELF der App gleich dem des Archivs), installiert wie
