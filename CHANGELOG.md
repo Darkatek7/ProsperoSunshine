@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **An `Error` line in the log that was none.** At the start of a stream, `sunshine.log` now and then got one or two
+  `Error: RTSP: handle_read_plaintext(): Couldn't read from tcp socket: End of file` lines. They came from the host's own
+  check of its ports every 5 seconds, not from a client, and nothing was wrong. The host no longer logs that as an error.
+
 ## 0.6.9 (2026-11-26)
 
 ### Fixed

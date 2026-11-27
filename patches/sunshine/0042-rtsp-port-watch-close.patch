@@ -1,0 +1,39 @@
+ProsperoSunshine: no Error line for the port watch's RTSP connection
+
+The host's port watch (main_ps5.cpp, wait_or_ports_lost) connects to the RTSP port every 5 s and closes the connection
+again. While a launch waits for its client, such a connection gets the waiting session and is read from, and its close
+was logged as "Error: RTSP: handle_read_plaintext(): Couldn't read from tcp socket: End of file" (with encrypted RTSP as
+handle_read_encrypted_header, followed by a 400 nobody reads). It is no error: a connection closed before it sent anything
+is now a debug line. One that ends inside a request stays an error.
+
+--- a/src/rtsp.cpp
++++ b/src/rtsp.cpp
+@@ -156,6 +156,14 @@
+         }
+       });
+ 
++#ifdef __SCE__
++      // As in handle_read_plaintext: the host's port watch, closed before it sent anything. Nothing to answer.
++      if (ec == boost::asio::error::eof && bytes == 0 && socket->begin == socket->msg_buf.data()) {
++        BOOST_LOG(debug) << "RTSP: a connection was closed before its first request"sv;
++        return;
++      }
++#endif
++
+       if (ec || bytes < sizeof(encrypted_rtsp_header_t)) {
+         BOOST_LOG(error) << "RTSP: handle_read_encrypted_header(): Couldn't read from tcp socket: "sv << ec.message();
+ 
+@@ -358,6 +366,13 @@
+       BOOST_LOG(debug) << "handle_read_plaintext(): Handle read of size: "sv << bytes << " bytes"sv;
+ 
+       if (ec) {
++#ifdef __SCE__
++        // A connection closed before it sent anything is the host's own port watch (main_ps5.cpp), which got here because a
++        // launch was waiting for its client. One that ends inside a request stays an error.
++        if (ec == boost::asio::error::eof && socket->begin == socket->msg_buf.data()) {
++          BOOST_LOG(debug) << "RTSP: a connection was closed before its first request"sv;
++        } else
++#endif
+         BOOST_LOG(error) << "RTSP: handle_read_plaintext(): Couldn't read from tcp socket: "sv << ec.message();
+ 
+         boost::system::error_code close_error;
