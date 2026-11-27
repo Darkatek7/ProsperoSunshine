@@ -104,6 +104,27 @@ bool here(const std::string &path)
     return ::stat(path.c_str(), &info) == 0;
 }
 
+// Whether this title can use the host's data folder itself: make it, and a file in it. Seeing /data is not enough: on a
+// 13.40 console with the Payload Manager the app saw /data/homebrew but not this folder, which the running host had made
+// (a user's report). access() would not tell either, it answers EPERM in a title even where it may write.
+bool data_folder_usable()
+{
+    const std::string folder = "/data/prosperosunshine";
+    for (std::size_t slash = folder.find('/', 1);; slash = folder.find('/', slash + 1))
+    {
+        ::mkdir(folder.substr(0, slash).c_str(), 0777);
+        if (slash == std::string::npos)
+            break;
+    }
+    const std::string probe = folder + "/.prospero_write_test";
+    const int fd = ::open(probe.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (fd < 0)
+        return false;
+    ::close(fd);
+    ::unlink(probe.c_str());
+    return true;
+}
+
 bool through_host(const std::string &path)
 {
     return path.rfind("/data/", 0) == 0 && sandboxed();
@@ -136,7 +157,7 @@ bool host_stat(const std::string &path, bool *folder, long long *size, std::stri
 
 bool sandboxed()
 {
-    static const bool value = !here("/data/homebrew") && !here("/data/prosperosunshine");
+    static const bool value = !data_folder_usable();
     return value;
 }
 
@@ -349,9 +370,14 @@ std::string describe_path(const std::string &path)
         long long size = -1;
         std::string mode, answer;
         if (!host_stat(path, &folder, &size, &mode, &answer))
-            return "this title has no /data; the host says: " + answer;
+            return "through the host, which says: " + answer;
         return std::string("through the host: ") + (folder ? "folder" : "file size=" + std::to_string(size)) + " mode=" + mode;
     }
+    return describe_here(path);
+}
+
+std::string describe_here(const std::string &path)
+{
     struct stat info{};
     if (::stat(path.c_str(), &info) != 0)
         return errno == ENOENT ? std::string("missing") : "stat " + diag::errno_name(errno);

@@ -7,6 +7,11 @@
 - **An `Error` line in the log that was none.** At the start of a stream, `sunshine.log` now and then got one or two
   `Error: RTSP: handle_read_plaintext(): Couldn't read from tcp socket: End of file` lines. They came from the host's own
   check of its ports every 5 seconds, not from a client, and nothing was wrong. The host no longer logs that as an error.
+- **The app couldn't save settings on some consoles** ("Cannot use /data/prosperosunshine: missing", reported from 13.40
+  with the Payload Manager). The app went by whether it could see `/data/homebrew`, and there it saw that but not the
+  host's folder. Now it tries the folder itself, and where it can't use it, it reaches its files through the running host,
+  the way built for 9.60. The message also says what `mkdir` answered, and Diagnostics shows what the app sees of
+  `/data`.
 
 ## 0.6.9 (2026-11-26)
 

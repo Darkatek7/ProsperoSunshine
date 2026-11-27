@@ -10,8 +10,9 @@ namespace psapp::io
 {
 
 // ---- files ----
-// Where a title has no /data (9.60), paths under /data go through the host instead: the files src/control/file_bridge.hpp
-// lists, while the host runs. Then copy_file and same_content don't reach them, and send_file never does.
+// Where this title can't use the host's data folder itself, paths under /data go through the host instead: the files
+// src/control/file_bridge.hpp lists, while the host runs. Then copy_file and same_content don't reach them, and send_file
+// never does. Seen on 9.60, where a title has no /data, and on a 13.40 console that showed the title /data/homebrew only.
 bool sandboxed();
 bool read_text(const std::string &path, std::string *out, std::size_t max_bytes = 1u << 20);
 // The file's last `max_bytes` at most, from the first whole line on (all of a smaller file), without reading the rest: for
@@ -34,6 +35,8 @@ std::string open_error(const std::string &path);
 // One line on a path for the diagnostic report: what it is, its owner and mode, and whether this title
 // may read and write it. Leaves nothing behind.
 std::string describe_path(const std::string &path);
+// The same in this title's own view, never through the host.
+std::string describe_here(const std::string &path);
 // The console's firmware (kern.sdk_version, as 0x13000040), or 0 when the title may not ask.
 std::uint32_t firmware_version();
 

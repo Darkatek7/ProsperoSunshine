@@ -33,8 +33,8 @@ reverse-engineering notes: `docs/` (German).
 - PS5 firmware: **13.00 and 10.20 are tested** (10.20 from 360p to 1080p, where the encoder takes no bitrate; its picture quality
   follows the bitrate set in Moonlight instead, and it sends well below it). Other versions are
   untested; the host refuses them only if its system-library lookups fail (`docs/firmware-porting.md`, German). Firmware
-  9.60 has its own capture record, measured by a contributor; there the app can't save settings yet, as a title's sandbox
-  has no `/data` on that console.
+  9.60 has its own capture record, measured by a contributor. A title's sandbox has no `/data` there, so the app reaches its
+  files through the running host (start the host before saving settings); not tried on such a console yet.
 - A homebrew environment with an **ELF loader** (for example one listening on port 9021). The app also needs
   [ShadowMountPlus](https://github.com/drakmor/ShadowMountPlus), which registers titles from `/data/homebrew/`.
 - No PS VR session while streaming.

@@ -28,7 +28,7 @@ bool is_end(const std::string &line)
     return line == "END" || line.rfind("ERR", 0) == 0;
 }
 
-constexpr const char *kNeedsHost = "Start the host first: on this firmware the app reaches its files through it";
+constexpr const char *kNeedsHost = "Start the host first: on this console the app reaches its files through it";
 
 bool any_line(const std::string &)
 {
@@ -400,7 +400,7 @@ void Host::prepare_through_host()
     if (!bridged_)
         return;
     const std::string answer = install.lines.empty() ? install.error : install.lines.front();
-    hui::sys::log("[PSAPP] no /data here, going through the host; its copy of the ELF: %s", answer.c_str());
+    hui::sys::log("[PSAPP] the data folder is not usable here, going through the host; its copy of the ELF: %s", answer.c_str());
     if (answer.rfind("OK ", 0) != 0)
         return;
     const io::Exchange status = io::exchange(kControlPort, "AUTOLOAD\n", any_line, 10000);
@@ -962,7 +962,7 @@ void Host::do_save(const Job &job)
 std::string Host::autoload_direct(bool on)
 {
     if (io::sandboxed())
-        return "this title has no /data";
+        return "this title can't use /data itself";
     std::string list;
     const bool have = io::read_text(autoload::kListPath, &list);
     if (!have && io::exists(autoload::kListPath))
@@ -1069,9 +1069,12 @@ std::string Host::build_report()
                                                                         : "unknown (autoload.txt is not readable here, and no host answered)");
 
     out += "\nPaths (this title's view, uid " + std::to_string(::getuid()) + "):\n";
-    // /data and /data/homebrew first: whether this title sees them decides whether it goes through the host (io::sandboxed).
-    for (const char *path : {"/data", "/data/homebrew", kDataDir, kConfPath, kHostElf, kHostDiagPath, kHostLogPath, "/data/pldmgr",
-                             autoload::kListPath, autoload::kConfigPath, autoload::kSlotDir, autoload::kSlotElf})
+    // First what this title sees itself: whether it can use the data folder decides whether it goes through the host.
+    out += std::string("  files through the host: ") + (io::sandboxed() ? "yes" : "no") + "\n";
+    for (const char *path : {"/data", "/data/homebrew", kDataDir})
+        out += std::string("  ") + path + " here: " + io::describe_here(path) + "\n";
+    for (const char *path : {kDataDir, kConfPath, kHostElf, kHostDiagPath, kHostLogPath, "/data/pldmgr", autoload::kListPath,
+                             autoload::kConfigPath, autoload::kSlotDir, autoload::kSlotElf})
         out += std::string("  ") + path + ": " + io::describe_path(path) + "\n";
     {
         // The slot keeps its own copy of the host, which only the app's start or a running host bring up to date: after an update
