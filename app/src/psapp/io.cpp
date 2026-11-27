@@ -304,17 +304,25 @@ bool make_dirs(const std::string &path)
         bool folder = false;
         long long size = -1;
         std::string mode, answer;
-        return host_stat(path, &folder, &size, &mode, &answer) && folder;
+        const bool made = host_stat(path, &folder, &size, &mode, &answer) && folder;
+        if (!made)
+            errno = 0;
+        return made;
     }
     // Only the result counts: a title may get another error than EEXIST for a parent it can't change, such as /data.
+    int error = 0;
     for (std::size_t slash = path.find('/', 1);; slash = path.find('/', slash + 1))
     {
-        ::mkdir(path.substr(0, slash).c_str(), 0777);
+        if (::mkdir(path.substr(0, slash).c_str(), 0777) != 0 && slash == std::string::npos)
+            error = errno;
         if (slash == std::string::npos)
             break;
     }
     struct stat info{};
-    return ::stat(path.c_str(), &info) == 0 && S_ISDIR(info.st_mode);
+    if (::stat(path.c_str(), &info) == 0 && S_ISDIR(info.st_mode))
+        return true;
+    errno = error;
+    return false;
 }
 
 std::string open_error(const std::string &path)

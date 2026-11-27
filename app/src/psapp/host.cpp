@@ -349,12 +349,21 @@ void Host::run()
     }
 }
 
+// Why a folder the app tried to make can't be used: what it is in this title's view, and what mkdir said.
+static std::string cannot_use(const char *path, int mkdir_error)
+{
+    std::string text = std::string("Cannot use ") + path + ": " + io::describe_path(path);
+    if (mkdir_error != 0)
+        text += ", mkdir " + diag::errno_name(mkdir_error);
+    return text;
+}
+
 // The data folder, and the host ELF the app carries copied to it when it is missing or another
 // build. Start, restart and autoload all use that one copy.
 void Host::prepare_files()
 {
     if (!io::sandboxed() && !io::make_dirs(kDataDir))
-        hui::sys::log("[PSAPP] cannot use %s: %s", kDataDir, io::describe_path(kDataDir).c_str());
+        hui::sys::log("[PSAPP] %s", cannot_use(kDataDir, errno).c_str());
     const bool bundled = io::exists(kBundledElf);
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -699,7 +708,10 @@ std::string Host::quit_and_wait()
 std::string Host::sync_slot()
 {
     if (!io::make_dirs(autoload::kSlotDir))
-        return std::string("cannot create ") + autoload::kSlotDir;
+    {
+        const int error = errno;
+        return std::string("cannot create ") + autoload::kSlotDir + (error != 0 ? " (" + diag::errno_name(error) + ")" : "");
+    }
     std::string error;
     if (!io::same_content(kHostElf, autoload::kSlotElf))
         error = io::copy_file(kHostElf, autoload::kSlotElf);
@@ -927,7 +939,7 @@ void Host::do_save(const Job &job)
     }
     if (!io::make_dirs(kDataDir))
     {
-        finish(std::string("Cannot use ") + kDataDir + ": " + io::describe_path(kDataDir), false);
+        finish(cannot_use(kDataDir, errno), false);
         return;
     }
     const std::string error = io::write_text(kConfPath, config.text());
@@ -1057,8 +1069,9 @@ std::string Host::build_report()
                                                                         : "unknown (autoload.txt is not readable here, and no host answered)");
 
     out += "\nPaths (this title's view, uid " + std::to_string(::getuid()) + "):\n";
-    for (const char *path : {kDataDir, kConfPath, kHostElf, kHostDiagPath, kHostLogPath, "/data/pldmgr", autoload::kListPath,
-                             autoload::kConfigPath, autoload::kSlotDir, autoload::kSlotElf})
+    // /data and /data/homebrew first: whether this title sees them decides whether it goes through the host (io::sandboxed).
+    for (const char *path : {"/data", "/data/homebrew", kDataDir, kConfPath, kHostElf, kHostDiagPath, kHostLogPath, "/data/pldmgr",
+                             autoload::kListPath, autoload::kConfigPath, autoload::kSlotDir, autoload::kSlotElf})
         out += std::string("  ") + path + ": " + io::describe_path(path) + "\n";
     {
         // The slot keeps its own copy of the host, which only the app's start or a running host bring up to date: after an update

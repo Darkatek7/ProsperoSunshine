@@ -27,7 +27,7 @@ long long file_size(const std::string &path);
 // Byte for byte the same (both must exist).
 bool same_content(const std::string &a, const std::string &b);
 bool exists(const std::string &path);
-// mkdir -p for an absolute path.
+// mkdir -p for an absolute path. On failure errno is what mkdir said for the path itself (0 where the host makes it).
 bool make_dirs(const std::string &path);
 // Why the file does not open for reading ("errno 13 (permission denied)"), empty when it does.
 std::string open_error(const std::string &path);
