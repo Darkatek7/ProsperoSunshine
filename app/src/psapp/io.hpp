@@ -14,6 +14,9 @@ namespace psapp::io
 // src/control/file_bridge.hpp lists, while the host runs. Then copy_file and same_content don't reach them, and send_file
 // never does. Seen on 9.60, where a title has no /data, and on a 13.40 console that showed the title /data/homebrew only.
 bool sandboxed();
+// Whether app_through_host in the data folder made sandboxed() true in the debug flavor (README, "Debug build"), to try the
+// way through the host on a console that doesn't need it. Always false in the normal app.
+bool through_host_forced();
 bool read_text(const std::string &path, std::string *out, std::size_t max_bytes = 1u << 20);
 // The file's last `max_bytes` at most, from the first whole line on (all of a smaller file), without reading the rest: for
 // a log that grows for as long as the host runs. This title's own view only, never through the host. In io_tail.cpp, which

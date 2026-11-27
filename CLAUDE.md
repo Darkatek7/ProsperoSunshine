@@ -169,8 +169,10 @@ Toolchain: PS5 Payload SDK v0.45 in the Docker image `prosperosunshine-sdk:v0.45
   open, or a call into it faults, the host leaves `haptic_blocked` in `/data/prosperosunshine/` and keeps the channel closed
   until that file is deleted.
 - Autoload through the Payload Manager: `/data/pldmgr/autoload.txt`, slot `local/prospero-sunshine`.
-- A title may have no `/data` (9.60): then the app reaches the files listed in `src/control/file_bridge.cpp` through `FILE` and `INSTALL` on
-  the control socket, while the host runs, and the host closes it through `/app0/app.quit`.
+- Where the app can't make and write `/data/prosperosunshine` itself (9.60, where a title has no `/data`; a 13.40 console
+  that showed the title only `/data/homebrew`), it reaches the files listed in `src/control/file_bridge.cpp` through `FILE`
+  and `INSTALL` on the control socket, while the host runs, and the host closes it through `/app0/app.quit`. The debug app
+  goes that way on any console while an empty `/data/prosperosunshine/app_through_host` exists; delete it after the round.
 - The app is installed at `/data/homebrew/PPSA47989`. A ShadowMountPlus scan does **not** pick up changes to
   `sce_sys` (param.json, icon, background) of an already registered title. Re-register it:
   `POST http://<console>:10101/api/v1/games/uninstall {"title_id":"PPSA47989"}` (keeps the source folder),

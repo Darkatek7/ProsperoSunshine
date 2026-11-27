@@ -400,7 +400,8 @@ void Host::prepare_through_host()
     if (!bridged_)
         return;
     const std::string answer = install.lines.empty() ? install.error : install.lines.front();
-    hui::sys::log("[PSAPP] the data folder is not usable here, going through the host; its copy of the ELF: %s", answer.c_str());
+    hui::sys::log("[PSAPP] %s, going through the host; its copy of the ELF: %s",
+                  io::through_host_forced() ? "app_through_host is there" : "the data folder is not usable here", answer.c_str());
     if (answer.rfind("OK ", 0) != 0)
         return;
     const io::Exchange status = io::exchange(kControlPort, "AUTOLOAD\n", any_line, 10000);
@@ -1070,7 +1071,11 @@ std::string Host::build_report()
 
     out += "\nPaths (this title's view, uid " + std::to_string(::getuid()) + "):\n";
     // First what this title sees itself: whether it can use the data folder decides whether it goes through the host.
-    out += std::string("  files through the host: ") + (io::sandboxed() ? "yes" : "no") + "\n";
+    out += std::string("  files through the host: ") +
+           (io::through_host_forced() ? "yes, forced by app_through_host"
+            : io::sandboxed()         ? "yes"
+                                      : "no") +
+           "\n";
     for (const char *path : {"/data", "/data/homebrew", kDataDir})
         out += std::string("  ") + path + " here: " + io::describe_here(path) + "\n";
     for (const char *path : {kDataDir, kConfPath, kHostElf, kHostDiagPath, kHostLogPath, "/data/pldmgr", autoload::kListPath,

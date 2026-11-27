@@ -650,6 +650,10 @@ What the debug build adds:
   `sunshine.log` and `host_diag.log` (masked as above) also goes to that address as UDP syslog, port 514 unless given, for
   example to a small server at home that keeps the last lines when the console hangs. Only an address you type in is used,
   nothing is sent anywhere else, and the normal build ignores the line.
+- **A switch for testing the app's way through the host, off unless you add it:** with an empty file `app_through_host`
+  in `/data/prosperosunshine/`, the debug app reads and writes its files through the running host, as on a console where
+  it can't use that folder itself, and Diagnostics says "files through the host: yes, forced by app_through_host". Delete
+  the file afterwards. The normal app ignores it.
 
 In every build:
 

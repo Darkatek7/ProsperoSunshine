@@ -3,6 +3,7 @@
 
 #include "app/psapp/diag.hpp"
 #include "app/psapp/file_wire.hpp"
+#include "app/psapp/flavor.hpp"
 
 #include <arpa/inet.h>
 #include <cerrno>
@@ -125,6 +126,13 @@ bool data_folder_usable()
     return true;
 }
 
+// Debug flavor only: the file app_through_host in the data folder sends the app through the host although it could use the
+// folder itself, to try that way on a console that doesn't need it. Looked at here, since exists() asks sandboxed().
+bool forced_by_file()
+{
+    return kDebugBuild && here("/data/prosperosunshine/app_through_host");
+}
+
 bool through_host(const std::string &path)
 {
     return path.rfind("/data/", 0) == 0 && sandboxed();
@@ -155,9 +163,15 @@ bool host_stat(const std::string &path, bool *folder, long long *size, std::stri
 
 } // namespace
 
+bool through_host_forced()
+{
+    static const bool value = forced_by_file();
+    return value;
+}
+
 bool sandboxed()
 {
-    static const bool value = !data_folder_usable();
+    static const bool value = through_host_forced() || !data_folder_usable();
     return value;
 }
 

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Added
+
+- **The debug app can be sent through the host on any console:** with an empty `/data/prosperosunshine/app_through_host`
+  it reads and writes its files through the running host, to test that way where it isn't needed (README, "Debug
+  build"). The normal app ignores the file.
+
 ### Fixed
 
 - **An `Error` line in the log that was none.** At the start of a stream, `sunshine.log` now and then got one or two
