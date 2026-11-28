@@ -73,8 +73,10 @@ puts it back to the host's default (the key is then removed from the file). A ti
 UNSAVED; the bar under the tiles explains the focused one. **Save** writes the settings changed on the page and leaves the
 rest of the file as it is, so a setting changed meanwhile on the web page stays. The host reads the file only when it
 starts, so use **Save and restart host** (or Restart host later) to apply it.
-**Revert changes** goes back to what the file holds. The three under **Controller** (Vibration, Rumble level, Trigger
-knock) are the exception: the host reads them within seconds while it runs, in a stream too, so **Save** is enough.
+**Revert changes** goes back to what the file holds. Vibration, Rumble level and Trigger knock under **Controller** are the
+exception: the host reads them within seconds while it runs, in a stream too, so **Save** is enough. Keys by game, the
+fourth tile there, counts from the host's next start like the rest. The web page has two more keyboard settings
+(Keyboard profile, Mouse speed) that the app's page has no room for.
 
 | Setting | `sunshine.conf` key | Values | Without the key |
 | --- | --- | --- | --- |
@@ -93,6 +95,7 @@ knock) are the exception: the host reads them within seconds while it runs, in a
 | Vibration | `haptic_mode` | off, rumble | off |
 | Rumble level | `haptic_strength` | 0 to 200 (%) | 100 |
 | Trigger knock | `trigger_knock_strength` | 0 to 100 (%) | 100 |
+| Keys by game | `keyboard_mouse_profile_by_game` | 1 on: the game in front picks the keyboard's profile from the host's title map | off |
 | HEVC (8 bit) | `experimental_hevc` | 1 on | off |
 | HDR (10 bit) | `experimental_hdr` | 1 on | off |
 | 1440p and 4K | `experimental_large_modes` | 1 on | off |
