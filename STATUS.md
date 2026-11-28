@@ -1,6 +1,6 @@
 # Arbeitsstand
 
-Stand: 26. November 2026, Release 0.6.9 (Spiele auf der M.2-SSD stehen in der App-Liste; aus 0.6.8: Verlauf der letzten Streams auf der Webseite, Text im Hintergrund, `reference_frame_invalidation` als Versuch). Hier steht nur, was live geprüft ist, mit dem Messweg. Was ausgeliefert ist:
+Stand: 28. November 2026, Release 0.6.10 (Tastaturprofile je Spiel auf der Webseite, Stopp und Accept der Server wechseln sich ab, die App erreicht ihre Dateien auch über den Host; aus 0.6.9: Spiele auf der M.2-SSD in der App-Liste). Hier steht nur, was live geprüft ist, mit dem Messweg. Was ausgeliefert ist:
 `CHANGELOG.md`. Plan und Reihenfolge: `ROADMAP.md`. Architektur: `docs/adr/001-sunshine-port.md`.
 
 Die älteren Einträge (bis 4. November 2026) und die ersten Nachweise nach Roadmap stehen unverändert und mit denselben
@@ -108,6 +108,60 @@ Issue 36“) und ein Debug-Build in jedem Release („Debug-Build (PR 29) zusamm
     (ab etwa 70 ms hin und zurück fehlen mehr als 7 Bilder, dann kommt ein IDR wie bisher).
 
 ## Neuere Nachweise
+
+### Release 0.6.10 auf der Konsole, lokale Builds (2026-11-28, 13.00)
+
+Konsolenrunden p73 mit dem Kandidaten `f8dc3b15` und p74 mit `7734b054` (derselbe Stand plus die Korrektur im Eintrag
+darunter). Beide normal installiert: App `v01.000.034`, Host-Datei, Kopie im Autoload-Slot und ELF der App bytegleich,
+`Restart host` in der App brachte die jeweilige Version, Steuer-Socket nur lokal. Zum Schluss blieb `7734b054` installiert.
+
+- **Streams, Home-Bildschirm, 30 s:** `f8dc3b15` H.264 1080p60 1796 Bilder, HEVC 1080p60 1794, HEVC 4K60 1784;
+  `7734b054` H.264 1795, HEVC 1793, nach `RELISTEN` aus dem Speicher 1794 und 1794. Je 0 fehlend, jedes Bild dekodiert, kein
+  `PS5 capture lost`, keine `Error`-Zeile im Stream.
+- **RTSP-Zeile:** `pair.py launch` der Mario-64-Demo ohne RTSP-Verbindung, 10 s bis zum Timeout: 0.6.9 schrieb zwei
+  `Error: RTSP: handle_read_plaintext(): … End of file`, 5 s auseinander, `f8dc3b15` zweimal keine. Der Debug-Build schreibt
+  dort `Debug: RTSP: a connection was closed before its first request`.
+- **App, normaler Weg:** Diagnose `files through the host: no`, `/data`, `/data/homebrew` und `/data/prosperosunshine` lesbar
+  und schreibbar, kein `.prospero_write_test` übrig. „Keys by game“ an und gespeichert gibt genau
+  `keyboard_mouse_profile_by_game = 1` in `sunshine.conf`, zurück auf Standard wieder die alte Datei.
+- **Debug-App über den Host** (`app_through_host`, zum ersten Mal auf einer Konsole): Sie installierte ihr ELF über `INSTALL`
+  (`OK installed`, Host-Datei und Slot danach mit dem Debug-ELF), die Diagnose sagt `files through the host: yes, forced by
+  app_through_host` und liest `host_diag.log` und `sunshine.log` über den Host, Speichern ging über den Host. `Restart host`:
+  `selfcheck done ms=221 problems=0`, H.264 1795 und HEVC 1791 Bilder, 0 fehlend.
+- **Tastaturprofile:** `KEYBOARD` nannte alle 43 Spiele je einmal (die 22 gezeigten und die 21 versteckten), beide von der
+  M.2-SSD dabei. `SETKEYBOARD PPSA99310 shooter` während eines Streams mit Tastatur und Maus als Pad (Testclient, die Demo
+  vorn): `OK saved`, nach 2,56 s `Keyboard pad profile shooter for PPSA99310, from your list`; `unset` nach 2,56 s zurück auf
+  `standard … from keyboard_mouse_profile`. In drei Läufen dauerten 4 von 6 Wechseln 2,56 bis 2,58 s. In
+  `keyboard_profiles.txt` änderte sich nur die Zeile der Demo. Falsches Profil und falsche Titel-ID wurden abgelehnt.
+- **Webseite gegen den echten Host** (mit einem Test-Login, der den des Besitzers ersetzte und danach mit `WEBLOGIN FORGET`
+  gelöscht wurde): `GET /api/keyboard` gleich der `KEYBOARD`-Antwort, `POST /api/keyboard/title` setzt und nimmt eine Zeile
+  weg und lehnt ein unbekanntes Profil mit 400 ab, die drei Tastatur-Einstellungen stehen in Gruppe 4; ohne Anmeldung
+  antworten beide Wege mit einer Ablehnung.
+- **Danach:** Zustandsdateien bytegleich mit vorher (bis auf den Stream-Verlauf), kein `control_lan`, `autoload.txt` unberührt.
+  Die Webseite ist aus, bis der Besitzer in der App wieder einen Login setzt.
+
+Nicht geprüft: die CI-Dateien des Tags. Ein Stream, dessen `/launch` die Demo startet, scheitert am Moduswechsel der Demo,
+mit 0.6.9 genauso (ROADMAP 23).
+
+### Absturz beim Beenden (2026-11-28, 13.00, Coredump und Linux-Test)
+
+In p73 stürzte `f8dc3b15` einmal in 12 Stopps nach `host shutting down` ab (`App Crash : PID=0xa1, reason=0xb`). Der
+Coredump der Konsole, nur lokal ausgewertet: Der Thread `nvhttp::47989` stand in asios `start_accept_op` (kqueue) auf
+`cmp [rax+0x60]` mit `rax = 0`. Auf dem Stack lag der Accept-Handler von `Server<HTTP>::accept()`, gerufen aus
+`io_context::run`. Der Thread `nvhttp`, der `stop()` ruft, wartete schon im `join`. Der Handler hatte also eine Verbindung
+angenommen und das nächste `async_accept` begonnen, während `stop()` den Acceptor schloss. `host_restart` verbindet sich nach
+`QUIT` alle 100 ms mit 47989, bis der Port zu ist. Der Code dazu ist seit 0.6.9 und davor unverändert.
+
+- **Linux:** Der neue Fall `stop_while_accepting` in `tests/deps/sws_server_test.cpp` stoppt einen Server 200-mal, während drei
+  Threads verbinden. Ein Build mit `-fsanitize=thread` meldete ohne Simple-Web-Server-Patch 0005 den Wettlauf und stürzte in
+  3 von 3 Läufen in `epoll_reactor::start_op` ab, an derselben Stelle wie auf der Konsole. Mit dem Patch gab es in 3 von 3 Läufen
+  keinen Absturz und keinen Wettlauf am Acceptor. Übrig blieben zwei Meldungen zu `Connection::close` in `stop()`, die nichts
+  freigeben (Begründung im Patch).
+- **Konsole, p74:** Ein Skript verband sich während jedes Stopps höchstens zehnmal je Sekunde mit 47989, 47984 und 48010 und
+  trennte gleich wieder. `f8dc3b15`: 41 Stopps, 0 Abstürze. `7734b054`: 49 Stopps, darunter 5 mit eingeschalteter Webseite
+  (auch 47990 im Skript), alle sauber (`mdns stopped`, `exit_value=0`, kein neuer Coredump). Weil auch der alte Build nicht
+  abstürzte, zeigt die Konsole den Fix nicht; belegt ist er nur durch den Linux-Test. Die Reihenfolge beim Stopp des
+  RTSP-Servers (Patch 0044) und die Accepts der HTTPS-Server sind nur im ELF nachgesehen und durch diese Stopps gelaufen.
 
 ### Release 0.6.9, CI-Dateien auf der Konsole (2026-11-26, 13.00)
 
