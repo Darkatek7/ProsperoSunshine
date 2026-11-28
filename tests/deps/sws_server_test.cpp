@@ -490,17 +490,70 @@ void ipv6_takes_ipv4() {
     }
 }
 
+// 9. stop() from another thread while clients keep connecting, as the host stops its servers: nvhttp's start() calls it
+// after the shutdown event, the web page's watcher thread while start() runs. Meanwhile host_restart knocks on 47989 every
+// 100 ms until it is closed, and a Moonlight with the console in its list asks for /serverinfo. stop() closed the
+// acceptor while the server's thread, done with a connection, handed the same acceptor the next accept; asio allows neither
+// from two threads at once, and the host crashed in start_accept_op on its way out (patches/simple-web-server/0005). The
+// window is narrow, so a pass here says little about the race itself: a -fsanitize=thread build of this file, run as
+// "sws_server_test stop_while_accepting", reports it without the patch. What this case holds on every build: start()
+// returns soon after stop(), without throwing, however the knocks fall.
+void stop_while_accepting() {
+    section = "stop while accepting";
+    for (int round = 0; round < 200; ++round) {
+        Instance s(Profile::gamestream);
+        std::atomic<bool> knocking{true};
+        std::vector<std::thread> knockers;
+        for (int t = 0; t < 3; ++t) {
+            knockers.emplace_back([&, t] {
+                while (knocking) {
+                    Client c(s.port());
+                    // One asks as Moonlight does; the others connect and close, as host_control::listening does.
+                    if (t == 0 && c.connected() && c.send(kPlainRequest)) c.read(200ms);
+                }
+            });
+        }
+        // The stop falls at a different point of the accepting each round.
+        std::this_thread::sleep_for(std::chrono::microseconds(round * 37 % 2000));
+        s.server.stop();
+        const auto until = std::chrono::steady_clock::now() + 3s;
+        while (!s.ended() && std::chrono::steady_clock::now() < until) std::this_thread::sleep_for(1ms);
+        knocking = false;
+        for (auto &k : knockers) k.join();
+        CHECK(s.failure().empty(), "round %d: start() threw (%s)", round, s.failure().c_str());
+        if (!s.ended()) {
+            // ~Instance would wait for it for ever.
+            std::fprintf(stderr, "FAIL [%s] round %d: start() still runs 3 s after stop()\n", section, round);
+            std::_Exit(1);
+        }
+    }
+}
+
 }  // namespace
 
-int main() {
-    chunked_cut_off();
-    bodies();
-    heads();
-    odd_bytes();
-    many_connections();
-    keep_alive();
-    chunk_size_wraps();
-    ipv6_takes_ipv4();
+int main(int argc, char **argv) {
+    // The names given run alone (for a sanitizer build that should see one case only); none runs every case.
+    const std::vector<std::pair<std::string_view, void (*)()>> cases = {
+        {"chunked_cut_off", chunked_cut_off},
+        {"bodies", bodies},
+        {"heads", heads},
+        {"odd_bytes", odd_bytes},
+        {"many_connections", many_connections},
+        {"keep_alive", keep_alive},
+        {"chunk_size_wraps", chunk_size_wraps},
+        {"ipv6_takes_ipv4", ipv6_takes_ipv4},
+        {"stop_while_accepting", stop_while_accepting},
+    };
+    for (int i = 1; i < argc; ++i) {
+        if (std::none_of(cases.begin(), cases.end(), [&](const auto &c) { return c.first == argv[i]; })) {
+            std::fprintf(stderr, "no case called %s\n", argv[i]);
+            return 2;
+        }
+    }
+    for (const auto &[case_name, run] : cases) {
+        if (argc > 1 && std::none_of(argv + 1, argv + argc, [&](const char *a) { return case_name == a; })) continue;
+        run();
+    }
     if (failures) {
         std::fprintf(stderr, "FAIL: %d checks failed\n", failures);
         return 1;

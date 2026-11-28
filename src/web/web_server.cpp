@@ -62,13 +62,16 @@ namespace prospero::web {
 namespace {
 // Simple-Web-Server's HTTPS server, which looks at a connection's first byte before the TLS handshake: a plain HTTP
 // request gets a redirect to https:// (web_plain.hpp) instead of a closed connection, which browsers show as an empty
-// response (issue 31). Everything else is the library's accept() as it is.
+// response (issue 31). Everything else is the library's accept() as it is, with its patch 0005: the watcher thread in
+// WebServer::run calls stop() while this runs, and the two take turns on the acceptor.
 class PageServer : public SimpleWeb::Server<SimpleWeb::HTTPS> {
 public:
     using SimpleWeb::Server<SimpleWeb::HTTPS>::Server;
 
 protected:
     void accept() override {
+        std::lock_guard<std::mutex> acceptor_lock(acceptor_mutex);
+        if (!acceptor->is_open()) return;
         auto connection = create_connection(*io_service, context);
         acceptor->async_accept(connection->socket->lowest_layer(), [this, connection](const SimpleWeb::error_code &ec) {
             auto lock = connection->handler_runner->continue_lock();

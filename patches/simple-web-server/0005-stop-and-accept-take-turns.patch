@@ -1,0 +1,72 @@
+ProsperoSunshine: stop() and accept() take turns on the acceptor
+
+The host stops its servers from another thread than the one that runs them: nvhttp's start() calls stop() on both
+GameStream servers after the shutdown event, the web page's watcher thread while start() runs. stop() closed the
+acceptor there while the server's thread, done with a connection, called async_accept() on the same acceptor from the
+accept handler; asio allows neither on one object from two threads at once. The close freed the reactor's descriptor
+state and cleared the acceptor's pointer to it between async_accept's check and its use, and the host crashed with a
+null pointer in start_accept_op while it stopped (1 stop in 12 in a console round; host_restart connects to 47989 every
+100 ms until it is closed). A -fsanitize=thread build of tests/deps/sws_server_test.cpp, case stop_while_accepting,
+reports the race and hits the same SEGV in epoll_reactor::start_op without this patch, in 3 runs of 3, and neither with
+it.
+
+A mutex of its own (start() holds start_stop_mutex when it calls accept()) is held by stop() around close() and by both
+accept()s around async_accept(), and accept() leaves a closed acceptor alone. The host's own accept() for the web page
+(src/web/web_server.cpp) and Sunshine's SunshineHTTPSServer::accept (its patch 0044) take it too. stop() also shuts down
+and cancels the open connections from its thread; the sanitizer names that as well, but it can't free anything: a
+connection is only deleted after it has left the set that stop() holds locked, and nothing closes a connection's socket
+before that.
+
+--- a/server_http.hpp
++++ b/server_http.hpp
+@@ -525,7 +525,11 @@
+ 
+       if(acceptor) {
+         error_code ec;
+-        acceptor->close(ec);
++        {
++          // ProsperoSunshine: accept() takes the same lock (acceptor_mutex).
++          std::lock_guard<std::mutex> acceptor_lock(acceptor_mutex);
++          acceptor->close(ec);
++        }
+ 
+         {
+           LockGuard lock(connections->mutex);
+@@ -546,6 +550,13 @@
+ 
+   protected:
+     std::mutex start_stop_mutex;
++    // ProsperoSunshine: held around the calls on the acceptor that can meet. accept() runs on the io_service's thread, called
++    // again from the last accept's handler, while stop() is called from another thread (the host's nvhttp and web page do
++    // so): asio allows neither on one object from two threads at once, and a close() that fell into async_accept() left the
++    // reactor a descriptor it had just freed (the host crashed in start_accept_op while it stopped). accept() leaves a
++    // closed acceptor alone: an accept on one would end at once with bad_descriptor, which is not operation_aborted, and
++    // start the next, for ever. Not start_stop_mutex: start() holds that when it calls accept().
++    std::mutex acceptor_mutex;
+ 
+     bool internal_io_service = false;
+ 
+@@ -876,6 +887,10 @@
+ 
+   protected:
+     void accept() override {
++      // ProsperoSunshine: see acceptor_mutex.
++      std::lock_guard<std::mutex> acceptor_lock(acceptor_mutex);
++      if(!acceptor->is_open())
++        return;
+       auto connection = create_connection(*io_service);
+ 
+       acceptor->async_accept(*connection->socket, [this, connection](const error_code &ec) {
+--- a/server_https.hpp
++++ b/server_https.hpp
+@@ -63,6 +63,10 @@
+     }
+ 
+     void accept() override {
++      // ProsperoSunshine: see acceptor_mutex in server_http.hpp.
++      std::lock_guard<std::mutex> acceptor_lock(acceptor_mutex);
++      if(!acceptor->is_open())
++        return;
+       auto connection = create_connection(*io_service, context);
+ 
+       acceptor->async_accept(connection->socket->lowest_layer(), [this, connection](const error_code &ec) {

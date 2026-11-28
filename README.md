@@ -338,11 +338,11 @@ console as before.
 
 **By game:** with **Keys by game** on (Controller in the app's Settings, `keyboard_mouse_profile_by_game = 1`, off by
 default) the running game picks the profile, from a map of about 3,000 PS4 and PS5 games made from Wikidata. In the web
-page's **Apps** tab, **Keyboard and mouse** gives any installed game a profile of your choice, which counts either way and
-for the game in front within two seconds. The choices go into `keyboard_profiles.txt` next to `sunshine.conf`, your own
-list, which also takes any title ID (homebrew and forwarders, such as your own Mario Kart 8 Deluxe forwarder set to
-`driving`) and profiles of your own with some keys changed; those show up in the Apps tab too. See
-[docs/keyboard-profiles.md](docs/keyboard-profiles.md).
+page's **Apps** tab, **Keyboard and mouse** gives any installed game a profile of your choice, which counts either way
+and for the game in front within a few seconds of the next key or mouse input. The choices go into
+`keyboard_profiles.txt` next to `sunshine.conf`, your own list, which also takes any title ID (homebrew and forwarders,
+such as your own Mario Kart 8 Deluxe forwarder set to `driving`) and profiles of your own with some keys changed; those
+show up in the Apps tab too. See [docs/keyboard-profiles.md](docs/keyboard-profiles.md).
 
 **When a controller connects** to that device, it takes the keyboard's place quietly: the same player, so the console
 doesn't ask again. From then on the keyboard and mouse are the console's keyboard and mouse, as before. If that

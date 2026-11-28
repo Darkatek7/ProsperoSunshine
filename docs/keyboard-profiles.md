@@ -213,9 +213,10 @@ whenever the game in front changes; mistakes go to `sunshine.log` with their lin
 
 The web page's **Apps** tab does the same per installed game, under **Keyboard and mouse**: each game shows what it gets
 without a choice (Automatic, with where that comes from) and takes any profile, your own ones too. A choice there counts
-within two seconds, for the game in front as well. It changes only that game's line: the value after its `=` (comments and
-spacing stay), or its commented line loses the `#`, or a new line goes at the end; Automatic puts a `#` in front of the
-game's lines again. Nothing else in the file changes, and the host never changes your lines on its own.
+within a few seconds of the next key or mouse input, for the game in front as well (at the host's next look at the
+game). It changes only that game's line: the value after its `=` (comments and spacing stay), or its commented line
+loses the `#`, or a new line goes at the end; Automatic puts a `#` in front of the game's lines again. Nothing else in
+the file changes, and the host never changes your lines on its own.
 
 ```
 # A line "TITLEID = profile" picks the profile for that title: any title ID of the console, also homebrew and forwarders.

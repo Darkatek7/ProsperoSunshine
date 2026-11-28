@@ -128,6 +128,14 @@ nur ein erfolgreicher Build.
     bis 69 ms statt 97 bis 104 ms (`STATUS.md`, „Verlust ohne Keyframe, Text im Hintergrund und echtes Moonlight“). Offen, und
     der Grund für „aus“: die Hardware-Decoder der Geräte (Windows, Android, iOS, Fernseher), 4K, andere Firmware, ein Weg mit
     langer Laufzeit. Danach: ob der Schalter in App und Webseite gehört und ob er ab Werk an sein kann.
+23. **Ein Stream, dessen `/launch` die Mario-64-Demo startet** (Konsolenrunde p73, 0.6.9 genauso, 4 von 4 Versuchen): Die erste
+    Öffnung der Aufnahme fällt in den Moduswechsel `0x138 → 0 → 0x140`, gibt nach 25 Wiederholungen (etwa 2 s) mit
+    `0x81950008` auf, und die Sitzung endet mit `PS5 capture failed to start: -1`. Etwa 1 s später ist `0x140` da. p36 bekam für
+    denselben Start `0x144` nach 6 Wiederholungen; ob „120-Hz-Ausgabe: Automatisch“ der Demo jetzt einen anderen Modus gibt,
+    ist ungeprüft. Die Wiederholungen bleiben mit Absicht unter den 2 s, die der Client auf den Stream wartet
+    (`capture.c`, `OpenVideo`). Offen: ob die erste Öffnung nach einem `/launch` länger warten darf, etwa weil der Client
+    die Zeit erst ab einem späteren Schritt misst, oder ob die Aufnahme bis zum neuen Modus mit einem Platzhalterbild
+    beginnen kann.
 
 ## Bis 1.0
 

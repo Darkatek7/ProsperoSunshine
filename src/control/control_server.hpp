@@ -42,8 +42,8 @@
 //                                  one it gets and from where (list, title_id, store_concept, name or default), and the
 //                                  same without its line; then "END"
 //   SETKEYBOARD <title id> <profile|unset> -> gives a title a profile in keyboard_profiles.txt, or comments its lines out
-//                                  ("OK saved" / "ERR ..."; input/profile_list_edit.hpp). Counts within two seconds, for
-//                                  the game in front too.
+//                                  ("OK saved" / "ERR ..."; input/profile_list_edit.hpp). Counts at the keyboard pad's next
+//                                  look at the game in front, for that game too (Sunshine patch 0043).
 //   MENUS                       -> "OK <profiles|unset>": the profiles that reach the console's menus (menu_access.hpp:
 //                                  none, or ids separated by commas), "unset" while they aren't chosen
 //   SETMENUS <profiles|unset>   -> chooses them ("OK saved" / "ERR ..."); "unset" goes back to the host's role deciding.

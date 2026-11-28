@@ -1091,7 +1091,8 @@ function renderApps(apps) {
 }
 
 // Keyboard and mouse: the profile each installed game gets (docs/keyboard-profiles.md). The host writes a choice into
-// keyboard_profiles.txt, where the player's own profiles live too, and the keyboard pad takes it within two seconds.
+// keyboard_profiles.txt, where the player's own profiles live too, and the keyboard pad takes it at its next look at the
+// game in front (at most every two seconds, while keys or mouse are in use).
 const profileLabel = (name) => name.charAt(0).toUpperCase() + name.slice(1);
 const profileFrom = { list: 'chosen here', title_id: 'title map', store_concept: 'title map', name: 'title map', default: 'default profile' };
 

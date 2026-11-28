@@ -1,0 +1,56 @@
+ProsperoSunshine: the GameStream HTTPS and RTSP servers stop without racing their accept
+
+Both are stopped from another thread than the one that runs them, and both accept again from the handler of the last
+accept, on the acceptor that the stop closes: asio allows neither on one object from two threads at once. The HTTP server
+on 47989 crashed the host that way while it stopped (Simple-Web-Server patch 0005, which gives ServerBase the
+acceptor_mutex). SunshineHTTPSServer has an accept() of its own for the client certificate check; it takes the same lock
+and leaves a closed acceptor alone. The RTSP server is no Simple-Web-Server one: rtsp::start now only stops the
+io_context from its thread (io_context::stop is safe from any thread), waits for the handler thread to leave its loop,
+and calls stop(), which closes the acceptor, after that. bind() restarts the context for a start after rest mode, as
+before.
+
+--- a/src/nvhttp.cpp
++++ b/src/nvhttp.cpp
+@@ -139,6 +139,12 @@
+      * @details Keep each handler's scope guard alive until all access to the server has finished.
+      */
+     void accept() override {
++      // ProsperoSunshine: start() runs this on the server's thread, called again from the last accept's handler, while
++      // stop() comes from nvhttp::start's thread; the two take turns on the acceptor (Simple-Web-Server patch 0005).
++      std::lock_guard<std::mutex> acceptor_lock(acceptor_mutex);
++      if (!acceptor->is_open()) {
++        return;
++      }
+       auto connection = create_connection(*io_service, context);
+ 
+       acceptor->async_accept(connection->socket->lowest_layer(), [this, connection](const SimpleWeb::error_code &ec) {
+--- a/src/rtsp.cpp
++++ b/src/rtsp.cpp
+@@ -735,6 +735,13 @@
+     }
+ 
+     /**
++     * @brief Make iterate() return at once; safe from any thread, unlike stop().
++     */
++    void interrupt() {
++      io_context.stop();
++    }
++
++    /**
+      * @brief Stop the RTSP server.
+      */
+     void stop() {
+@@ -1418,8 +1425,12 @@
+     shutdown_event->view();
+ 
+     // Stop the server and join the server thread
+-    server.stop();
++    // ProsperoSunshine: the acceptor belongs to the handler thread, whose handle_accept() calls async_accept on it, and
++    // asio allows no close() from here meanwhile. So the context is only stopped from here (the loop sees the shutdown
++    // event and ends), and the acceptor is closed once that thread has ended.
++    server.interrupt();
+     rtsp_thread.join();
++    server.stop();
+   }
+ 
+   /**

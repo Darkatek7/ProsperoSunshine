@@ -1,4 +1,4 @@
-ProsperoSunshine: a profile the web page gives the game in front counts at once
+ProsperoSunshine: a profile the web page gives the game in front counts at the next look
 
 The keyboard pad looks up the game in front every two seconds while the keys and mouse are in use, and reads
 keyboard_profiles.txt only when that game changes (patch 0018). When the web page's Apps tab gives a title a profile
@@ -22,7 +22,7 @@ next game on.
     * at most every two seconds while the keys and the mouse are in use, and its profile and the list anew only when it
 -   * changes, so an edited list counts from the next game on.
 +   * changes, so a list edited by hand counts from the next game on. One the web page changed (SETKEYBOARD on the control
-+   * socket, prospero::profile_list_edited) counts within those two seconds, for the game in front too.
++   * socket, prospero::profile_list_edited) counts at the next of those looks, for the game in front too.
     *
     * @return The profile to play with.
     */

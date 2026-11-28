@@ -6,15 +6,22 @@
 
 - **Keyboard and mouse profiles without editing files.** The web page's Apps tab has a new card, **Keyboard and mouse**:
   every installed game shows the profile it gets and where that comes from, and takes any profile, your own ones from
-  `keyboard_profiles.txt` too. A choice counts within two seconds, also for the game in front. The web page's Settings
-  have **Keyboard profile**, **Keys by game** and **Mouse speed** under Controller; the app has **Keys by game** (its page
-  has no room for more). The host writes a choice into `keyboard_profiles.txt` and leaves the rest of the file as it was.
+  `keyboard_profiles.txt` too. A choice counts within a few seconds of the next key or mouse input, also for the game in
+  front. The web page's Settings have **Keyboard profile**, **Keys by game** and **Mouse speed** under Controller; the
+  app has **Keys by game** (its page has no room for more). The host writes a choice into `keyboard_profiles.txt` and
+  leaves the rest of the file as it was.
 - **The debug app can be sent through the host on any console:** with an empty `/data/prosperosunshine/app_through_host`
   it reads and writes its files through the running host, to test that way where it isn't needed (README, "Debug
   build"). The normal app ignores the file.
 
 ### Fixed
 
+- **The host could crash on its way out.** Now and then (1 stop in 12 in a test round) it crashed after `host shutting
+  down`, in every version so far: the HTTP server on port 47989 was closed from one thread while it took the next
+  connection on another. `host_restart` connects to that port every 100 ms until it is closed, and a Moonlight that
+  lists the console asks it now and then. The process was ending anyway and the next host started normally, but the
+  console kept a crash report and the rest of the stop (the mDNS goodbye) was skipped. Now the stop and the accept take
+  turns, on all of the host's servers: 47984, 47989, RTSP and the web page.
 - **An `Error` line in the log that was none.** At the start of a stream, `sunshine.log` now and then got one or two
   `Error: RTSP: handle_read_plaintext(): Couldn't read from tcp socket: End of file` lines. They came from the host's own
   check of its ports every 5 seconds, not from a client, and nothing was wrong. The host no longer logs that as an error.
