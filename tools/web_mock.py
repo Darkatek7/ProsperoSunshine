@@ -90,7 +90,8 @@ def overview():
 
 
 SETTINGS = {
-    "groups": [{"id": 0, "caption": "HOST", "note": ""}, {"id": 1, "caption": "NETWORK", "note": "Made-up options of the mock."}],
+    "groups": [{"id": 0, "caption": "HOST", "note": ""}, {"id": 1, "caption": "NETWORK", "note": "Made-up options of the mock."},
+               {"id": 4, "caption": "CONTROLLER", "note": ""}],
     "options": [
         {"key": "sunshine_name", "group": 0, "label": "Host name", "help": "The name Moonlight shows.", "kind": "text",
          "default": "network name", "choices": [], "min": 0, "max": 0, "step": 1, "app_only": False, "locked": False, "state": "",
@@ -104,8 +105,44 @@ SETTINGS = {
         {"key": "upnp", "group": 1, "label": "UPnP", "help": "Asks the router to forward the ports.", "kind": "toggle",
          "default": "off", "choices": [], "min": 0, "max": 0, "step": 1, "app_only": False, "locked": False, "state": "",
          "value": "on"},
+        # The keyboard's three (app/src/psapp/conf.cpp): the first in the app's list, the other two in web_option_specs.
+        {"key": "keyboard_mouse_profile_by_game", "group": 4, "label": "Keys by game",
+         "help": "On: a keyboard and mouse get the keys that suit the game in front, from the host's title map.",
+         "kind": "toggle", "default": "Off", "choices": [], "min": 0, "max": 0, "step": 1, "app_only": False, "locked": False,
+         "state": "", "value": "1"},
+        {"key": "keyboard_mouse_profile", "group": 4, "label": "Keyboard profile",
+         "help": "The keys a keyboard and mouse play with where nothing picks a profile for the game.", "kind": "choice",
+         "default": "Standard", "choices": [{"value": p, "label": p.capitalize()} for p in
+                                            ["standard", "action", "shooter", "driving", "fighting", "platformer", "sports"]],
+         "min": 0, "max": 0, "step": 1, "app_only": False, "locked": False, "state": "", "value": None},
+        {"key": "keyboard_mouse_sensitivity", "group": 4, "label": "Mouse speed",
+         "help": "Where the mouse's speed starts on a device that hasn't turned it with Ctrl+Alt and the wheel.", "kind": "number",
+         "default": "100 %", "choices": [], "min": 10, "max": 1000, "step": 10, "app_only": False, "locked": False, "state": "",
+         "value": None},
     ],
 }
+# /api/keyboard (src/web/web_server.cpp): the profile by game for the Apps tab; POST /api/keyboard/title changes it here.
+KEYBOARD = {
+    "default": "standard", "by_game": True, "pad": True, "problems": 1,
+    "profiles": ["standard", "action", "shooter", "driving", "fighting", "platformer", "sports"],
+    "own": ["kart"],
+    "titles": [
+        {"id": "PPSA00001", "named": "", "gets": "driving", "from": "title_id", "auto": "driving", "auto_from": "title_id",
+         "name": "A game"},
+        {"id": "PPSA00002", "named": "kart", "gets": "kart", "from": "list", "auto": "standard", "auto_from": "default",
+         "name": "Another game"},
+    ],
+}
+
+
+def set_keyboard(body):
+    for title in KEYBOARD["titles"]:
+        if title["id"] == body.get("id"):
+            profile = body.get("profile")
+            title["named"] = profile or ""
+            title["gets"], title["from"] = (profile, "list") if profile else (title["auto"], title["auto_from"])
+
+
 ANSWERS = {
     "/api/session": lambda: {"user": "owner", "settings_pending": False},
     "/api/overview": overview,
@@ -113,6 +150,7 @@ ANSWERS = {
     "/api/apps": lambda: {"apps": [{"id": "PPSA00001", "state": "shown", "name": "A game"},
                                    {"id": "PPSA00002", "state": "hidden", "name": "Another game"}]},
     "/api/settings": lambda: SETTINGS,
+    "/api/keyboard": lambda: KEYBOARD,
 }
 LOG = "\n".join(f"[2026-01-01 12:00:{i:02d}.000]: Info: a line of the mock's log, number {i}" for i in range(40))
 TYPES = {"html": "text/html; charset=utf-8", "js": "text/javascript", "css": "text/css"}
@@ -145,7 +183,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.reply(f.read(), TYPES[name.rsplit(".", 1)[1]])
 
     def do_POST(self):
-        self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        if self.path.split("?")[0] == "/api/keyboard/title":
+            set_keyboard(json.loads(body or b"{}"))
         self.reply(json.dumps({"ok": True, "message": ""}))
 
 

@@ -425,7 +425,10 @@ void Host::read_files()
     if (have_config)
     {
         const Config config = Config::parse(text);
+        // The web page's own options too, so that the report lists them; the settings page shows only option_specs().
         for (const OptionSpec &spec : option_specs())
+            values[spec.key] = option_value(config, spec);
+        for (const OptionSpec &spec : web_option_specs())
             values[spec.key] = option_value(config, spec);
         if (upnp_enabled(text))
             host_upnp_ = true;
@@ -433,6 +436,8 @@ void Host::read_files()
     else
     {
         for (const OptionSpec &spec : option_specs())
+            values[spec.key] = std::nullopt;
+        for (const OptionSpec &spec : web_option_specs())
             values[spec.key] = std::nullopt;
         if (io::exists(kConfPath))
             error = "sunshine.conf could not be read";
@@ -952,7 +957,8 @@ void Host::do_save(const Job &job)
     }
     if (!job.flag)
     {
-        finish(io::port_open(kControlPort) ? "Saved. All but Controller's need a host restart." : "Saved",
+        finish(io::port_open(kControlPort) ? "Saved. Vibration, rumble and knock count now, the rest after a host restart."
+                                           : "Saved",
                true);
         return;
     }

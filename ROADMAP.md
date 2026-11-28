@@ -80,9 +80,12 @@ nur ein erfolgreicher Build.
     - PIN-Eingabe, „End stream“ während eines Streams, Umbenennen und Entfernen über die Seite;
     - „Save and restart host“, 403 von einer Adresse außerhalb, die Seite nach echtem Ruhemodus.
     Später, falls gewünscht: Geräte sperren, die Host-Rolle je Gerät auf der Seite zeigen.
-15. **Tastatur und Maus als Controller (P8.10):** seit 0.3.3 im Release. Offen sind die Einstellungen dazu in der App und eine
-    Seite, auf der man einem installierten Spiel ein Profil gibt; heute geht das nur über `sunshine.conf` und
-    `keyboard_profiles.txt` (`docs/keyboard-profiles.md`). Ungeprüft in einem Spiel sind die Profile
+15. **Tastatur und Maus als Controller (P8.10):** seit 0.3.3 im Release. Auf `main`, noch in keinem Release und ohne
+    Konsolenrunde: Die Webseite hat Standardprofil, „Keys by game“ und Mausgeschwindigkeit unter Settings, die App nur „Keys
+    by game“ (ihre Seite hat keinen Platz mehr), und der Apps-Tab der Webseite gibt jedem installierten Spiel ein Profil
+    (`KEYBOARD`/`SETKEYBOARD`, `src/input/profile_list_edit.hpp`, Sunshine-Patch 0043), gegen den Nachbau der Host-API
+    geprüft. Offen: die Konsolenrunde dazu; eigene Profile und geänderte Tasten gibt es weiter nur in `keyboard_profiles.txt`
+    (`docs/keyboard-profiles.md`). Ungeprüft in einem Spiel sind die Profile
     `driving`, `fighting`, `platformer` und `sports` und Firmware 13.00 (`docs/status-archive.md`, „Tastatur und Maus als
     Controller“).
 16. **Große Dateien aufteilen:** `src/sunshine/platform_ps5.cpp` (jetzt `platform_ps5.cpp`, `audio_ps5.cpp`, `input_ps5.cpp`,

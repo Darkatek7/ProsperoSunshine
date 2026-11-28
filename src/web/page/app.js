@@ -1090,12 +1090,54 @@ function renderApps(apps) {
   }));
 }
 
+// Keyboard and mouse: the profile each installed game gets (docs/keyboard-profiles.md). The host writes a choice into
+// keyboard_profiles.txt, where the player's own profiles live too, and the keyboard pad takes it within two seconds.
+const profileLabel = (name) => name.charAt(0).toUpperCase() + name.slice(1);
+const profileFrom = { list: 'chosen here', title_id: 'title map', store_concept: 'title map', name: 'title map', default: 'default profile' };
+
+function renderKeyboard(k) {
+  const settingsLink = el('button', { type: 'button', class: 'inline-link', text: 'Settings', onclick: () => selectTab('settings') });
+  const parts = [];
+  if (!k.pad) parts.push('Keyboard and mouse as a controller is off (keyboard_mouse_pad = 0 in sunshine.conf): these choices count once it is on again. ');
+  parts.push(`Default profile: ${profileLabel(k.default)}. Keys by game: ${k.by_game ? 'on' : 'off'}. Both are in `, settingsLink, '.');
+  if (k.problems) parts.push(` keyboard_profiles.txt has ${k.problems} line${k.problems === 1 ? '' : 's'} the host can't read; sunshine.log names ${k.problems === 1 ? 'it' : 'them'}.`);
+  $('keyboard-state').replaceChildren(...parts);
+  const list = $('keyboard-titles');
+  if (!k.titles.length) {
+    list.replaceChildren(el('li', { class: 'empty', text: 'No game or app is installed.' }));
+    return;
+  }
+  const sorted = [...k.titles].sort((a, b) => (a.name || '\uffff').localeCompare(b.name || '\uffff') || a.id.localeCompare(b.id));
+  list.replaceChildren(...sorted.map((t) => {
+    const select = el('select', { 'aria-label': `Keyboard profile for ${t.name || t.id}` },
+      el('option', { value: '', text: `Automatic: ${profileLabel(t.auto)} (${profileFrom[t.auto_from] || t.auto_from})` }),
+      ...k.profiles.map((p) => el('option', { value: p, text: profileLabel(p) })),
+      ...k.own.map((p) => el('option', { value: p, text: `${p} (your own)` })));
+    select.value = t.named || '';
+    select.addEventListener('change', () => setKeyboardProfile(t, select.value || null));
+    return el('li', {},
+      el('div', { class: 'grow' },
+        el('div', { class: 'title', text: t.name || t.id }),
+        el('div', { class: 'sub', text: t.id })),
+      select);
+  }));
+}
+
 async function loadApps() {
   try {
-    const [apps, overview] = await Promise.all([api('/api/apps'), api('/api/overview')]);
+    const [apps, overview, keyboard] = await Promise.all([api('/api/apps'), api('/api/overview'), api('/api/keyboard')]);
     renderAppsTrusted(overview.devices, overview.trusted || []);
     renderApps(apps.apps);
+    renderKeyboard(keyboard);
   } catch (e) { failed(e); }
+}
+
+async function setKeyboardProfile(title, profile) {
+  try {
+    await api('/api/keyboard/title', { id: title.id, profile });
+    notice(profile ? `${title.name || title.id} plays with ${profileLabel(profile)} on a keyboard.` : `${title.name || title.id} plays with its automatic profile on a keyboard.`);
+    loadApps();
+  } catch (e) { failed(e); loadApps(); }
 }
 
 async function setAppHidden(app, hidden) {

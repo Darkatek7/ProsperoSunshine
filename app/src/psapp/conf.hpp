@@ -70,6 +70,10 @@ NumberSteps number_steps(const OptionSpec &spec);
 
 // The options the app offers, group by group in the settings page's order.
 const std::vector<OptionSpec> &option_specs();
+// Options the web page's Settings tab has besides those, each in its group after the app's: the app's page has no room left
+// (settings_layout.cpp), and these few are for players with a keyboard, who have a browser too.
+const std::vector<OptionSpec> &web_option_specs();
+// In either list.
 const OptionSpec *find_option(std::string_view key);
 // The option's place in experimental_list.h (ps_exp_switch_at), or -1 for an option that is no such switch.
 int experimental_switch(const OptionSpec &spec);

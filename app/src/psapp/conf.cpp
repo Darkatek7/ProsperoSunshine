@@ -106,6 +106,11 @@ const std::vector<OptionSpec> &option_specs()
         {G::controller, I::sliders, "trigger_knock_strength", "Trigger knock",
          "Softens the hard knock some games send when firing. 0 turns it off.",
          OptionKind::number, "100 %", {}, 0, 100, 5, 100, "%"},
+        // The host reads this one at its start (Sunshine patch 0018, docs/keyboard-profiles.md); the web page has the
+        // keyboard's other two (web_option_specs) and its choice per game.
+        {G::controller, I::sliders, "keyboard_mouse_profile_by_game", "Keys by game",
+         "On: a keyboard and mouse get the keys that suit the game in front, from the host's title map. The web page picks them per game.",
+         OptionKind::toggle, "Off", {}, 0, 0, 1, 0},
         };
         // The Experimental switches, which the host reads itself (src/sunshine/main_ps5.cpp), not Sunshine.
         for (int i = 0; i < PS_EXP_SWITCH_COUNT; ++i)
@@ -120,6 +125,31 @@ const std::vector<OptionSpec> &option_specs()
                         OptionKind::toggle, "Off", {}, 0, 0, 1, 0});
         return list;
     }();
+    return specs;
+}
+
+const std::vector<OptionSpec> &web_option_specs()
+{
+    using G = OptionGroup;
+    using I = icons::Icon;
+    // Both read by the host at its start (Sunshine patch 0017). The profiles are the host's (src/input/keyboard_pad.hpp,
+    // profile_names, which tests/web_settings_test.cpp holds this list to).
+    static const std::vector<OptionSpec> specs = {
+        {G::controller, I::sliders, "keyboard_mouse_profile", "Keyboard profile",
+         "The keys a keyboard and mouse play with where nothing picks a profile for the game: Keys by game, or a choice in Apps.",
+         OptionKind::choice, "Standard",
+         {{"standard", "Standard"},
+          {"action", "Action"},
+          {"shooter", "Shooter"},
+          {"driving", "Driving"},
+          {"fighting", "Fighting"},
+          {"platformer", "Platformer"},
+          {"sports", "Sports"}},
+         0, 0, 1, 0},
+        {G::controller, I::sliders, "keyboard_mouse_sensitivity", "Mouse speed",
+         "Where the mouse's speed starts on a device that hasn't turned it with Ctrl+Alt and the wheel. 100 is the base speed.",
+         OptionKind::number, "100 %", {}, 10, 1000, 10, 100, "%"},
+    };
     return specs;
 }
 
@@ -139,10 +169,13 @@ NumberSteps number_steps(const OptionSpec &spec)
 
 const OptionSpec *find_option(std::string_view key)
 {
-    for (const OptionSpec &spec : option_specs())
+    for (const std::vector<OptionSpec> *list : {&option_specs(), &web_option_specs()})
     {
-        if (key == spec.key)
-            return &spec;
+        for (const OptionSpec &spec : *list)
+        {
+            if (key == spec.key)
+                return &spec;
+        }
     }
     return nullptr;
 }

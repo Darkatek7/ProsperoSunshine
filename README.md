@@ -296,9 +296,10 @@ Shift stay down until they are tapped again. Both work on the keys of a device w
 controller, say, or one connected by Bluetooth): they press that controller's PS, with the same rules for who may. When a
 controller of Moonlight for iPhone or iPad joins that may press PS, the console says how, once per device.
 
-The rest depends on the profile, `keyboard_mouse_profile` in `sunshine.conf` (`standard` unless set). They follow the
-keyboard layouts of PC games of each kind; [docs/keyboard-profiles.md](docs/keyboard-profiles.md) has every table and why.
-All of it is optional: without settings, `standard` applies.
+The rest depends on the profile: **Keyboard profile** in the web page's Settings (`keyboard_mouse_profile` in
+`sunshine.conf`, `standard` unless set). They follow the keyboard layouts of PC games of each kind;
+[docs/keyboard-profiles.md](docs/keyboard-profiles.md) has every table and why. All of it is optional: without settings,
+`standard` applies.
 
 | Profile | For | What changes |
 |---|---|---|
@@ -335,11 +336,13 @@ suspended behind the home screen), the keys are the menu keys anyway.
 on-screen keyboard (✕ on Enter picks a letter), connect a controller, or set `keyboard_mouse_pad = 0` to send the keys to the
 console as before.
 
-**By game:** with `keyboard_mouse_profile_by_game = 1` (off by default) the running game picks the profile, from a map
-of about 3,000 PS4 and PS5 games made from Wikidata. `keyboard_profiles.txt` next to `sunshine.conf` is your own list,
-which counts either way: a profile per title (any title ID, also homebrew and forwarders, such as your own Mario Kart 8
-Deluxe forwarder set to `driving`) and profiles of your own with some keys changed. The host writes your installed games
-into it as comments, so choosing one is removing a `#`. See [docs/keyboard-profiles.md](docs/keyboard-profiles.md).
+**By game:** with **Keys by game** on (Controller in the app's Settings, `keyboard_mouse_profile_by_game = 1`, off by
+default) the running game picks the profile, from a map of about 3,000 PS4 and PS5 games made from Wikidata. In the web
+page's **Apps** tab, **Keyboard and mouse** gives any installed game a profile of your choice, which counts either way and
+for the game in front within two seconds. The choices go into `keyboard_profiles.txt` next to `sunshine.conf`, your own
+list, which also takes any title ID (homebrew and forwarders, such as your own Mario Kart 8 Deluxe forwarder set to
+`driving`) and profiles of your own with some keys changed; those show up in the Apps tab too. See
+[docs/keyboard-profiles.md](docs/keyboard-profiles.md).
 
 **When a controller connects** to that device, it takes the keyboard's place quietly: the same player, so the console
 doesn't ask again. From then on the keyboard and mouse are the console's keyboard and mouse, as before. If that
@@ -536,8 +539,8 @@ If you try it from outside, an issue with `sunshine.log` and what happened helps
   its own ([Keyboard and mouse as a controller](#keyboard-and-mouse-as-a-controller)), also for the host, who then can't
   type into text fields with the keyboard; use the console's on-screen keyboard, connect a controller, or set
   `keyboard_mouse_pad = 0` in `sunshine.conf`. In Moonlight's absolute mouse mode the mouse stops at the edge of the
-  window. Keys are remapped in `keyboard_profiles.txt` only, not yet in the app, and a game's own dead zone and top turning
-  speed make the mouse feel unlike on a PC.
+  window. Keys are remapped in `keyboard_profiles.txt` only, not in the app or the web page, and a game's own dead zone and
+  top turning speed make the mouse feel unlike on a PC.
 - Sound is stereo unless you turn on **Surround** under Experimental in the app's Settings. With it, a Moonlight that asks for
   5.1 or 7.1 gets the console's own multichannel sound. Which channel goes to which speaker is a guess so far (the order of the
   console's 8-channel audio output): the console used for testing outputs stereo, and then only front left and right carry

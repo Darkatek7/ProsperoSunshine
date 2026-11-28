@@ -126,11 +126,12 @@ std::string build_report(ControlServer &control) {
         return it == state.end() ? std::string() : it->second;
     };
 
-    // sunshine.conf as the app reads it: the keys of option_specs(), sorted like the app's map.
+    // sunshine.conf as the app reads it: the keys of option_specs() and web_option_specs(), sorted like the app's map.
     std::map<std::string, std::optional<std::string>> settings;
     {
         const psapp::Config config = psapp::Config::parse(read_tail(conf_path, 1u << 20).value_or(std::string()));
         for (const psapp::OptionSpec &spec : psapp::option_specs()) settings[spec.key] = psapp::option_value(config, spec);
+        for (const psapp::OptionSpec &spec : psapp::web_option_specs()) settings[spec.key] = psapp::option_value(config, spec);
     }
 
     const std::optional<std::string> host_file = read_tail(diag_path, 4u << 20);

@@ -50,11 +50,8 @@ Move opposite(Move move)
 const std::set<std::pair<std::string, std::string>> kOneWay = {
     // Host, Playing and Error correction's six tiles over Network's three and Controller's two.
     {"min_log_level", "down"}, // to upnp, whose up is quit closes game
-    // Controller's two tiles over its third.
-    {"haptic_strength", "down"}, // to trigger_knock_strength, whose up is vibration
-    // Network's three and Controller's one over the Experimental six.
+    // Network's three and Controller's two over the Experimental six.
     {"experimental_large_modes", "up"}, // to wan_encryption_mode, whose down is HDR
-    {"surround_sound", "up"},           // to trigger_knock_strength, whose down is below 1080p
     // The Experimental six over the four actions.
     {"experimental_high_bitrate", "down"}, // to revert, whose up is 1440p and 4K
     {"experimental_small_modes", "down"},  // to web, whose up is surround

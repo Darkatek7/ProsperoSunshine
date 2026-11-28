@@ -707,7 +707,8 @@ void Screen::draw_settings(hui::gfx::DrawList &list, std::uint32_t glass) const
         extra = std::string("Default: ") + spec.default_label;
     }
     else if (tile_ == tiles)
-        help = "Writes the changes to sunshine.conf. They apply when the host starts next, Controller's within seconds.";
+        help = "Writes the changes to sunshine.conf. They apply when the host starts next; vibration, rumble and knock within "
+               "seconds.";
     else if (tile_ == tiles + 1)
         help = "Writes the changes and restarts the host, which ends a running stream.";
     else if (tile_ == tiles + 2)

@@ -1,0 +1,38 @@
+ProsperoSunshine: a profile the web page gives the game in front counts at once
+
+The keyboard pad looks up the game in front every two seconds while the keys and mouse are in use, and reads
+keyboard_profiles.txt only when that game changes (patch 0018). When the web page's Apps tab gives a title a profile
+(SETKEYBOARD on the control socket, src/input/profile_list_edit.hpp), it sets prospero::profile_list_edited, and the next
+look reads the list and picks the profile anew, for the game in front too. A list edited by hand still counts from the
+next game on.
+
+--- a/src/input.cpp
++++ b/src/input.cpp
+@@ -36,6 +36,7 @@
+ #include "apps/titles.hpp"
+ #include "input.h"
+ #include "input/keyboard_pad.hpp"
++#include "input/profile_list_edit.hpp"
+ #include "input/title_profile.hpp"
+ #include "logging.h"
+ #include "platform/common.h"
+@@ -866,7 +867,8 @@
+    * running title is sceLncUtilGetAppIdOfRunningBigApp's, so a suspended game keeps its profile in the console's menus,
+    * and an app of the console's such as Settings is a title without one (keyboard_mouse_profile). The game is looked up
+    * at most every two seconds while the keys and the mouse are in use, and its profile and the list anew only when it
+-   * changes, so an edited list counts from the next game on.
++   * changes, so a list edited by hand counts from the next game on. One the web page changed (SETKEYBOARD on the control
++   * socket, prospero::profile_list_edited) counts within those two seconds, for the game in front too.
+    *
+    * @return The profile to play with.
+    */
+@@ -883,7 +885,8 @@
+     checked = now;
+     char running[16];
+     const std::string in_front = ps_title_running(running) > 0 ? running : "";
+-    if (in_front == title) {
++    const bool edited = prospero::profile_list_edited.exchange(false);
++    if (in_front == title && !edited) {
+       return choice;
+     }
+     title = in_front;

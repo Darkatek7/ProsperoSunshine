@@ -3,7 +3,8 @@
 A device without a controller plays with its keyboard and mouse as a controller of its own
 ([README](../README.md#keyboard-and-mouse-as-a-controller)). How the keys and mouse map depends on the profile. Everything
 here is optional: without any setting, the `standard` profile applies and nothing else changes. The profiles, the map by
-game and your own list are for those who want them, and for now they live in files, not in the app.
+game and your own list are for those who want them. The web page has the settings (Settings, under Controller) and a
+profile per game (Apps, Keyboard and mouse), the app has Keys by game; profiles of your own and changed keys live in a file.
 
 ## Why these keys
 
@@ -37,8 +38,8 @@ A key gives full deflection, two keys on one stick a diagonal, and opposite keys
 since everyone streaming would see it: turn until the camera feels right. A device starts at 100 %, with 24 steps either
 side, from 10 % to 1000 % of the base speed, each about 21 % faster than the last, so a step feels the same anywhere. The
 host keeps it per device and profile in `keyboard_sensitivity.txt` (a device is a hash of its pairing, not its address),
-so a laptop can keep shooters faster than action games. `keyboard_mouse_sensitivity` (in percent) in `sunshine.conf` moves
-where a new device starts. A game's own dead zone and top turning speed still apply: once the stick is at full, the camera
+so a laptop can keep shooters faster than action games. **Mouse speed** in the web page's Settings
+(`keyboard_mouse_sensitivity` in `sunshine.conf`, in percent) moves where a new device starts. A game's own dead zone and top turning speed still apply: once the stick is at full, the camera
 turns no faster (GTA III and Elden Ring cap it), so raise the game's own camera sensitivity first. Before the controller is
 there, Ctrl+Alt and the wheel don't add it, except that where Ctrl is a button (`shooter`, `sports`), Ctrl pressed first
 counts as a press and adds the controller like any other; press Alt first, then Ctrl.
@@ -54,7 +55,8 @@ Settings, count as a title without a profile and get `keyboard_mouse_profile`. H
 
 ## The profiles
 
-`keyboard_mouse_profile` in `sunshine.conf` picks one; `standard` unless set.
+**Keyboard profile** in the web page's Settings (`keyboard_mouse_profile` in `sunshine.conf`) picks one; `standard` unless
+set.
 
 ### standard: menus and most games
 
@@ -189,7 +191,8 @@ layer of their own.
 
 ## The profile by game
 
-With `keyboard_mouse_profile_by_game = 1` in `sunshine.conf` (off by default), the game in front picks the profile:
+With **Keys by game** on (Controller in the app's or the web page's Settings, `keyboard_mouse_profile_by_game = 1` in
+`sunshine.conf`, off by default; the host reads it when it starts), the game in front picks the profile:
 
 1. your own list, below;
 2. the title map in the host, made by `tools/title_profiles.py` from [Wikidata](https://www.wikidata.org) (CC0): about
@@ -205,8 +208,14 @@ game that is missing or in the wrong profile in the map can be fixed in your lis
 
 `keyboard_profiles.txt`, next to `sunshine.conf` in `/data/prosperosunshine/`, holds your choices. It counts with or without
 the map. When the host starts it adds the installed titles the file doesn't mention yet, as commented lines with the
-profile they would get; to choose one, remove the `#` and change the profile if you like. Your lines are never changed.
-The host reads the file again whenever the game in front changes; mistakes go to `sunshine.log` with their line number.
+profile they would get; to choose one, remove the `#` and change the profile if you like. The host reads the file again
+whenever the game in front changes; mistakes go to `sunshine.log` with their line number.
+
+The web page's **Apps** tab does the same per installed game, under **Keyboard and mouse**: each game shows what it gets
+without a choice (Automatic, with where that comes from) and takes any profile, your own ones too. A choice there counts
+within two seconds, for the game in front as well. It changes only that game's line: the value after its `=` (comments and
+spacing stay), or its commented line loses the `#`, or a new line goes at the end; Automatic puts a `#` in front of the
+game's lines again. Nothing else in the file changes, and the host never changes your lines on its own.
 
 ```
 # A line "TITLEID = profile" picks the profile for that title: any title ID of the console, also homebrew and forwarders.

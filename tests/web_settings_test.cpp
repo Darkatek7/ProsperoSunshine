@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "web/web_settings.hpp"
+#include "input/keyboard_pad.hpp"
 #include <cassert>
 #include <iostream>
 #include <set>
@@ -15,6 +16,26 @@ int main() {
     for (const auto &g : groups) ids.insert(g.id);
     assert(ids.size() == groups.size());
     for (const auto &spec : psapp::option_specs()) assert(ids.count(static_cast<int>(spec.group)) == 1);
+    for (const auto &spec : psapp::web_option_specs()) assert(ids.count(static_cast<int>(spec.group)) == 1);
+
+    // The keyboard's settings (docs/keyboard-profiles.md): by game in the app's Controller group, the other two on the web page
+    // only, found by find_option all the same, with the host's profiles and the host's range for the mouse.
+    const psapp::OptionSpec *by_game = psapp::find_option("keyboard_mouse_profile_by_game");
+    assert(by_game && by_game->group == psapp::OptionGroup::controller && by_game->kind == psapp::OptionKind::toggle);
+    assert(std::any_of(psapp::option_specs().begin(), psapp::option_specs().end(),
+                       [](const psapp::OptionSpec &spec) { return std::string(spec.key) == "keyboard_mouse_profile_by_game"; }));
+    const psapp::OptionSpec *profile = psapp::find_option("keyboard_mouse_profile");
+    assert(profile && profile->kind == psapp::OptionKind::choice && profile->choices.size() == prospero::profile_names.size());
+    for (size_t i = 0; i < prospero::profile_names.size(); i++) assert(profile->choices[i].value == prospero::profile_names[i]);
+    assert(std::string(profile->default_label) == "Standard");
+    const psapp::OptionSpec *speed = psapp::find_option("keyboard_mouse_sensitivity");
+    assert(speed && speed->kind == psapp::OptionKind::number);
+    assert(speed->min == prospero::min_sensitivity && speed->max == prospero::max_sensitivity &&
+           speed->fallback == prospero::default_sensitivity);
+    assert(psapp::validate(*speed, "100") == std::nullopt && psapp::validate(*speed, "5") && psapp::validate(*speed, "1001"));
+    for (const auto &spec : psapp::web_option_specs())
+        assert(std::none_of(psapp::option_specs().begin(), psapp::option_specs().end(),
+                            [&spec](const psapp::OptionSpec &app) { return std::string(app.key) == spec.key; }));
 
     // fec_percentage is offered, with the app's help text and range.
     const psapp::OptionSpec *fec = psapp::find_option("fec_percentage");

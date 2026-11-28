@@ -2,6 +2,7 @@
 #include "web/web_server.hpp"
 #include "apps/app_access.hpp"
 #include "control/uuid_lines.hpp"
+#include "input/keyboard_pad.hpp"
 #include "net/upnp_client.hpp"
 #include "web/web_auth.hpp"
 #include "web/web_cert.hpp"
@@ -30,6 +31,7 @@
 #include <optional>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -462,7 +464,7 @@ json upnp_json() {
 }
 
 // What the Settings tab gets: the app's groups in its order (the same captions, and the note the app puts under Experimental),
-// and every option of the app's list with its group. The Experimental firmware switches are shown and not changed here
+// and every option of the app's list with its group, then those only the page has (web_option_specs). The Experimental firmware switches are shown and not changed here
 // ("app_only"): the app checks the firmware, and says what a failed trial turned off. Where the firmware makes one of them
 // pointless, the page reads as the app does ("locked", with the app's word and help).
 json settings_json() {
@@ -470,7 +472,11 @@ json settings_json() {
     const std::uint32_t firmware = kernel_get_fw_version();
     const std::string firmware_name = firmware_text();
     json list = json::array();
-    for (const auto &spec : psapp::option_specs()) {
+    std::vector<const psapp::OptionSpec *> specs;
+    for (const auto &spec : psapp::option_specs()) specs.push_back(&spec);
+    for (const auto &spec : psapp::web_option_specs()) specs.push_back(&spec);
+    for (const psapp::OptionSpec *option : specs) {
+        const psapp::OptionSpec &spec = *option;
         json choices = json::array();
         for (const auto &choice : spec.choices) choices.push_back({{"value", choice.value}, {"label", choice.label}});
         const auto value = psapp::option_value(config, spec);
@@ -723,6 +729,53 @@ void routes(Server &server, State &state, ControlServer &control, const std::sha
         if (!title_id_valid(id) || hidden == body.end() || !hidden->is_boolean())
             return send_error(response, SimpleWeb::StatusCode::client_error_bad_request, "check the title and hidden");
         send_answer(response, control.handle("SETAPPS " + id + (hidden->get<bool>() ? " hidden" : " shown"), ControlServer::Caller::web));
+    });
+    // The keyboard pad's profile by game for the Apps tab (docs/keyboard-profiles.md): the settings as sunshine.conf has them,
+    // the profiles a title may get (the host's, then the player's own from keyboard_profiles.txt), and for each installed title
+    // the profile its line there names ("" for none), the one it gets and where that comes from.
+    get("^/api/keyboard$", [&control](const Response &response, const Request &) {
+        const std::string answer = control.handle("KEYBOARD", ControlServer::Caller::web);
+        if (answer.starts_with("ERR "))
+            return send_error(response, SimpleWeb::StatusCode::server_error_internal_server_error, answer.substr(4));
+        json profiles = json::array(), own = json::array(), titles = json::array();
+        for (const auto name : prospero::profile_names) profiles.push_back(std::string(name));
+        json out{{"default", "standard"}, {"by_game", false}, {"pad", true}, {"problems", 0}};
+        for (const auto &line : ok_lines(answer)) {
+            Record record = fields(line, "name");
+            if (record.contains("default")) {
+                out["default"] = record["default"];
+                out["by_game"] = record["bygame"] == "1";
+                out["pad"] = record["pad"] != "0";
+                out["problems"] = std::atoi(record["problems"].c_str());
+            } else if (record.contains("own")) {
+                own.push_back(record["own"]);
+            } else if (record.contains("title")) {
+                titles.push_back({{"id", record["title"]},
+                                  {"named", record["named"] == "-" ? std::string() : record["named"]},
+                                  {"gets", record["gets"]},
+                                  {"from", record["from"]},
+                                  {"auto", record["auto"]},
+                                  {"auto_from", record["autofrom"]},
+                                  {"name", record["name"]}});
+            }
+        }
+        out["profiles"] = std::move(profiles);
+        out["own"] = std::move(own);
+        out["titles"] = std::move(titles);
+        send_json(response, out);
+    });
+    // {"id": title ID, "profile": a profile's name, or null for none of its own}.
+    post("^/api/keyboard/title$", [&control](const Response &response, const json &body) {
+        const std::string id = text_field(body, "id");
+        const auto profile = body.find("profile");
+        const bool unset = profile != body.end() && profile->is_null();
+        const std::string name = unset ? std::string("unset") : text_field(body, "profile");
+        const bool name_valid = !name.empty() && name.size() <= 64 && std::all_of(name.begin(), name.end(), [](unsigned char c) {
+            return std::isalnum(c) || c == '-' || c == '_';
+        });
+        if (!title_id_valid(id) || profile == body.end() || !name_valid)
+            return send_error(response, SimpleWeb::StatusCode::client_error_bad_request, "check the title and profile");
+        send_answer(response, control.handle("SETKEYBOARD " + id + ' ' + name, ControlServer::Caller::web));
     });
     // {"uuids": [...], "trusted": true | false}: "I trust this device" and "Stop trusting" in Devices.
     post("^/api/devices/trust$", [](const Response &response, const json &body) {

@@ -34,6 +34,16 @@
 //   APPS                        -> "OK <title id> <hidden|shown> <name>" per installed title, then the hidden ids of titles
 //                                  no longer installed ("OK <id> hidden"), then "END" (app_access.hpp)
 //   SETAPPS <title id> <hidden|shown> -> hides an app from devices that aren't trusted, or shows it again ("OK saved")
+//   KEYBOARD                    -> the keyboard pad's profiles (docs/keyboard-profiles.md): "OK default=<profile>
+//                                  bygame=<0|1> pad=<0|1> problems=<n>" (sunshine.conf now; the lines of keyboard_profiles.txt
+//                                  it can't read), "OK own=<name>" per profile of the player's own, then per installed title
+//                                  "OK title=<id> named=<profile|-> gets=<profile> from=<source> auto=<profile>
+//                                  autofrom=<source> name=<name>": the profile its line in keyboard_profiles.txt names, the
+//                                  one it gets and from where (list, title_id, store_concept, name or default), and the
+//                                  same without its line; then "END"
+//   SETKEYBOARD <title id> <profile|unset> -> gives a title a profile in keyboard_profiles.txt, or comments its lines out
+//                                  ("OK saved" / "ERR ..."; input/profile_list_edit.hpp). Counts within two seconds, for
+//                                  the game in front too.
 //   MENUS                       -> "OK <profiles|unset>": the profiles that reach the console's menus (menu_access.hpp:
 //                                  none, or ids separated by commas), "unset" while they aren't chosen
 //   SETMENUS <profiles|unset>   -> chooses them ("OK saved" / "ERR ..."); "unset" goes back to the host's role deciding.

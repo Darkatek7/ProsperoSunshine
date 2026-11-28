@@ -4,6 +4,11 @@
 
 ### Added
 
+- **Keyboard and mouse profiles without editing files.** The web page's Apps tab has a new card, **Keyboard and mouse**:
+  every installed game shows the profile it gets and where that comes from, and takes any profile, your own ones from
+  `keyboard_profiles.txt` too. A choice counts within two seconds, also for the game in front. The web page's Settings
+  have **Keyboard profile**, **Keys by game** and **Mouse speed** under Controller; the app has **Keys by game** (its page
+  has no room for more). The host writes a choice into `keyboard_profiles.txt` and leaves the rest of the file as it was.
 - **The debug app can be sent through the host on any console:** with an empty `/data/prosperosunshine/app_through_host`
   it reads and writes its files through the running host, to test that way where it isn't needed (README, "Debug
   build"). The normal app ignores the file.

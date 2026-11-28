@@ -9,6 +9,7 @@
 #include "control/stream_list.hpp"
 #include "control/http_guard.hpp"
 #include "control/uuid_lines.hpp"
+#include "input/profile_list_edit.hpp"
 #include "host_control.hpp"
 #include "net/exposure.hpp"
 #include "sunshine/platform_ps5.hpp"
@@ -53,6 +54,29 @@ std::string one_line(std::string text) {
     for (char &c : text)
         if (static_cast<unsigned char>(c) < 0x20 || c == 0x7f) c = ' ';
     return text;
+}
+
+// A whole file, empty if it isn't there.
+std::string read_whole(const std::filesystem::path &file) {
+    std::ifstream in(file, std::ios::binary);
+    return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
+// The keyboard pad's own list (input/title_profile.hpp), next to sunshine.conf as the input code reads it.
+std::filesystem::path keyboard_list_file() {
+    return std::filesystem::path(config::sunshine.config_file).parent_path() / "keyboard_profiles.txt";
+}
+
+// Where a title's keyboard profile comes from, as KEYBOARD names it.
+std::string_view source_token(ProfileSource source) {
+    switch (source) {
+    case ProfileSource::list: return "list";
+    case ProfileSource::title_id: return "title_id";
+    case ProfileSource::store_concept: return "store_concept";
+    case ProfileSource::name: return "name";
+    case ProfileSource::chosen: return "default";
+    }
+    return "default";
 }
 
 // The paired devices by client certificate: uuid and name.
@@ -442,6 +466,76 @@ std::string ControlServer::handle_locked(const std::string &line, Caller caller)
         if (!change_uuid_lines(platf::appdata() / "hidden_apps.txt", {id}, state == "hidden")) return "ERR the list could not be saved";
         // No title in the log: it goes into the report people post.
         BOOST_LOG(info) << "Control: an app was "sv << (state == "hidden" ? "hidden from"sv : "shown again to"sv) << " devices that aren't trusted"sv;
+        return "OK saved";
+    }
+    // The keyboard pad's profile by game (docs/keyboard-profiles.md), for the web page's Apps tab: the settings as
+    // sunshine.conf has them now, the player's own profiles, then what each installed title gets and why.
+    if (command == "KEYBOARD") {
+        const auto settings = config::parse_config(read_whole(config::sunshine.config_file));
+        const auto setting = [&settings](const std::string &key) {
+            const auto it = settings.find(key);
+            return it == settings.end() ? std::string() : it->second;
+        };
+        const Profile chosen = parse_profile(setting("keyboard_mouse_profile")).value_or(Profile::standard);
+        const bool by_game = setting("keyboard_mouse_profile_by_game") == "1";
+        const bool pad_on = keyboard_pad_enabled(setting("keyboard_mouse_pad"));
+        const ProfileList list = parse_profile_list(read_whole(keyboard_list_file()));
+        std::string out = "OK default="s + std::string(profile_name(chosen)) + " bygame=" + (by_game ? "1" : "0") +
+                          " pad=" + (pad_on ? "1" : "0") + " problems=" + std::to_string(list.problems.size()) + '\n';
+        std::vector<std::string> own;
+        for (const auto &[name, profile] : list.own) own.push_back(name);
+        std::sort(own.begin(), own.end());
+        for (const auto &name : own) out += "OK own=" + name + '\n';
+        for (const auto &title : console_titles()) {
+            if (!console_title_id(title.id)) continue;
+            // As the input code picks it (Sunshine patch 0018): the list, then with by_game the title map.
+            const auto meta = read_title_meta("/user", title.id);
+            const uint32_t concept_id = meta ? meta->concept_id : 0;
+            const std::string english = meta ? meta->english : "";
+            const auto choice = choose_profile(title.id, concept_id, english, list, chosen, by_game);
+            // What it would get without a line of its own: the page's "Automatic".
+            const auto automatic = choose_profile(title.id, concept_id, english, {}, chosen, by_game);
+            const auto line = list.titles.find(title.id);
+            const std::string named = line != list.titles.end() && profile_for_title(list, line->second) ? line->second : "-";
+            out += "OK title=" + title.id + " named=" + named +
+                   " gets=" + (choice.own ? choice.own->name : std::string(profile_name(choice.profile))) +
+                   " from=" + std::string(source_token(choice.source)) + " auto=" + std::string(profile_name(automatic.profile)) +
+                   " autofrom=" + std::string(source_token(automatic.source)) + " name=" + one_line(title.name) + '\n';
+        }
+        return out + "END";
+    }
+    if (command == "SETKEYBOARD") {
+        std::string id, profile, extra;
+        in >> id >> profile;
+        if (!console_title_id(id) || profile.empty() || (in >> extra)) return "ERR usage: SETKEYBOARD <title id> <profile|unset>";
+        std::transform(profile.begin(), profile.end(), profile.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (profile == "unset") profile.clear();
+        std::string name;
+        if (!profile.empty())
+            for (const auto &title : console_titles())
+                if (title.id == id) name = title.name;
+        // Requests take turns (handle), so nothing else changes the file in between; the host itself only adds to it at its start.
+        const auto file = keyboard_list_file();
+        const std::string text = read_whole(file);
+        if (!profile.empty() && !profile_for_title(parse_profile_list(text), profile)) return "ERR no profile " + one_line(profile);
+        const std::string changed = with_title_profile(text, id, profile, name);
+        if (changed != text) {
+            // Through a temporary file: the input code reads this one whenever the game in front changes.
+            auto temporary = file;
+            temporary += ".new";
+            {
+                std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
+                out << changed;
+                if (!out.flush()) return "ERR keyboard_profiles.txt could not be written";
+            }
+            std::error_code ec;
+            std::filesystem::rename(temporary, file, ec);
+            if (ec) return "ERR keyboard_profiles.txt could not be written";
+        }
+        profile_list_edited = true;
+        // No title in the log: it goes into the report people post.
+        BOOST_LOG(info) << "Control: a title's keyboard profile was "sv << (profile.empty() ? "taken away"sv : "set"sv);
         return "OK saved";
     }
     if (command == "MENUS") {
